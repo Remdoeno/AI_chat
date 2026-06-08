@@ -39,8 +39,7 @@ const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const IMAGE_COMPRESSION_NOTICE_BYTES = 2 * 1024 * 1024;
 const PREVIOUS_SESSION_ARM_MS = 3600;
-const PREVIOUS_SESSION_MIN_RETRY_MS = 1000;
-const PREVIOUS_SESSION_TOP_SETTLE_MS = 420;
+const PREVIOUS_SESSION_MIN_RETRY_MS = 800;
 const PREVIOUS_SESSION_PULL_THRESHOLD = 72;
 const IMAGE_EXTENSION_MIME = {
   avif: "image/avif",
@@ -74,7 +73,6 @@ let activeSearchQuery = "";
 let isMessageComposing = false;
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
 let previousSessionArmedAt = 0;
-let previousSessionTopReadyAt = Date.now();
 let isLoadingPreviousSession = false;
 let hasMorePreviousSessions = true;
 let touchStartY = 0;
@@ -299,7 +297,16 @@ function setHistoryLoadState(state, text) {
   }
   const indicator = document.createElement("div");
   indicator.className = `history-load is-${state} is-entering`;
-  indicator.textContent = text;
+  if (state === "loading") {
+    const spinner = document.createElement("span");
+    spinner.className = "history-load-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = text;
+    indicator.append(spinner, label);
+  } else {
+    indicator.textContent = text;
+  }
   messagesEl.prepend(indicator);
   requestAnimationFrame(() => {
     indicator.classList.remove("is-entering");
@@ -506,13 +513,12 @@ function clearMessages() {
 
 function resetPreviousSessionLoadState() {
   previousSessionArmedAt = 0;
-  previousSessionTopReadyAt = Date.now();
   isLoadingPreviousSession = false;
   hasMorePreviousSessions = true;
   removeHistoryLoadIndicator();
 }
 
-function resetPreviousSessionArmFromScroll() {
+function cancelPreviousSessionPreparation() {
   if (!previousSessionArmedAt) {
     return;
   }
@@ -520,19 +526,26 @@ function resetPreviousSessionArmFromScroll() {
   removeHistoryLoadIndicator(true);
 }
 
-function handleMessagesScroll() {
-  if (!isAtMessagesTop()) {
-    previousSessionTopReadyAt = 0;
-    resetPreviousSessionArmFromScroll();
+function enterPreviousSessionArmed() {
+  if (activeController || isLoadingPreviousSession || !hasMorePreviousSessions || !sessionId || previousSessionArmedAt) {
     return;
   }
-  if (!previousSessionTopReadyAt) {
-    previousSessionTopReadyAt = Date.now() + PREVIOUS_SESSION_TOP_SETTLE_MS;
-  }
+  previousSessionArmedAt = Date.now();
+  setHistoryLoadState("armed", "加载上一段对话");
+  setTimeout(() => {
+    if (Date.now() - previousSessionArmedAt >= PREVIOUS_SESSION_ARM_MS && !isLoadingPreviousSession) {
+      previousSessionArmedAt = 0;
+      removeHistoryLoadIndicator(true);
+    }
+  }, PREVIOUS_SESSION_ARM_MS + 80);
 }
 
-function isPreviousSessionTopReady() {
-  return isAtMessagesTop() && previousSessionTopReadyAt > 0 && Date.now() >= previousSessionTopReadyAt;
+function handleMessagesScroll() {
+  if (!isAtMessagesTop()) {
+    cancelPreviousSessionPreparation();
+    return;
+  }
+  enterPreviousSessionArmed();
 }
 
 function prependHistoryMessages(messages) {
@@ -559,7 +572,7 @@ async function loadPreviousSessionContext() {
   }
 
   isLoadingPreviousSession = true;
-  setHistoryLoadState("loading", "正在加载上一段对话...");
+  setHistoryLoadState("loading", "加载上一段对话");
   setStatus("加载历史中");
 
   try {
@@ -596,33 +609,29 @@ function armOrLoadPreviousSession() {
   if (activeController || isLoadingPreviousSession || !hasMorePreviousSessions || !sessionId) {
     return;
   }
-  if (!isPreviousSessionTopReady()) {
-    handleMessagesScroll();
+  if (!isAtMessagesTop()) {
+    cancelPreviousSessionPreparation();
     return;
   }
 
   const now = Date.now();
-  if (previousSessionArmedAt) {
-    const elapsed = now - previousSessionArmedAt;
-    if (elapsed < PREVIOUS_SESSION_MIN_RETRY_MS) {
-      setHistoryLoadState("waiting", "再等一下，再拉/滚一次接上段对话");
-      return;
-    }
-    if (elapsed <= PREVIOUS_SESSION_ARM_MS) {
-      previousSessionArmedAt = 0;
-      loadPreviousSessionContext();
-      return;
-    }
+  if (!previousSessionArmedAt) {
+    enterPreviousSessionArmed();
+    return;
   }
 
-  previousSessionArmedAt = now;
-  setHistoryLoadState("armed", "再拉/滚一次接上段对话");
-  setTimeout(() => {
-    if (Date.now() - previousSessionArmedAt >= PREVIOUS_SESSION_ARM_MS && !isLoadingPreviousSession) {
-      previousSessionArmedAt = 0;
-      removeHistoryLoadIndicator(true);
-    }
-  }, PREVIOUS_SESSION_ARM_MS + 80);
+  const elapsed = now - previousSessionArmedAt;
+  if (elapsed < PREVIOUS_SESSION_MIN_RETRY_MS) {
+    setHistoryLoadState("waiting", "加载上一段对话");
+    return;
+  }
+  if (elapsed <= PREVIOUS_SESSION_ARM_MS) {
+    previousSessionArmedAt = 0;
+    loadPreviousSessionContext();
+    return;
+  }
+
+  enterPreviousSessionArmed();
 }
 
 function renderAttachmentPreview() {

@@ -201,8 +201,24 @@ h1 {
 }
 
 .history-load.is-loading {
-  border-color: rgba(31, 132, 103, 0.35);
-  color: var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+  border-color: rgba(102, 112, 133, 0.3);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--muted);
+  transform: translateY(10px);
+}
+
+.history-load-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(102, 112, 133, 0.25);
+  border-top-color: rgba(102, 112, 133, 0.78);
+  border-radius: 50%;
+  animation: history-spinner-rotate 760ms linear infinite;
 }
 
 .history-load.is-error {
@@ -219,6 +235,12 @@ h1 {
   100% {
     opacity: 0.22;
     transform: translateY(-2px);
+  }
+}
+
+@keyframes history-spinner-rotate {
+  to {
+    transform: rotate(360deg);
   }
 }
 
