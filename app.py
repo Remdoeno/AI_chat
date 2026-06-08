@@ -37,7 +37,15 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
-from schemas import AdminLoginPayload, AuthPasswordPayload, ChatAttachment, ChatPayload, IdlePromptPayload, MemoryAdminPayload
+from schemas import (
+    AdminLoginPayload,
+    AuthPasswordPayload,
+    ChatAttachment,
+    ChatPayload,
+    IdlePromptPayload,
+    IdleStatusPayload,
+    MemoryAdminPayload,
+)
 from streaming_utils import ThinkStripper, format_sse, split_think_text
 
 
@@ -1874,6 +1882,19 @@ def delete_app_setting(key: str) -> None:
 
 def get_idle_agent_custom_prompt() -> str:
     return get_app_setting("idle_agent_custom_prompt", IDLE_AGENT_CUSTOM_PROMPT_DEFAULT)
+
+
+def is_idle_agent_paused() -> bool:
+    return get_app_setting("idle_agent_paused", "0").strip() == "1"
+
+
+def set_idle_agent_paused(paused: bool) -> bool:
+    set_app_setting("idle_agent_paused", "1" if paused else "0")
+    if paused:
+        IDLE_AGENT_CANCEL_EVENT.set()
+    else:
+        IDLE_AGENT_CANCEL_EVENT.clear()
+    return paused
 
 
 def load_idle_story_seeds() -> List[str]:
@@ -5272,6 +5293,8 @@ def recent_idle_agent_run_exists() -> bool:
 def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
     if not IDLE_AGENT_ENABLED:
         return False, "idle_disabled"
+    if is_idle_agent_paused():
+        return False, "idle_paused"
     if force:
         return True, "forced"
     with ACTIVE_GENERATIONS_LOCK:
@@ -5292,7 +5315,7 @@ def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
 def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
     can_run, reason = idle_agent_can_run(force=force)
     if not can_run:
-        if reason == "idle_disabled":
+        if reason in ("idle_disabled", "idle_paused"):
             return {"status": "skipped", "reason": reason}
         return {"status": "busy", "reason": reason}
     if not IDLE_AGENT_WORKER_LOCK.acquire(blocking=False):
@@ -6955,6 +6978,20 @@ def update_artifacts_prompt_endpoint(payload: IdlePromptPayload, request: Reques
     set_idle_agent_custom_prompt(prompt)
     record_event(None, "idle_agent_prompt_update", visitor_ip(request), {"chars": len(prompt)})
     return {"prompt": prompt}
+
+
+@app.get("/api/artifacts/idle-status")
+def artifacts_idle_status_endpoint() -> Dict[str, object]:
+    init_db()
+    return {"paused": is_idle_agent_paused()}
+
+
+@app.put("/api/artifacts/idle-status")
+def update_artifacts_idle_status_endpoint(payload: IdleStatusPayload, request: Request) -> Dict[str, object]:
+    init_db()
+    paused = set_idle_agent_paused(payload.paused)
+    record_event(None, "idle_agent_pause_update", visitor_ip(request), {"paused": paused})
+    return {"paused": paused}
 
 
 @app.get("/api/analysis/traces")

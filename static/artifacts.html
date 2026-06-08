@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Qwen3.6 成果</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/artifacts.css?v=20260608_artifact_trash_icon" />
+    <link rel="stylesheet" href="/static/artifacts.css?v=20260608_idle_pause_toggle" />
   </head>
   <body>
     <main class="page-shell">
@@ -61,6 +61,13 @@
 
         <button id="refreshButton" class="button" type="button">刷新</button>
         <button id="shuffleButton" class="button secondary-action" type="button">打乱顺序</button>
+        <section class="idle-control" aria-label="空闲生成控制">
+          <div>
+            <strong>后台创作</strong>
+            <span id="idleStatusText">读取中</span>
+          </div>
+          <button id="idleToggleButton" class="button secondary-action" type="button">暂停生成</button>
+        </section>
         <p id="statusText" class="status">读取中</p>
 
         <section class="prompt-panel" aria-label="空闲创作 prompt">
@@ -105,6 +112,6 @@
         </div>
       </div>
     </dialog>
-    <script src="/static/artifacts.js?v=20260608_artifact_trash_icon"></script>
+    <script src="/static/artifacts.js?v=20260608_idle_pause_toggle"></script>
   </body>
 </html>

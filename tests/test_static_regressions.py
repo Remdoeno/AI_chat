@@ -201,12 +201,17 @@ class StaticRegressionTests(unittest.TestCase):
 
         self.assertIn("idlePromptInput", html)
         self.assertIn("savePromptButton", html)
+        self.assertIn("idleToggleButton", html)
+        self.assertIn("idleStatusText", html)
         self.assertIn("/api/artifacts/prompt", js)
+        self.assertIn("/api/artifacts/idle-status", js)
+        self.assertIn("updateIdleToggle", js)
         self.assertIn("PUT", js)
-        self.assertIn("20260608_artifact_trash_icon", html)
+        self.assertIn("20260608_idle_pause_toggle", html)
         self.assertIn("function renderMarkdown", js)
         self.assertIn("setRenderedMarkdown(artifactDialogBody, item.content || \"\")", js)
         self.assertNotIn("body.textContent = item.content || \"\"", js)
+        self.assertIn(".idle-control", css)
         self.assertIn(".artifact-body strong", css)
         self.assertIn(".artifact-body ol", css)
 

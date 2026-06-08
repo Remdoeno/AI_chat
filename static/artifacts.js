@@ -5,6 +5,8 @@ const sortSelect = document.getElementById("sortSelect");
 const orderSelect = document.getElementById("orderSelect");
 const refreshButton = document.getElementById("refreshButton");
 const shuffleButton = document.getElementById("shuffleButton");
+const idleToggleButton = document.getElementById("idleToggleButton");
+const idleStatusText = document.getElementById("idleStatusText");
 const idlePromptInput = document.getElementById("idlePromptInput");
 const savePromptButton = document.getElementById("savePromptButton");
 const statusText = document.getElementById("statusText");
@@ -30,9 +32,18 @@ let shuffleSeed = Math.floor(Math.random() * 2147483647);
 let activeDialogArtifactId = null;
 const artifactsById = new Map();
 let likeClickTimer = null;
+let idlePaused = false;
 
 function setStatus(text) {
   statusText.textContent = text;
+}
+
+function updateIdleToggle(paused) {
+  idlePaused = Boolean(paused);
+  idleStatusText.textContent = idlePaused ? "已暂停" : "运行中";
+  idleToggleButton.textContent = idlePaused ? "开始生成" : "暂停生成";
+  idleToggleButton.classList.toggle("is-paused", idlePaused);
+  idleToggleButton.setAttribute("aria-pressed", idlePaused ? "true" : "false");
 }
 
 function formatTime(value) {
@@ -460,15 +471,17 @@ async function loadData({ append = false } = {}) {
   updateLoadMoreButton();
 
   try {
-    const [artifactsResp, runsResp, promptResp] = await Promise.all([
+    const [artifactsResp, runsResp, promptResp, idleStatusResp] = await Promise.all([
       fetch(`/api/artifacts?${params.toString()}`),
       fetch("/api/artifacts/runs?limit=80"),
       fetch("/api/artifacts/prompt"),
+      fetch("/api/artifacts/idle-status"),
     ]);
 
     if (!artifactsResp.ok) throw new Error(`artifacts ${artifactsResp.status}`);
     if (!runsResp.ok) throw new Error(`runs ${runsResp.status}`);
     if (!promptResp.ok) throw new Error(`prompt ${promptResp.status}`);
+    if (!idleStatusResp.ok) throw new Error(`idle-status ${idleStatusResp.status}`);
 
     renderArtifacts(await artifactsResp.json(), append);
     renderRuns(await runsResp.json());
@@ -476,6 +489,7 @@ async function loadData({ append = false } = {}) {
     if (document.activeElement !== idlePromptInput) {
       idlePromptInput.value = promptPayload.prompt || "";
     }
+    updateIdleToggle((await idleStatusResp.json()).paused);
     setStatus("已更新");
   } finally {
     artifactLoading = false;
@@ -511,6 +525,26 @@ shuffleButton.addEventListener("click", () => {
   sortSelect.value = "random";
   resetArtifactPaging();
   loadData().catch((error) => setStatus(`失败: ${error.message}`));
+});
+idleToggleButton.addEventListener("click", async () => {
+  idleToggleButton.disabled = true;
+  const nextPaused = !idlePaused;
+  setStatus(nextPaused ? "暂停后台创作中" : "恢复后台创作中");
+  try {
+    const response = await fetch("/api/artifacts/idle-status", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paused: nextPaused }),
+    });
+    if (!response.ok) throw new Error(`idle-status ${response.status}`);
+    const payload = await response.json();
+    updateIdleToggle(payload.paused);
+    setStatus(payload.paused ? "后台创作已暂停" : "后台创作已开始");
+  } catch (error) {
+    setStatus(`切换失败: ${error.message}`);
+  } finally {
+    idleToggleButton.disabled = false;
+  }
 });
 loadMoreButton.addEventListener("click", () => {
   loadData({ append: true }).catch((error) => setStatus(`失败: ${error.message}`));

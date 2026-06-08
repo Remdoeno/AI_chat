@@ -41,3 +41,7 @@ class AuthPasswordPayload(BaseModel):
 
 class IdlePromptPayload(BaseModel):
     prompt: str = Field(default="")
+
+
+class IdleStatusPayload(BaseModel):
+    paused: bool = False
