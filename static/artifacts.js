@@ -229,7 +229,7 @@ function renderDeleteButton(item, className = "delete-artifact-button") {
   button.className = className;
   button.type = "button";
   button.dataset.artifactId = String(item.id);
-  button.textContent = "删";
+  button.textContent = "delete";
   button.title = "删除成果";
   button.setAttribute("aria-label", `删除成果 ${item.title || item.id}`);
   button.addEventListener("click", (event) => {
