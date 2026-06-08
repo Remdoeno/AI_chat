@@ -43,6 +43,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("searchActivity", html)
         self.assertIn("searchActivityList", html)
         self.assertIn("20260608_mobile_chrome_fix", html)
+        self.assertIn("/static/app.js?v=20260608_no_opening_placeholder_flash", html)
         self.assertIn("searchActivityList", js)
         self.assertIn("搜索：", js)
         self.assertNotIn("正在访问", js)
