@@ -1933,6 +1933,132 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertEqual(random_page["sort"], "random")
         self.assertEqual(random_page["limit"], 2)
 
+    def test_idle_artifact_save_assigns_unique_mainline_episode_numbers(self):
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Shinning Hero 连载")
+        original_embed = self.app.embedding_client.embed_text
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            first = self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="错误自报第42集",
+                artifact_type="novel",
+                content="Shinning Hero 在雨夜发现城市主线的第一个线索。",
+                series_title="Shinning Hero 城市档案",
+                episode_index=42,
+                summary="主线开端。",
+            )
+            second = self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="又一次错误自报第42集",
+                artifact_type="novel",
+                content="绿手侠追查同一条线索，BenMan 的过去露出裂缝。",
+                series_title="Shinning Hero 城市档案",
+                episode_index=42,
+                summary="主线继续。",
+            )
+            prequel = self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="BenMan 前传：巨龙克隆体",
+                artifact_type="novel",
+                content="BenMan 在未来宇宙第一次接触巨龙之力。",
+                series_title="Shinning Hero 城市档案",
+                episode_index=42,
+                summary="前传起源。",
+            )
+        finally:
+            self.app.embedding_client.embed_text = original_embed
+
+        payload = self.app.list_idle_agent_artifacts(
+            series_title="Shinning Hero 城市档案",
+            sort="created",
+            order="asc",
+            limit=10,
+        )
+        by_id = {item["id"]: item for item in payload["items"]}
+
+        self.assertEqual(by_id[first]["episode_index"], 1)
+        self.assertEqual(by_id[second]["episode_index"], 2)
+        self.assertIsNone(by_id[prequel]["episode_index"])
+
+    def test_idle_agent_prompt_includes_series_context_and_next_episode_rule(self):
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Shinning Hero 连载")
+        original_embed = self.app.embedding_client.embed_text
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="Shinning Hero 城市档案：开端",
+                artifact_type="novel",
+                content="Shinning Hero 使用动感光波守住第一条街。",
+                series_title="Shinning Hero 城市档案",
+                episode_index=1,
+                summary="Shinning Hero 发现城市阴影里的主线线索。",
+            )
+            self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="Shinning Hero 城市档案：绿手",
+                artifact_type="novel",
+                content="绿手侠的辐射右手暴露出敌人的新据点。",
+                series_title="Shinning Hero 城市档案",
+                episode_index=2,
+                summary="绿手侠加入调查，主线指向地下实验室。",
+            )
+        finally:
+            self.app.embedding_client.embed_text = original_embed
+
+        prompt, summary = self.app.build_idle_agent_prompt()
+
+        self.assertIn("已有连续系列资料", prompt)
+        self.assertIn("Shinning Hero 城市档案", prompt)
+        self.assertIn("下一集必须填写 3", prompt)
+        self.assertIn("Shinning Hero 发现城市阴影里的主线线索", prompt)
+        self.assertIn("绿手侠加入调查", prompt)
+        self.assertIn("series_context=1", summary)
+
+    def test_renumber_idle_series_mainline_episodes_repairs_duplicates(self):
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Shinning Hero 连载")
+        original_embed = self.app.embedding_client.embed_text
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            first = self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="旧第42集之一",
+                artifact_type="novel",
+                content="第一段主线。",
+                series_title="Shinning Hero 城市档案",
+                episode_index=1,
+            )
+            second = self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="旧第42集之二",
+                artifact_type="novel",
+                content="第二段主线。",
+                series_title="Shinning Hero 城市档案",
+                episode_index=2,
+            )
+            with self.app.connect_db() as conn:
+                conn.execute(
+                    "UPDATE idle_agent_artifacts SET episode_index = 42 WHERE id IN (?, ?)",
+                    (first, second),
+                )
+
+            result = self.app.renumber_idle_series_mainline_episodes("Shinning Hero 城市档案")
+        finally:
+            self.app.embedding_client.embed_text = original_embed
+
+        payload = self.app.list_idle_agent_artifacts(
+            series_title="Shinning Hero 城市档案",
+            sort="created",
+            order="asc",
+            limit=10,
+        )
+        by_id = {item["id"]: item for item in payload["items"]}
+
+        self.assertEqual(result["updated"], 2)
+        self.assertEqual(result["reindexed"], 2)
+        self.assertEqual(by_id[first]["episode_index"], 1)
+        self.assertEqual(by_id[second]["episode_index"], 2)
+
     def test_artifact_dislike_decrements_likes_without_going_below_zero(self):
         run_id = self.app.create_idle_agent_run("notes", "测试任务", "基于摘要生成")
         artifact_id = self.app.save_idle_agent_artifact(

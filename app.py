@@ -105,6 +105,10 @@ IDLE_AGENT_TOP_P = float(os.environ.get("QWEN_IDLE_AGENT_TOP_P", "0.95"))
 IDLE_ARTIFACT_TOP_K = int(os.environ.get("QWEN_IDLE_ARTIFACT_TOP_K", "2"))
 IDLE_ARTIFACT_MIN_SCORE = float(os.environ.get("QWEN_IDLE_ARTIFACT_MIN_SCORE", "0.5"))
 IDLE_ARTIFACT_CONTEXT_CHARS = int(os.environ.get("QWEN_IDLE_ARTIFACT_CONTEXT_CHARS", "700"))
+IDLE_SERIES_CONTEXT_MAX_SERIES = int(os.environ.get("QWEN_IDLE_SERIES_CONTEXT_MAX_SERIES", "4"))
+IDLE_SERIES_CONTEXT_MAX_EPISODES = int(os.environ.get("QWEN_IDLE_SERIES_CONTEXT_MAX_EPISODES", "80"))
+IDLE_SERIES_CONTEXT_RECENT_CONTENT = int(os.environ.get("QWEN_IDLE_SERIES_CONTEXT_RECENT_CONTENT", "4"))
+IDLE_SERIES_CONTEXT_RECENT_CHARS = int(os.environ.get("QWEN_IDLE_SERIES_CONTEXT_RECENT_CHARS", "520"))
 IDLE_AGENT_CUSTOM_PROMPT_DEFAULT = os.environ.get("QWEN_IDLE_AGENT_CUSTOM_PROMPT", "").strip()
 DEFAULT_IDLE_STORY_SEEDS_FILE = DATA_DIR / "idle_story_seeds.txt"
 IDLE_STORY_SEEDS_FILE = os.environ.get(
@@ -249,6 +253,9 @@ IDLE_AGENT_SYSTEM_PROMPT = (
     "你可以写短篇小说、诗歌、剧本、世界观、角色档案、自我背景知识、设定集或研究札记。"
     "灵感来自已整理长期记忆和用户偏好，但不要复述或泄露原始聊天。"
     "保持足够自由度，产出应该像一个自主系统在空闲时留下的作品。"
+    "如果续写已有连续系列，必须阅读用户消息里的系列前情；主线要承接上一集并推进一条贯穿大主线。"
+    "每一集可以是相对独立的单元回，但要保留角色状态、伏笔和长期冲突的连续性。"
+    "主线连载的 episode_index 必须填写提示中指定的下一集编号；前传、番外、起源故事不要占用主线集数，episode_index 填 null。"
     "content 控制在约 800 到 1400 个中文字，宁可短而完整，也不要写到 JSON 被截断。"
     "必须输出完整、可被 json.loads 解析的 JSON，不要输出 Markdown 代码块、注释或 JSON 以外的文字。"
     "只输出 JSON：{\"task_type\":\"novel|poetry|script|worldbuilding|persona|notes|other\","
@@ -4494,6 +4501,105 @@ def create_artifact_memory(
     return memory_id
 
 
+PREQUEL_ARTIFACT_MARKERS = (
+    "前传",
+    "外传",
+    "番外",
+    "起源",
+    "过去篇",
+    "特别篇",
+    "origin",
+    "prequel",
+)
+
+
+def is_prequel_idle_artifact(title: str, content: str = "") -> bool:
+    text = f"{title}\n{content}".lower()
+    return any(marker.lower() in text for marker in PREQUEL_ARTIFACT_MARKERS)
+
+
+def current_series_mainline_episode(series_title: str) -> int:
+    clean_series = normalize_idle_artifact_terms(series_title).strip()
+    if not clean_series:
+        return 0
+    with connect_db() as conn:
+        row = conn.execute(
+            """
+            SELECT MAX(episode_index) AS max_episode
+            FROM idle_agent_artifacts
+            WHERE series_title = ?
+              AND episode_index IS NOT NULL
+            """,
+            (clean_series,),
+        ).fetchone()
+    return int(row["max_episode"] or 0) if row else 0
+
+
+def resolve_idle_series_episode_index(
+    series_title: str,
+    requested_episode: object,
+    title: str = "",
+    content: str = "",
+) -> Optional[int]:
+    clean_series = normalize_idle_artifact_terms(series_title).strip()
+    if not clean_series:
+        return None
+    if is_prequel_idle_artifact(title, content):
+        return None
+    current_episode = current_series_mainline_episode(clean_series)
+    next_episode = current_episode + 1
+    try:
+        requested = int(requested_episode) if requested_episode not in (None, "", "null") else None
+    except Exception:
+        requested = None
+    if requested == next_episode:
+        return requested
+    return next_episode
+
+
+def renumber_idle_series_mainline_episodes(series_title: str) -> Dict[str, int]:
+    clean_series = normalize_idle_artifact_terms(series_title).strip()
+    if not clean_series:
+        return {"updated": 0}
+    updated_ids: List[int] = []
+    with connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id
+            FROM idle_agent_artifacts
+            WHERE series_title = ?
+              AND episode_index IS NOT NULL
+            ORDER BY created_at ASC, id ASC
+            """,
+            (clean_series,),
+        ).fetchall()
+        updated = 0
+        for index, row in enumerate(rows, start=1):
+            cur = conn.execute(
+                """
+                UPDATE idle_agent_artifacts
+                SET episode_index = ?
+                WHERE id = ?
+                  AND COALESCE(episode_index, -1) != ?
+                """,
+                (index, int(row["id"]), index),
+            )
+            if cur.rowcount:
+                updated += int(cur.rowcount or 0)
+                updated_ids.append(int(row["id"]))
+    reindexed = 0
+    for artifact_id in updated_ids:
+        try:
+            index_idle_agent_artifact(artifact_id)
+            reindexed += 1
+        except Exception as exc:
+            record_event(None, "idle_artifact_index_error", "local", {
+                "artifact_id": artifact_id,
+                "error": str(exc),
+            })
+    return {"updated": updated, "reindexed": reindexed, "total": len(rows)}
+
+
 def save_idle_agent_artifact(
     run_id: int,
     title: str,
@@ -4512,7 +4618,12 @@ def save_idle_agent_artifact(
         raise ValueError("idle artifact content is empty")
     artifact_id = 0
     series_value = clean_series.strip() or None
-    episode_value = int(episode_index) if episode_index is not None else None
+    episode_value = resolve_idle_series_episode_index(
+        series_value or "",
+        episode_index,
+        title=clean_title,
+        content=text,
+    )
     summary_value = clean_summary.strip() or compact_idle_artifact_content(text, 260)
     with connect_db() as conn:
         cur = conn.execute(
@@ -4773,6 +4884,98 @@ def backfill_idle_artifact_vectors(limit: int = 10000) -> Dict[str, int]:
     return {"indexed": indexed, "failed": failed}
 
 
+def load_idle_series_context(
+    max_series: int = IDLE_SERIES_CONTEXT_MAX_SERIES,
+    max_episodes: int = IDLE_SERIES_CONTEXT_MAX_EPISODES,
+) -> List[Dict[str, object]]:
+    series_limit = min(max(int(max_series), 1), 12)
+    episode_limit = min(max(int(max_episodes), 1), 200)
+    with connect_db() as conn:
+        series_rows = conn.execute(
+            """
+            SELECT series_title,
+                   COUNT(*) AS total_count,
+                   MAX(COALESCE(episode_index, 0)) AS max_episode,
+                   MAX(id) AS newest_id
+            FROM idle_agent_artifacts
+            WHERE series_title IS NOT NULL
+              AND TRIM(series_title) != ''
+            GROUP BY series_title
+            ORDER BY newest_id DESC
+            LIMIT ?
+            """,
+            (series_limit,),
+        ).fetchall()
+        contexts: List[Dict[str, object]] = []
+        for row in series_rows:
+            series_title = str(row["series_title"])
+            episode_rows = conn.execute(
+                """
+                SELECT id, title, episode_index, summary, content, created_at
+                FROM idle_agent_artifacts
+                WHERE series_title = ?
+                ORDER BY
+                    CASE WHEN episode_index IS NULL THEN 1 ELSE 0 END,
+                    episode_index ASC,
+                    id ASC
+                LIMIT ?
+                """,
+                (series_title, episode_limit),
+            ).fetchall()
+            contexts.append(
+                {
+                    "series_title": series_title,
+                    "total_count": int(row["total_count"] or 0),
+                    "max_episode": int(row["max_episode"] or 0),
+                    "episodes": [row_to_dict(item) for item in episode_rows],
+                }
+            )
+    return contexts
+
+
+def format_idle_series_context(series_context: List[Dict[str, object]]) -> str:
+    if not series_context:
+        return ""
+    lines = [
+        "已有连续系列资料：",
+        "如果选择续写其中某个系列，必须先承接以下前情；主线 episode_index 只能使用提示中的下一集编号。",
+        "前传、番外、起源故事可以丰富人物过去，但 episode_index 必须填 null，避免污染主线编号。",
+    ]
+    for series in series_context:
+        title = str(series.get("series_title") or "").strip()
+        max_episode = int(series.get("max_episode") or 0)
+        next_episode = max_episode + 1
+        total_count = int(series.get("total_count") or 0)
+        lines.append("")
+        lines.append(
+            f"系列《{title}》：已有作品 {total_count} 个，主线最大集数 {max_episode}；"
+            f"如果续写主线，episode_index 下一集必须填写 {next_episode}。"
+        )
+        lines.append("已有剧情摘要（按主线顺序；番外/前传列在后面）：")
+        episodes = list(series.get("episodes") or [])
+        for item in episodes:
+            episode_index = item.get("episode_index")
+            episode = f"第 {int(episode_index)} 集" if episode_index is not None else "前传/番外"
+            summary = str(item.get("summary") or "").strip() or compact_idle_artifact_content(
+                str(item.get("content") or ""),
+                160,
+            )
+            lines.append(f"- {episode} #{item.get('id')}《{item.get('title') or '未命名成果'}》：{summary}")
+        recent = episodes[-IDLE_SERIES_CONTEXT_RECENT_CONTENT:]
+        if recent:
+            lines.append("最近细节片段（用于衔接角色状态和伏笔，不要原样复读）：")
+            for item in recent:
+                episode_index = item.get("episode_index")
+                episode = f"第 {int(episode_index)} 集" if episode_index is not None else "前传/番外"
+                content = compact_idle_artifact_content(
+                    str(item.get("content") or ""),
+                    IDLE_SERIES_CONTEXT_RECENT_CHARS,
+                )
+                if content:
+                    lines.append(f"[{episode} #{item.get('id')}] {content}")
+    return "\n".join(lines)
+
+
 def recent_curated_memory_summaries(limit: int = 12) -> List[Dict[str, object]]:
     with connect_db() as conn:
         rows = conn.execute(
@@ -4881,6 +5084,7 @@ def build_idle_agent_prompt() -> Tuple[str, str]:
     memories = recent_curated_memory_summaries()
     custom_prompt = get_idle_agent_custom_prompt()
     story_seeds = load_idle_story_seeds()
+    series_context = load_idle_series_context()
     if memories:
         lines = [
             "以下是已整理长期记忆摘要，只能作为创作偏好和设定灵感，不要复述原文：",
@@ -4893,12 +5097,19 @@ def build_idle_agent_prompt() -> Tuple[str, str]:
     lines.append("请选择一个你认为值得在空闲时完成的小作品，保持自主性和创造性。")
     lines.append("")
     lines.append("你可以写短篇小说、诗歌、剧本、世界观、角色档案、自我设定或连续作品。")
+    formatted_series_context = format_idle_series_context(series_context)
+    if formatted_series_context:
+        lines.append("")
+        lines.append(formatted_series_context)
     if story_seeds:
         lines.append("以下是用户配置的可选创作种子，不是强制任务；请在空闲时轮换选择：")
         lines.extend(story_seeds)
     lines.append(
-        "如果选择继续某个系列，请在 JSON 中填写 series_title、episode_index 和 summary；"
-        "如果创作其他内容，也可以将这些字段留空。"
+        "如果选择继续某个已有系列：series_title 必须与上方系列名完全一致；"
+        "主线连载 episode_index 必须填写上方指定的下一集编号；"
+        "前传、番外、起源故事可以写，但 episode_index 必须填 null，标题需明确标注前传/番外/起源；"
+        "summary 必须写成本集对主线、角色状态或设定变化的摘要。"
+        "如果创作其他内容，可以将 series_title 和 episode_index 留空。"
     )
     if custom_prompt:
         lines.append("")
@@ -4907,6 +5118,7 @@ def build_idle_agent_prompt() -> Tuple[str, str]:
     summary = (
         f"curated_memories={len(memories)};"
         f"story_seeds={len(story_seeds)};"
+        f"series_context={len(series_context)};"
         f"custom_prompt={'set' if custom_prompt else 'empty'}"
     )
     return "\n".join(lines), summary
