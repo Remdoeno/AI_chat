@@ -23,6 +23,11 @@ const artifactDialogBody = document.getElementById("artifactDialogBody");
 const artifactDialogLike = document.getElementById("artifactDialogLike");
 const artifactDialogDelete = document.getElementById("artifactDialogDelete");
 const artifactDialogClose = document.getElementById("artifactDialogClose");
+const artifactCommentCount = document.getElementById("artifactCommentCount");
+const artifactComments = document.getElementById("artifactComments");
+const artifactCommentForm = document.getElementById("artifactCommentForm");
+const artifactCommentInput = document.getElementById("artifactCommentInput");
+const artifactCommentSubmit = document.getElementById("artifactCommentSubmit");
 
 const ARTIFACT_PAGE_SIZE = 20;
 let artifactOffset = 0;
@@ -33,6 +38,7 @@ let activeDialogArtifactId = null;
 const artifactsById = new Map();
 let likeClickTimer = null;
 let idlePaused = false;
+let activeArtifactComments = [];
 
 function setStatus(text) {
   statusText.textContent = text;
@@ -235,6 +241,19 @@ function renderLikeButton(item, className = "like-button") {
   return button;
 }
 
+function renderCommentButton(item) {
+  const button = document.createElement("button");
+  button.className = "comment-count-button";
+  button.type = "button";
+  button.dataset.artifactId = String(item.id);
+  button.innerHTML = `评 <span class="comment-count" data-artifact-id="${item.id}">${Number(item.comment_count || 0)}</span>`;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openArtifactDialog(Number(item.id), { focusComment: true });
+  });
+  return button;
+}
+
 function renderDeleteButton(item, className = "delete-artifact-button") {
   const button = document.createElement("button");
   button.className = className;
@@ -291,7 +310,7 @@ function renderArtifactCard(item) {
 
   const cardHead = document.createElement("div");
   cardHead.className = "artifact-card-head";
-  cardHead.append(pill, renderDeleteButton(item, "delete-artifact-button artifact-card-delete"));
+  cardHead.append(pill);
 
   const title = document.createElement("h3");
   title.className = "artifact-title";
@@ -302,16 +321,19 @@ function renderArtifactCard(item) {
   summary.textContent = excerptText(item.summary || item.content || "", 128) || "没有简介。";
 
   const meta = document.createElement("div");
-  meta.className = "meta";
+  meta.className = "meta artifact-card-meta";
   const series = item.series_title ? ` · ${item.series_title}` : "";
   const episode = item.episode_index != null ? ` · 第 ${item.episode_index} 集` : "";
   meta.textContent = `#${item.id}${series}${episode} · ${formatTime(item.created_at)}`;
 
   const footer = document.createElement("div");
   footer.className = "artifact-card-footer";
-  footer.append(meta, renderLikeButton(item));
+  const footerActions = document.createElement("div");
+  footerActions.className = "artifact-card-actions";
+  footerActions.append(renderCommentButton(item), renderLikeButton(item));
+  footer.append(renderDeleteButton(item, "delete-artifact-button artifact-card-delete"), footerActions);
 
-  article.append(cardHead, title, summary, footer);
+  article.append(cardHead, title, summary, meta, footer);
   return article;
 }
 
@@ -349,6 +371,17 @@ function updateLikeCounts(artifactId, likes) {
   if (activeDialogArtifactId === Number(artifactId)) {
     const count = artifactDialogLike.querySelector("span");
     if (count) count.textContent = String(likes);
+  }
+}
+
+function updateCommentCounts(artifactId, count) {
+  const item = artifactsById.get(Number(artifactId));
+  if (item) item.comment_count = count;
+  document.querySelectorAll(`.comment-count[data-artifact-id="${artifactId}"]`).forEach((node) => {
+    node.textContent = String(count);
+  });
+  if (activeDialogArtifactId === Number(artifactId)) {
+    artifactCommentCount.textContent = String(count);
   }
 }
 
@@ -396,10 +429,183 @@ async function deleteArtifact(artifactId) {
   setStatus("成果已删除");
 }
 
-function openArtifactDialog(artifactId) {
+function renderCommentDeleteButton(item) {
+  const button = document.createElement("button");
+  button.className = "comment-delete-button";
+  button.type = "button";
+  button.title = "删除评论及后续回复";
+  button.setAttribute("aria-label", `删除评论 ${item.id}`);
+  button.innerHTML = `
+    <svg class="artifact-delete-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M6 6l1 18h10l1-18" />
+      <path d="M10 11v7" />
+      <path d="M14 11v7" />
+    </svg>
+  `;
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    deleteArtifactComment(item.id).catch((error) => setStatus(`删除评论失败: ${error.message}`));
+  });
+  return button;
+}
+
+function renderCommentRow(item, { temporary = false } = {}) {
+  const row = document.createElement("article");
+  row.className = `comment-row ${item.role === "assistant" ? "assistant-comment" : "user-comment"}`;
+  row.dataset.commentId = String(item.id);
+
+  const head = document.createElement("div");
+  head.className = "comment-head";
+  const meta = document.createElement("span");
+  meta.textContent = `${item.role === "assistant" ? "Qwen" : item.author || "visitor"} · ${temporary ? "生成中" : formatTime(item.created_at)}`;
+  head.appendChild(meta);
+  if (!temporary) {
+    head.appendChild(renderCommentDeleteButton(item));
+  }
+
+  const body = document.createElement("div");
+  body.className = "comment-body";
+  setRenderedMarkdown(body, item.content || "");
+
+  row.append(head, body);
+  return row;
+}
+
+function renderArtifactComments(items) {
+  activeArtifactComments = items || [];
+  clearChildren(artifactComments);
+  if (!activeArtifactComments.length) {
+    renderEmpty(artifactComments, "还没有评论");
+  } else {
+    for (const item of activeArtifactComments) {
+      artifactComments.appendChild(renderCommentRow(item));
+    }
+  }
+  updateCommentCounts(activeDialogArtifactId, activeArtifactComments.length);
+}
+
+async function loadArtifactComments(artifactId) {
+  const response = await fetch(`/api/artifacts/${artifactId}/comments`);
+  if (!response.ok) throw new Error(`comments ${response.status}`);
+  const payload = await response.json();
+  renderArtifactComments(payload.items || []);
+  return payload;
+}
+
+async function deleteArtifactComment(commentId) {
+  if (!window.confirm("确认删除这条评论及它后面的 AI 回复/追问？")) {
+    return;
+  }
+  const response = await fetch(`/api/artifact-comments/${commentId}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`comment delete ${response.status}`);
+  if (activeDialogArtifactId != null) {
+    await loadArtifactComments(activeDialogArtifactId);
+  }
+  resetArtifactPaging();
+  loadData().catch((error) => setStatus(`刷新失败: ${error.message}`));
+}
+
+function parseSseBlocks(buffer) {
+  const blocks = buffer.split("\n\n");
+  return {
+    complete: blocks.slice(0, -1),
+    rest: blocks[blocks.length - 1] || "",
+  };
+}
+
+function parseSseBlock(block) {
+  let event = "message";
+  const dataLines = [];
+  for (const line of block.split("\n")) {
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trim());
+    }
+  }
+  const rawData = dataLines.join("\n");
+  let data = {};
+  if (rawData) {
+    try {
+      data = JSON.parse(rawData);
+    } catch {
+      data = { content: rawData };
+    }
+  }
+  return { event, data };
+}
+
+async function submitArtifactComment(content) {
+  if (activeDialogArtifactId == null) return;
+  const parentId = activeArtifactComments.length
+    ? activeArtifactComments[activeArtifactComments.length - 1].id
+    : null;
+  const response = await fetch(`/api/artifacts/${activeDialogArtifactId}/comments/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content,
+      parent_id: parentId,
+      author: "visitor",
+    }),
+  });
+  if (!response.ok || !response.body) throw new Error(`comment stream ${response.status}`);
+
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let buffer = "";
+  let assistantDraft = null;
+  let assistantText = "";
+  clearChildren(artifactComments);
+  for (const item of activeArtifactComments) {
+    artifactComments.appendChild(renderCommentRow(item));
+  }
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = parseSseBlocks(buffer);
+    buffer = parsed.rest;
+    for (const block of parsed.complete) {
+      const { event, data } = parseSseBlock(block);
+      if (event === "user_comment") {
+        activeArtifactComments.push(data);
+        artifactComments.appendChild(renderCommentRow(data));
+        updateCommentCounts(activeDialogArtifactId, activeArtifactComments.length + 1);
+      } else if (event === "token") {
+        if (!assistantDraft) {
+          assistantDraft = {
+            id: "assistant-draft",
+            role: "assistant",
+            author: "Qwen",
+            content: "",
+            created_at: "",
+          };
+          artifactComments.appendChild(renderCommentRow(assistantDraft, { temporary: true }));
+        }
+        assistantText += data.content || "";
+        assistantDraft.content = assistantText;
+        const body = artifactComments.querySelector('[data-comment-id="assistant-draft"] .comment-body');
+        if (body) setRenderedMarkdown(body, assistantText);
+      } else if (event === "done") {
+        await loadArtifactComments(activeDialogArtifactId);
+        resetArtifactPaging();
+        loadData().catch((error) => setStatus(`刷新失败: ${error.message}`));
+      } else if (event === "error") {
+        throw new Error(data.message || "评论失败");
+      }
+    }
+  }
+}
+
+function openArtifactDialog(artifactId, options = {}) {
   const item = artifactsById.get(Number(artifactId));
   if (!item) return;
   activeDialogArtifactId = Number(artifactId);
+  activeArtifactComments = [];
   artifactDialogTitle.textContent = item.title || "未命名成果";
   const series = item.series_title ? ` · ${item.series_title}` : "";
   const episode = item.episode_index != null ? ` · 第 ${item.episode_index} 集` : "";
@@ -410,11 +616,23 @@ function openArtifactDialog(artifactId) {
   artifactDialogLike.dataset.artifactId = String(item.id);
   artifactDialogLike.innerHTML = `赞 <span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
   artifactDialogDelete.dataset.artifactId = String(item.id);
+  artifactCommentInput.value = "";
+  clearChildren(artifactComments);
+  renderEmpty(artifactComments, "读取评论中");
+  artifactCommentCount.textContent = String(Number(item.comment_count || 0));
   if (typeof artifactDialog.showModal === "function") {
     artifactDialog.showModal();
   } else {
     artifactDialog.setAttribute("open", "open");
   }
+  loadArtifactComments(Number(item.id))
+    .then(() => {
+      if (options.focusComment) artifactCommentInput.focus();
+    })
+    .catch((error) => {
+      clearChildren(artifactComments);
+      renderEmpty(artifactComments, `评论读取失败: ${error.message}`);
+    });
 }
 
 function renderRuns(payload) {
@@ -563,10 +781,33 @@ artifactDialogDelete.addEventListener("click", (event) => {
 });
 artifactDialog.addEventListener("close", () => {
   activeDialogArtifactId = null;
+  activeArtifactComments = [];
 });
 artifactDialog.addEventListener("click", (event) => {
   if (event.target === artifactDialog) {
     artifactDialog.close();
+  }
+});
+artifactCommentForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const content = artifactCommentInput.value.trim();
+  if (!content) {
+    artifactCommentInput.focus();
+    return;
+  }
+  artifactCommentSubmit.disabled = true;
+  artifactCommentInput.disabled = true;
+  setStatus("AI 正在回复评论");
+  try {
+    artifactCommentInput.value = "";
+    await submitArtifactComment(content);
+    setStatus("评论已回复");
+  } catch (error) {
+    setStatus(`评论失败: ${error.message}`);
+  } finally {
+    artifactCommentSubmit.disabled = false;
+    artifactCommentInput.disabled = false;
+    artifactCommentInput.focus();
   }
 });
 savePromptButton.addEventListener("click", async () => {

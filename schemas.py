@@ -45,3 +45,9 @@ class IdlePromptPayload(BaseModel):
 
 class IdleStatusPayload(BaseModel):
     paused: bool = False
+
+
+class ArtifactCommentPayload(BaseModel):
+    content: str = Field(min_length=1)
+    parent_id: Optional[int] = None
+    author: str = Field(default="visitor")

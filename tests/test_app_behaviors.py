@@ -1965,6 +1965,76 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertEqual(random_page["sort"], "random")
         self.assertEqual(random_page["limit"], 2)
 
+    def test_artifact_comments_save_ai_reply_and_sort_by_comment_count(self):
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于摘要生成")
+        first = self.app.save_idle_agent_artifact(
+            run_id=run_id,
+            title="第一篇故事",
+            artifact_type="novel",
+            content="Shinning Hero 在雨夜城市里追查一束断裂的光。",
+            summary="雨夜追查。",
+        )
+        second = self.app.save_idle_agent_artifact(
+            run_id=run_id,
+            title="第二篇故事",
+            artifact_type="novel",
+            content="绿手侠在实验室门口停下。",
+            summary="实验室门口。",
+        )
+        original_reply = self.app.call_artifact_comment_model
+        self.app.call_artifact_comment_model = lambda *_args, **_kwargs: "这条评论可以从世界观层面理解为光与城市秩序的冲突。"
+        try:
+            created = self.app.create_artifact_comment_with_ai_reply(
+                first,
+                "这个世界观里光为什么这么重要？",
+                author="tester",
+            )
+        finally:
+            self.app.call_artifact_comment_model = original_reply
+
+        comments = self.app.list_artifact_comments(first)
+        by_role = [item["role"] for item in comments["items"]]
+        by_count = self.app.list_idle_agent_artifacts(sort="comments", order="desc", limit=2)
+
+        self.assertEqual(created["user_comment"]["role"], "user")
+        self.assertEqual(created["assistant_comment"]["role"], "assistant")
+        self.assertIn("世界观", created["assistant_comment"]["content"])
+        self.assertEqual(by_role, ["user", "assistant"])
+        self.assertEqual(by_count["items"][0]["id"], first)
+        self.assertEqual(by_count["items"][0]["comment_count"], 2)
+        self.assertEqual(by_count["items"][1]["id"], second)
+        self.assertEqual(by_count["items"][1]["comment_count"], 0)
+
+    def test_delete_artifact_comment_removes_descendant_replies(self):
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于摘要生成")
+        artifact_id = self.app.save_idle_agent_artifact(
+            run_id=run_id,
+            title="评论删除故事",
+            artifact_type="novel",
+            content="一段可以被评论的故事。",
+        )
+        root = self.app.create_artifact_comment(artifact_id, "user", "第一条问题")
+        ai = self.app.create_artifact_comment(
+            artifact_id,
+            "assistant",
+            "第一条回答",
+            parent_id=root["id"],
+            root_id=root["id"],
+        )
+        follow_up = self.app.create_artifact_comment(
+            artifact_id,
+            "user",
+            "继续追问",
+            parent_id=ai["id"],
+            root_id=root["id"],
+        )
+
+        deleted = self.app.delete_artifact_comment(root["id"])
+
+        self.assertEqual(deleted["deleted"], 3)
+        self.assertEqual(self.app.list_artifact_comments(artifact_id)["items"], [])
+        self.assertFalse(self.app.delete_artifact_comment(follow_up["id"])["ok"])
+
     def test_idle_artifact_save_assigns_unique_mainline_episode_numbers(self):
         run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Shinning Hero 连载")
         original_embed = self.app.embedding_client.embed_text

@@ -337,13 +337,24 @@ textarea:focus {
 
 .artifact-card-footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
   align-items: end;
   margin-top: auto;
 }
 
-.like-button {
+.artifact-card-meta {
+  min-height: 32px;
+}
+
+.artifact-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.like-button,
+.comment-count-button {
   min-width: 66px;
   height: 34px;
   border: 1px solid rgba(22, 119, 95, 0.24);
@@ -355,7 +366,9 @@ textarea:focus {
 }
 
 .like-button:hover,
-.like-button:focus-visible {
+.like-button:focus-visible,
+.comment-count-button:hover,
+.comment-count-button:focus-visible {
   border-color: rgba(22, 119, 95, 0.5);
   background: rgba(22, 119, 95, 0.12);
   outline: none;
@@ -383,7 +396,7 @@ textarea:focus {
 }
 
 .artifact-card-delete {
-  justify-self: end;
+  justify-self: start;
   opacity: 0.64;
 }
 
@@ -480,6 +493,109 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
+.artifact-comments {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.artifact-comments-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.artifact-comments-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.artifact-comments-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.comment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.comment-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
+}
+
+.assistant-comment {
+  background: #f7faf9;
+}
+
+.comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.comment-body {
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.comment-body p {
+  margin: 0 0 0.6em;
+}
+
+.comment-body p:last-child {
+  margin-bottom: 0;
+}
+
+.comment-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.comment-delete-button:hover,
+.comment-delete-button:focus-visible {
+  border-color: var(--line);
+  color: #475467;
+  background: rgba(102, 112, 133, 0.08);
+  outline: none;
+}
+
+.comment-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.comment-form textarea {
+  min-height: 76px;
+}
+
+.comment-form .button {
+  min-width: 88px;
+  height: auto;
+}
+
 .artifact-dialog {
   width: min(920px, calc(100vw - 28px));
   max-height: min(86vh, 920px);
@@ -544,6 +660,7 @@ textarea:focus {
 .dialog-delete-button {
   width: auto;
   min-width: 66px;
+  margin-right: auto;
   padding: 0 14px;
   color: #b42318;
 }
@@ -623,6 +740,10 @@ textarea:focus {
 
   .artifact-head,
   .run {
+    grid-template-columns: 1fr;
+  }
+
+  .comment-form {
     grid-template-columns: 1fr;
   }
 
