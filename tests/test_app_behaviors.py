@@ -2388,6 +2388,70 @@ class AppBehaviorTests(unittest.TestCase):
 
         self.assertNotIn("学们勿的荣耀", prompt)
 
+    def test_regular_schedule_query_includes_future_event_context(self):
+        identity = "device:dev_regular_events01"
+        old_session = self.app.create_session(identity, "agent-events-source")
+        session_id = self.app.create_session(identity, "agent-events-chat")
+        first = self.app.add_message(old_session, "user", "周三上午10到12点有组会，周五晚上有北大 Chinese football 演出。")
+        self.app.save_curated_memory(
+            old_session,
+            first,
+            first,
+            "用户周三上午10:00-12:00有组会。",
+            importance_label="event",
+            timeline_at="2026-06-10T10:00:00+08:00",
+            confidence=0.92,
+        )
+        self.app.save_curated_memory(
+            old_session,
+            first,
+            first,
+            "用户周五晚上有北大 Chinese football 演出，需要和唱歌课请假。",
+            importance_label="event",
+            timeline_at="2026-06-12T19:00:00+08:00",
+            confidence=0.91,
+        )
+
+        original_gate = self.app.should_use_memory_recall
+        self.app.should_use_memory_recall = lambda *_args, **_kwargs: False
+        try:
+            prompt = self.app.build_system_prompt(session_id, "周三及之后有什么活动吗", identity)
+        finally:
+            self.app.should_use_memory_recall = original_gate
+
+        self.assertIn("普通聊天中可参考的未来事件/日程", prompt)
+        self.assertIn("周三上午10:00-12:00有组会", prompt)
+        self.assertIn("周五晚上有北大 Chinese football 演出", prompt)
+
+    def test_regular_non_schedule_query_does_not_inject_future_event_context(self):
+        identity = "device:dev_regular_events02"
+        old_session = self.app.create_session(identity, "agent-events-source")
+        session_id = self.app.create_session(identity, "agent-events-chat")
+        first = self.app.add_message(old_session, "user", "周三上午10到12点有组会。")
+        self.app.save_curated_memory(
+            old_session,
+            first,
+            first,
+            "用户周三上午10:00-12:00有组会。",
+            importance_label="event",
+            timeline_at="2026-06-10T10:00:00+08:00",
+            confidence=0.92,
+        )
+
+        original_gate = self.app.should_use_memory_recall
+        self.app.should_use_memory_recall = lambda *_args, **_kwargs: False
+        try:
+            prompt = self.app.build_system_prompt(session_id, "讲个普通笑话", identity)
+        finally:
+            self.app.should_use_memory_recall = original_gate
+
+        self.assertNotIn("普通聊天中可参考的未来事件/日程", prompt)
+        self.assertNotIn("周三上午10:00-12:00有组会", prompt)
+
+    def test_memory_agent_prompt_rejects_schedule_query_as_preference(self):
+        self.assertIn("只是在询问、查询或确认已有日程", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("不要保存为 preference", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+
     def test_opening_turns_are_not_reused_as_regular_chat_history(self):
         client = TestClient(self.app.app)
         identity = "device:dev_openhistory01"

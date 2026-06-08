@@ -207,6 +207,8 @@ MEMORY_AGENT_SYSTEM_PROMPT = (
     "如果用户提到会议、演出、请假、截止时间、提醒、约定、考试、出行、提交任务等带时间的事项，应保存为 event。"
     "event 必须尽量拆成独立条目；例如一条用户输入里有周三组会和周五演出，应输出两条 event。"
     "event 的 timeline_at 必须用当前真实时间解析成 ISO 8601 时间；如果只有日期没有具体时刻，选择当天 09:00；如果是晚上，选择 19:00。"
+    "如果用户只是在询问、查询或确认已有日程，例如“周三及之后有什么活动吗”，不要保存为 preference、rule 或 event；"
+    "只有用户提供新的具体事项、时间、提醒要求，或更正已有事项时才保存日程相关记忆。"
     "不重要内容包括：一次性闲聊、复读、无意义数字、模型回答模板、临时情绪、没有长期价值的玩笑。"
     "如果重要，输出简短自然语言记忆，禁止保存 assistant 自己编出的补充属性，禁止保存设备身份、session、User-Agent。"
     "只输出 JSON。优先输出：{\"important\": true/false, \"items\": [{\"label\": \"preference|identity|rule|persona|risk|event|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.0到1.0}]}。"
@@ -2239,6 +2241,209 @@ def format_future_events_context(events: List[Dict[str, object]]) -> str:
             f"{str(item['content']).strip()}"
         )
     return "\n".join(lines)
+
+
+TIMELINE_QUERY_SCHEDULE_TERMS = (
+    "日程",
+    "活动",
+    "安排",
+    "会议",
+    "组会",
+    "演出",
+    "请假",
+    "截止",
+    "提醒",
+    "约定",
+    "预约",
+    "ddl",
+    "deadline",
+    "什么事",
+    "有事",
+)
+
+TIMELINE_QUERY_TIME_TERMS = (
+    "今天",
+    "明天",
+    "后天",
+    "本周",
+    "下周",
+    "这周",
+    "周一",
+    "周二",
+    "周三",
+    "周四",
+    "周五",
+    "周六",
+    "周日",
+    "星期一",
+    "星期二",
+    "星期三",
+    "星期四",
+    "星期五",
+    "星期六",
+    "星期日",
+    "礼拜一",
+    "礼拜二",
+    "礼拜三",
+    "礼拜四",
+    "礼拜五",
+    "礼拜六",
+    "礼拜日",
+    "上午",
+    "下午",
+    "晚上",
+    "之后",
+    "以后",
+    "未来",
+    "几号",
+    "几点",
+)
+
+WEEKDAY_ALIASES = (
+    ("周一", 0),
+    ("星期一", 0),
+    ("礼拜一", 0),
+    ("周二", 1),
+    ("星期二", 1),
+    ("礼拜二", 1),
+    ("周三", 2),
+    ("星期三", 2),
+    ("礼拜三", 2),
+    ("周四", 3),
+    ("星期四", 3),
+    ("礼拜四", 3),
+    ("周五", 4),
+    ("星期五", 4),
+    ("礼拜五", 4),
+    ("周六", 5),
+    ("星期六", 5),
+    ("礼拜六", 5),
+    ("周日", 6),
+    ("星期日", 6),
+    ("礼拜日", 6),
+    ("周天", 6),
+    ("星期天", 6),
+    ("礼拜天", 6),
+)
+
+
+def is_timeline_event_query(user_message: str) -> bool:
+    text = clean_search_text(user_message, 300).lower()
+    if not text:
+        return False
+    has_schedule_term = any(term in text for term in TIMELINE_QUERY_SCHEDULE_TERMS)
+    has_time_term = any(term in text for term in TIMELINE_QUERY_TIME_TERMS)
+    if has_schedule_term and has_time_term:
+        return True
+    if has_schedule_term and any(term in text for term in ("有什么", "有没有", "查一下", "看看", "记得")):
+        return True
+    return False
+
+
+def start_of_local_day(value: datetime) -> datetime:
+    tz = local_timezone()
+    current = value.astimezone(tz) if value.tzinfo else value.replace(tzinfo=tz)
+    return current.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def next_weekday_start(now: datetime, weekday: int) -> datetime:
+    today = start_of_local_day(now)
+    delta_days = (weekday - today.weekday()) % 7
+    return today + timedelta(days=delta_days)
+
+
+def event_query_time_window(user_message: str, now: Optional[datetime] = None) -> Tuple[datetime, datetime]:
+    tz = local_timezone()
+    current = now or datetime.now(tz)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=tz)
+    current = current.astimezone(tz)
+    text = clean_search_text(user_message, 300)
+    default_end = current + timedelta(days=max(1, OPENING_FUTURE_EVENT_WINDOW_DAYS))
+
+    for alias, weekday in WEEKDAY_ALIASES:
+        if alias not in text:
+            continue
+        day_start = next_weekday_start(current, weekday)
+        if any(marker in text for marker in (f"{alias}及之后", f"{alias}之后", f"{alias}以后", f"{alias}起")):
+            return day_start, default_end
+        return day_start, day_start + timedelta(days=1)
+
+    if "后天" in text:
+        day_start = start_of_local_day(current + timedelta(days=2))
+        return day_start, day_start + timedelta(days=1)
+    if "明天" in text:
+        day_start = start_of_local_day(current + timedelta(days=1))
+        return day_start, day_start + timedelta(days=1)
+    if "今天" in text:
+        day_start = start_of_local_day(current)
+        return day_start, day_start + timedelta(days=1)
+    return current, default_end
+
+
+def format_regular_timeline_events_context(events: List[Dict[str, object]]) -> str:
+    if not events:
+        return ""
+    lines = [
+        "普通聊天中可参考的未来事件/日程：",
+        "这些是用户曾明确提供或后台整理的结构化 event；当用户询问日程、活动、提醒、会议或日期范围时，必须优先依据这些事件回答。",
+        "如果这些事件中没有匹配项，只能说目前没有记录到对应日程；不要根据用户身份、学校或常识泛泛猜测。",
+        "",
+    ]
+    for index, item in enumerate(events, start=1):
+        lines.append(
+            f"[未来事件 {index}] time={item['timeline_at']} "
+            f"confidence={float(item.get('confidence', 0.7)):.2f}"
+        )
+        lines.append(str(item["content"]).strip())
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def build_regular_timeline_events_context(
+    user_message: str,
+    visitor_ip: str,
+    session_id: str = "",
+    analysis_trace_id: str = "",
+) -> str:
+    if not is_timeline_event_query(user_message):
+        return ""
+    now = datetime.now(local_timezone())
+    window_start, window_end = event_query_time_window(user_message, now)
+    events = retrieve_future_event_memories(
+        visitor_ip,
+        now=window_start,
+        limit=min(max(OPENING_FUTURE_EVENT_LIMIT, 8), 20),
+    )
+    filtered: List[Dict[str, object]] = []
+    for event in events:
+        event_at = parse_datetime_for_timeline(event.get("timeline_at"))
+        if event_at is None or event_at < window_start or event_at >= window_end:
+            continue
+        filtered.append(event)
+    if analysis_trace_id:
+        record_analysis_trace(
+            session_id=session_id,
+            trace_id=analysis_trace_id,
+            event_type="memory_agent",
+            visitor_ip=visitor_ip,
+            step_name="timeline_event_lookup",
+            payload={
+                "query": user_message[:240],
+                "window_start": window_start.isoformat(timespec="minutes"),
+                "window_end": window_end.isoformat(timespec="minutes"),
+                "results": [
+                    {
+                        "memory_id": item.get("id"),
+                        "timeline_at": item.get("timeline_at"),
+                        "confidence": item.get("confidence"),
+                        "content": item.get("content"),
+                    }
+                    for item in filtered
+                ],
+            },
+        )
+    return format_regular_timeline_events_context(filtered)
 
 
 def count_device_curated_memories(visitor_ip: str) -> int:
@@ -5508,8 +5713,17 @@ def build_system_prompt(
     active_recall_context = ""
     visitor_context = format_visitor_identity_context(visitor_ip)
     profile_context = format_profile_context(retrieve_profile_context_memories(visitor_ip))
+    timeline_events_context = ""
     date_context = current_date_context()
     if not web_search_context:
+        timeline_events_context = build_regular_timeline_events_context(
+            user_message,
+            visitor_ip,
+            session_id=session_id,
+            analysis_trace_id=analysis_trace_id,
+        )
+        if memory_debug is not None:
+            memory_debug["timeline_events"] = "run" if timeline_events_context else "skipped"
         retrieval_query = ""
         try:
             if precomputed_memory_gate is None:
@@ -5637,6 +5851,8 @@ def build_system_prompt(
     prompt_parts = [SYSTEM_PROMPT, date_context, visitor_context]
     if profile_context:
         prompt_parts.append(profile_context)
+    if timeline_events_context:
+        prompt_parts.append(timeline_events_context)
     if memory_context:
         prompt_parts.append(memory_context)
     if artifact_context:
