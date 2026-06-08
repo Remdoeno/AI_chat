@@ -12,6 +12,14 @@ LOG_FILE="$LOG_DIR/qwen_web_${WEB_PORT}_$(date +%Y%m%d_%H%M%S).log"
 
 mkdir -p "$LOG_DIR" data
 
+if [ -z "${QWEN_IDLE_STORY_SEEDS_FILE:-}" ] && [ -f "data/idle_story_seeds.txt" ]; then
+  export QWEN_IDLE_STORY_SEEDS_FILE="$PWD/data/idle_story_seeds.txt"
+fi
+
+if [ -z "${QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS:-}" ] && [ -f "data/idle_artifact_term_replacements.json" ]; then
+  export QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS="$(tr -d '\n' < data/idle_artifact_term_replacements.json)"
+fi
+
 if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE")
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" >/dev/null 2>&1; then

@@ -1934,6 +1934,26 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("Canonical Hero Name", text)
         self.assertNotIn("Old Hero Name", text)
 
+    def test_idle_agent_response_loads_term_replacements_file(self):
+        replacements_path = Path(self.tmpdir.name) / "idle_artifact_term_replacements.json"
+        replacements_path.write_text(
+            json.dumps({"Flash Superman": "Shinning Hero"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        self.app.IDLE_ARTIFACT_TERM_REPLACEMENTS = ""
+        self.app.IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE = str(replacements_path)
+
+        payload = self.app.parse_idle_agent_response(
+            '{"task_type":"novel","title":"Flash Superman 登场",'
+            '"content":"Flash Superman 使用动感光波。",'
+            '"series_title":"Flash Superman 城市档案",'
+            '"episode_index":1,"summary":"Flash Superman 继续行动。"}'
+        )
+
+        text = json.dumps(payload, ensure_ascii=False)
+        self.assertIn("Shinning Hero", text)
+        self.assertNotIn("Flash Superman", text)
+
     def test_idle_agent_response_falls_back_to_raw_content_for_malformed_json(self):
         payload = self.app.parse_idle_agent_response(
             '{"task_type":"notes","title":"未闭合草稿","content":"第一行\n第二行"'

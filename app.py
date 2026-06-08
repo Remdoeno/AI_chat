@@ -96,8 +96,19 @@ IDLE_ARTIFACT_TOP_K = int(os.environ.get("QWEN_IDLE_ARTIFACT_TOP_K", "2"))
 IDLE_ARTIFACT_MIN_SCORE = float(os.environ.get("QWEN_IDLE_ARTIFACT_MIN_SCORE", "0.5"))
 IDLE_ARTIFACT_CONTEXT_CHARS = int(os.environ.get("QWEN_IDLE_ARTIFACT_CONTEXT_CHARS", "700"))
 IDLE_AGENT_CUSTOM_PROMPT_DEFAULT = os.environ.get("QWEN_IDLE_AGENT_CUSTOM_PROMPT", "").strip()
-IDLE_STORY_SEEDS_FILE = os.environ.get("QWEN_IDLE_STORY_SEEDS_FILE", "").strip()
+DEFAULT_IDLE_STORY_SEEDS_FILE = DATA_DIR / "idle_story_seeds.txt"
+IDLE_STORY_SEEDS_FILE = os.environ.get(
+    "QWEN_IDLE_STORY_SEEDS_FILE",
+    str(DEFAULT_IDLE_STORY_SEEDS_FILE) if DEFAULT_IDLE_STORY_SEEDS_FILE.exists() else "",
+).strip()
 IDLE_ARTIFACT_TERM_REPLACEMENTS = os.environ.get("QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS", "").strip()
+DEFAULT_IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE = DATA_DIR / "idle_artifact_term_replacements.json"
+IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE = os.environ.get(
+    "QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE",
+    str(DEFAULT_IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE)
+    if DEFAULT_IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE.exists()
+    else "",
+).strip()
 WEB_SEARCH_PROXY = os.environ.get("QWEN_WEB_SEARCH_PROXY", "").strip()
 WEB_SEARCH_TIMEOUT = float(os.environ.get("QWEN_WEB_SEARCH_TIMEOUT", "12"))
 WEB_SEARCH_MAX_CANDIDATES = int(
@@ -4436,19 +4447,30 @@ def compact_idle_artifact_content(content: str, max_chars: int) -> str:
 
 
 def load_idle_artifact_term_replacements() -> Dict[str, str]:
-    if not IDLE_ARTIFACT_TERM_REPLACEMENTS:
-        return {}
-    try:
-        payload = json.loads(IDLE_ARTIFACT_TERM_REPLACEMENTS)
-    except Exception:
-        return {}
-    if not isinstance(payload, dict):
-        return {}
-    return {
-        str(source): str(target)
-        for source, target in payload.items()
-        if str(source).strip() and str(target).strip()
-    }
+    replacements: Dict[str, str] = {}
+
+    def merge_payload(payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        for source, target in payload.items():
+            source_text = str(source).strip()
+            target_text = str(target).strip()
+            if source_text and target_text:
+                replacements[source_text] = target_text
+
+    if IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE:
+        try:
+            payload = json.loads(Path(IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE).read_text(encoding="utf-8"))
+            merge_payload(payload)
+        except Exception:
+            pass
+    if IDLE_ARTIFACT_TERM_REPLACEMENTS:
+        try:
+            payload = json.loads(IDLE_ARTIFACT_TERM_REPLACEMENTS)
+            merge_payload(payload)
+        except Exception:
+            pass
+    return replacements
 
 
 def normalize_idle_artifact_terms(text: str) -> str:

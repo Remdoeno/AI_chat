@@ -68,6 +68,7 @@ export QWEN_IDLE_STORY_SEEDS_FILE="./data/idle_story_seeds.txt"
 ```
 
 `idle_story_seeds.txt` 可以写你自己的小说、角色、世界观、写作偏好或长期创作计划。该文件默认不上传。
+如果 `data/idle_story_seeds.txt` 已存在，启动脚本和应用会自动读取它。
 
 也可以在成果页里配置空闲创作 prompt，让 idle agent 在不聊天、不整理记忆时进行创作。
 
@@ -76,6 +77,8 @@ export QWEN_IDLE_STORY_SEEDS_FILE="./data/idle_story_seeds.txt"
 ```bash
 export QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS='{"旧术语":"标准术语"}'
 ```
+
+也可以把同样的 JSON 写入 `data/idle_artifact_term_replacements.json`，该文件同样默认不上传。
 
 ## 启动 Web 服务
 
