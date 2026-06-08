@@ -327,30 +327,44 @@ textarea:focus {
 }
 
 .delete-artifact-button {
-  min-width: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
   height: 34px;
-  border: 1px solid rgba(180, 35, 24, 0.24);
-  border-radius: 999px;
-  color: #b42318;
-  background: rgba(180, 35, 24, 0.06);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
   cursor: pointer;
-  font-weight: 800;
 }
 
 .delete-artifact-button:hover,
 .delete-artifact-button:focus-visible {
-  border-color: rgba(180, 35, 24, 0.46);
-  background: rgba(180, 35, 24, 0.12);
+  border-color: var(--line);
+  color: #475467;
+  background: rgba(102, 112, 133, 0.08);
   outline: none;
 }
 
 .artifact-card-delete {
-  opacity: 0.72;
+  justify-self: end;
+  opacity: 0.64;
 }
 
 .artifact-card-delete:hover,
 .artifact-card-delete:focus-visible {
   opacity: 1;
+}
+
+.artifact-delete-icon {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .type-pill {
@@ -493,7 +507,10 @@ textarea:focus {
 }
 
 .dialog-delete-button {
+  width: auto;
   min-width: 66px;
+  padding: 0 14px;
+  color: #b42318;
 }
 
 .icon-button {

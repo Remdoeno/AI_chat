@@ -229,7 +229,15 @@ function renderDeleteButton(item, className = "delete-artifact-button") {
   button.className = className;
   button.type = "button";
   button.dataset.artifactId = String(item.id);
-  button.textContent = "delete";
+  button.innerHTML = `
+    <svg class="artifact-delete-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M6 6l1 18h10l1-18" />
+      <path d="M10 11v7" />
+      <path d="M14 11v7" />
+    </svg>
+  `;
   button.title = "删除成果";
   button.setAttribute("aria-label", `删除成果 ${item.title || item.id}`);
   button.addEventListener("click", (event) => {
