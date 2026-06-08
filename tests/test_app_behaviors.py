@@ -1427,6 +1427,37 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertEqual(vector_count, 1)
         self.assertEqual(job_row["status"], "completed")
 
+    def test_memory_agent_job_skips_third_party_identity_fact_from_lookup(self):
+        identity = "device:dev_thirdparty_fact"
+        session_id = self.app.create_session(identity, "agent-thirdparty-fact")
+        user_id = self.app.add_message(session_id, "user", "魏祥毓教授在哪工作？")
+        assistant_id = self.app.add_message(session_id, "assistant", "魏祥毓教授在北京化工大学工作。")
+        job_id = self.app.enqueue_memory_agent_job(session_id, user_id, assistant_id, "turn_complete")
+
+        original_call = self.app.call_memory_agent_model
+        original_embed = self.app.embedding_client.embed_text
+        self.app.call_memory_agent_model = lambda _source: {
+            "important": True,
+            "memory": "魏祥毓教授在北京化工大学工作",
+            "label": "identity",
+            "confidence": 0.9,
+        }
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            result = self.app.process_memory_agent_job(job_id)
+        finally:
+            self.app.call_memory_agent_model = original_call
+            self.app.embedding_client.embed_text = original_embed
+
+        self.assertEqual(result["status"], "skipped")
+        with self.app.connect_db() as conn:
+            memory_count = conn.execute("SELECT COUNT(*) AS c FROM curated_memories").fetchone()["c"]
+            job_row = conn.execute("SELECT status, error FROM memory_agent_jobs WHERE id = ?", (job_id,)).fetchone()
+
+        self.assertEqual(memory_count, 0)
+        self.assertEqual(job_row["status"], "skipped")
+        self.assertIn("third_party_fact", job_row["error"])
+
     def test_memory_agent_job_saves_future_events_as_separate_event_memories(self):
         identity = "device:dev_events012345"
         session_id = self.app.create_session(identity, "agent-worker-events")
@@ -2588,6 +2619,12 @@ class AppBehaviorTests(unittest.TestCase):
     def test_memory_agent_prompt_rejects_schedule_query_as_preference(self):
         self.assertIn("只是在询问、查询或确认已有日程", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
         self.assertIn("不要保存为 preference", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+
+    def test_memory_agent_prompt_rejects_third_party_facts_as_identity(self):
+        self.assertIn("第三方人物", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("不要保存为 identity", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("fact", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("fact", self.app.ALLOWED_MEMORY_LABELS)
 
     def test_opening_turns_are_not_reused_as_regular_chat_history(self):
         client = TestClient(self.app.app)

@@ -229,6 +229,9 @@ MEMORY_AGENT_SYSTEM_PROMPT = (
     "你只判断一轮聊天是否值得写入长期记忆库。"
     "输入只应包含用户发言；你只能根据用户原话提炼记忆，不能把 assistant 的表达、推测、玩笑或解释当成用户事实。"
     "重要记忆包括：用户稳定身份、称呼、偏好、长期设定、反复出现的规则、明确要求、需要避免的错误、未来日程事件。"
+    "identity 只用于当前用户本人身份，不用于第三方人物、论文作者、老师、名人或公开机构信息。"
+    "第三方人物、公开事实、检索问题或百科式事实默认不要保存为长期记忆，也不要保存为 identity；"
+    "只有用户明确表示该事实对长期任务持续有用时，才可保存为 fact。"
     "如果用户提到会议、演出、请假、截止时间、提醒、约定、考试、出行、提交任务等带时间的事项，应保存为 event。"
     "event 必须尽量拆成独立条目；例如一条用户输入里有周三组会和周五演出，应输出两条 event。"
     "event 的 timeline_at 必须用当前真实时间解析成 ISO 8601 时间；如果只有日期没有具体时刻，选择当天 09:00；如果是晚上，选择 19:00。"
@@ -236,8 +239,8 @@ MEMORY_AGENT_SYSTEM_PROMPT = (
     "只有用户提供新的具体事项、时间、提醒要求，或更正已有事项时才保存日程相关记忆。"
     "不重要内容包括：一次性闲聊、复读、无意义数字、模型回答模板、临时情绪、没有长期价值的玩笑。"
     "如果重要，输出简短自然语言记忆，禁止保存 assistant 自己编出的补充属性，禁止保存设备身份、session、User-Agent。"
-    "只输出 JSON。优先输出：{\"important\": true/false, \"items\": [{\"label\": \"preference|identity|rule|persona|risk|event|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.0到1.0}]}。"
-    "如果只有一条普通记忆，也兼容输出：{\"important\": true/false, \"label\": \"preference|identity|rule|persona|risk|event|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.7}。"
+    "只输出 JSON。优先输出：{\"important\": true/false, \"items\": [{\"label\": \"preference|identity|rule|persona|risk|event|fact|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.0到1.0}]}。"
+    "如果只有一条普通记忆，也兼容输出：{\"important\": true/false, \"label\": \"preference|identity|rule|persona|risk|event|fact|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.7}。"
 )
 
 IDLE_AGENT_SYSTEM_PROMPT = (
@@ -259,7 +262,7 @@ IDLE_AGENT_CANCEL_EVENT = threading.Event()
 IDLE_AGENT_WORKER_LOCK = threading.Lock()
 IDLE_AGENT_THREAD_STARTED = False
 LAST_USER_ACTIVITY_AT = time.time()
-ALLOWED_MEMORY_LABELS = {"preference", "identity", "rule", "persona", "risk", "event", "other"}
+ALLOWED_MEMORY_LABELS = {"preference", "identity", "rule", "persona", "risk", "event", "fact", "other"}
 OPENING_FUTURE_EVENT_LIMIT = int(os.environ.get("QWEN_OPENING_FUTURE_EVENT_LIMIT", "8"))
 OPENING_FUTURE_EVENT_WINDOW_DAYS = int(os.environ.get("QWEN_OPENING_FUTURE_EVENT_WINDOW_DAYS", "30"))
 OPENING_PROMPT_CACHE_VERSION = "v2"
@@ -5414,6 +5417,48 @@ def normalize_memory_agent_item(item: object) -> Optional[Dict[str, object]]:
     }
 
 
+def memory_text_is_user_centered(text: str) -> bool:
+    cleaned = str(text or "").strip()
+    return bool(re.search(r"(用户|本人|来访者|我|我的|俺|咱|咱们|我们)", cleaned))
+
+
+def source_is_third_party_lookup(source: str) -> bool:
+    text = str(source or "").strip()
+    if not text:
+        return False
+    lookup_markers = (
+        "是谁",
+        "在哪",
+        "哪里",
+        "工作",
+        "任职",
+        "教授",
+        "老师",
+        "作者",
+        "第几作者",
+        "引用",
+        "论文",
+        "文章",
+        "去世",
+        "逝世",
+        "查",
+        "搜索",
+    )
+    has_lookup = any(marker in text for marker in lookup_markers) or "?" in text or "？" in text
+    user_markers = ("我", "我的", "本人", "咱", "咱们", "我们")
+    return has_lookup and not any(marker in text for marker in user_markers)
+
+
+def memory_agent_item_skip_reason(item: Dict[str, object], source: str) -> str:
+    label = normalize_memory_label(item.get("label", "other"))
+    memory_text = str(item.get("memory", "")).strip()
+    if source_is_third_party_lookup(source) and not memory_text_is_user_centered(memory_text):
+        return "third_party_fact"
+    if label in {"identity", "persona", "preference", "rule"} and not memory_text_is_user_centered(memory_text):
+        return "not_user_centered"
+    return ""
+
+
 def parse_memory_agent_response(text: str) -> Dict[str, object]:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -5573,11 +5618,36 @@ def process_memory_agent_job(job_id: int) -> Dict[str, object]:
 
         saved_ids: List[int] = []
         duplicate_ids: List[int] = []
+        skipped_reasons: List[str] = []
         for index, item in enumerate(decision_items, start=1):
             memory_text = str(item["memory"]).strip()
             memory_label = normalize_memory_label(item.get("label", "other"))
             timeline_at = str(item.get("timeline_at", "") or "").strip() or None
             confidence = float(item.get("confidence", 0.7))
+            skip_reason = memory_agent_item_skip_reason(
+                {
+                    "memory": memory_text,
+                    "label": memory_label,
+                },
+                source,
+            )
+            if skip_reason:
+                skipped_reasons.append(skip_reason)
+                if trace_id:
+                    record_analysis_trace(
+                        session_id=session_id,
+                        trace_id=trace_id,
+                        event_type="memory_agent",
+                        visitor_ip=visitor,
+                        step_name="memory_agent_item_skipped",
+                        payload={
+                            "item_index": index,
+                            "label": memory_label,
+                            "reason": skip_reason,
+                            "memory_preview": memory_text[:240],
+                        },
+                    )
+                continue
             memory_embedding_started = time.perf_counter()
             vector = embedding_client.embed_text(memory_text)
             if trace_id:
@@ -5639,6 +5709,10 @@ def process_memory_agent_job(job_id: int) -> Dict[str, object]:
                 "memory_ids": duplicate_ids,
                 "score": MEMORY_WRITE_DEDUPE_THRESHOLD,
             }
+        if skipped_reasons:
+            unique_reasons = sorted(set(skipped_reasons))
+            mark_memory_agent_job(job_id, "skipped", ",".join(unique_reasons))
+            return {"status": "skipped", "reason": unique_reasons[0]}
         mark_memory_agent_job(job_id, "skipped")
         return {"status": "skipped"}
     except Exception as exc:

@@ -102,8 +102,11 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("retrieve_future_event_memories", app_py)
         self.assertIn("format_future_events_context", app_py)
         self.assertIn('value="event"', admin_html)
+        self.assertIn('value="fact"', admin_html)
         self.assertIn('"event"', admin_js)
+        self.assertIn('"fact"', admin_js)
         self.assertIn('value="event"', memory_html)
+        self.assertIn('value="fact"', memory_html)
         self.assertIn("item.importance_label || item.label", admin_js)
         self.assertIn("20260608_auth_release", admin_html)
 
