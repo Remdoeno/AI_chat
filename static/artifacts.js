@@ -19,6 +19,7 @@ const artifactDialogMeta = document.getElementById("artifactDialogMeta");
 const artifactDialogSummary = document.getElementById("artifactDialogSummary");
 const artifactDialogBody = document.getElementById("artifactDialogBody");
 const artifactDialogLike = document.getElementById("artifactDialogLike");
+const artifactDialogDelete = document.getElementById("artifactDialogDelete");
 const artifactDialogClose = document.getElementById("artifactDialogClose");
 
 const ARTIFACT_PAGE_SIZE = 20;
@@ -223,6 +224,21 @@ function renderLikeButton(item, className = "like-button") {
   return button;
 }
 
+function renderDeleteButton(item, className = "delete-artifact-button") {
+  const button = document.createElement("button");
+  button.className = className;
+  button.type = "button";
+  button.dataset.artifactId = String(item.id);
+  button.textContent = "删";
+  button.title = "删除成果";
+  button.setAttribute("aria-label", `删除成果 ${item.title || item.id}`);
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    deleteArtifact(item.id).catch((error) => setStatus(`删除失败: ${error.message}`));
+  });
+  return button;
+}
+
 function handleLikeClick(event, artifactId) {
   window.clearTimeout(likeClickTimer);
   if (event.detail >= 2) {
@@ -238,6 +254,7 @@ function renderArtifactCard(item) {
   artifactsById.set(Number(item.id), item);
   const article = document.createElement("article");
   article.className = "artifact-card";
+  article.dataset.artifactCardId = String(item.id);
   article.tabIndex = 0;
   article.setAttribute("role", "button");
   article.setAttribute("aria-label", `打开成果 ${item.title || "未命名成果"}`);
@@ -252,6 +269,10 @@ function renderArtifactCard(item) {
   const pill = document.createElement("span");
   pill.className = "type-pill";
   pill.textContent = artifactTypeLabel(item.artifact_type);
+
+  const cardHead = document.createElement("div");
+  cardHead.className = "artifact-card-head";
+  cardHead.append(pill, renderDeleteButton(item, "delete-artifact-button artifact-card-delete"));
 
   const title = document.createElement("h3");
   title.className = "artifact-title";
@@ -271,7 +292,7 @@ function renderArtifactCard(item) {
   footer.className = "artifact-card-footer";
   footer.append(meta, renderLikeButton(item));
 
-  article.append(pill, title, summary, footer);
+  article.append(cardHead, title, summary, footer);
   return article;
 }
 
@@ -326,6 +347,36 @@ async function dislikeArtifact(artifactId) {
   updateLikeCounts(payload.id, payload.likes);
 }
 
+function removeDeletedArtifact(artifactId) {
+  const safeId = Number(artifactId);
+  artifactsById.delete(safeId);
+  document.querySelectorAll(`[data-artifact-card-id="${safeId}"]`).forEach((node) => node.remove());
+  artifactTotal = Math.max(0, artifactTotal - 1);
+  artifactOffset = Math.max(0, Math.min(artifactOffset - 1, artifactTotal));
+  artifactCount.textContent = `${artifactOffset}/${artifactTotal}`;
+  if (activeDialogArtifactId === safeId && artifactDialog.open) {
+    artifactDialog.close();
+  }
+  if (!artifactList.querySelector(".artifact-card")) {
+    clearChildren(artifactList);
+    renderEmpty(artifactList, "暂无成果");
+  }
+  updateLoadMoreButton();
+}
+
+async function deleteArtifact(artifactId) {
+  const item = artifactsById.get(Number(artifactId));
+  const title = item?.title || `#${artifactId}`;
+  if (!window.confirm(`确认删除成果「${title}」？此操作不会删除聊天记录。`)) {
+    return;
+  }
+  const response = await fetch(`/api/artifacts/${artifactId}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`delete ${response.status}`);
+  const payload = await response.json();
+  removeDeletedArtifact(payload.id);
+  setStatus("成果已删除");
+}
+
 function openArtifactDialog(artifactId) {
   const item = artifactsById.get(Number(artifactId));
   if (!item) return;
@@ -339,6 +390,7 @@ function openArtifactDialog(artifactId) {
   setRenderedMarkdown(artifactDialogBody, item.content || "");
   artifactDialogLike.dataset.artifactId = String(item.id);
   artifactDialogLike.innerHTML = `赞 <span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
+  artifactDialogDelete.dataset.artifactId = String(item.id);
   if (typeof artifactDialog.showModal === "function") {
     artifactDialog.showModal();
   } else {
@@ -459,6 +511,12 @@ artifactDialogClose.addEventListener("click", () => artifactDialog.close());
 artifactDialogLike.addEventListener("click", (event) => {
   if (activeDialogArtifactId != null) {
     handleLikeClick(event, activeDialogArtifactId);
+  }
+});
+artifactDialogDelete.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (activeDialogArtifactId != null) {
+    deleteArtifact(activeDialogArtifactId).catch((error) => setStatus(`删除失败: ${error.message}`));
   }
 });
 artifactDialog.addEventListener("close", () => {

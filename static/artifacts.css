@@ -254,6 +254,13 @@ textarea:focus {
   transform: translateY(-1px);
 }
 
+.artifact-card-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
 .artifact-head,
 .run {
   display: grid;
@@ -317,6 +324,33 @@ textarea:focus {
   border-color: rgba(22, 119, 95, 0.5);
   background: rgba(22, 119, 95, 0.12);
   outline: none;
+}
+
+.delete-artifact-button {
+  min-width: 42px;
+  height: 34px;
+  border: 1px solid rgba(180, 35, 24, 0.24);
+  border-radius: 999px;
+  color: #b42318;
+  background: rgba(180, 35, 24, 0.06);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.delete-artifact-button:hover,
+.delete-artifact-button:focus-visible {
+  border-color: rgba(180, 35, 24, 0.46);
+  background: rgba(180, 35, 24, 0.12);
+  outline: none;
+}
+
+.artifact-card-delete {
+  opacity: 0.72;
+}
+
+.artifact-card-delete:hover,
+.artifact-card-delete:focus-visible {
+  opacity: 1;
 }
 
 .type-pill {
@@ -452,9 +486,14 @@ textarea:focus {
   position: sticky;
   bottom: -20px;
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
   padding: 12px 0 0;
   background: linear-gradient(rgba(255, 255, 255, 0), var(--panel) 34%);
+}
+
+.dialog-delete-button {
+  min-width: 66px;
 }
 
 .icon-button {

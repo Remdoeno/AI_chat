@@ -5154,6 +5154,14 @@ def dislike_idle_agent_artifact(artifact_id: int) -> Dict[str, object]:
     return {"id": int(row["id"]), "likes": int(row["likes"])}
 
 
+def delete_idle_agent_artifact(artifact_id: int) -> bool:
+    safe_id = int(artifact_id)
+    with connect_db() as conn:
+        conn.execute("DELETE FROM idle_artifact_vectors WHERE artifact_id = ?", (safe_id,))
+        cursor = conn.execute("DELETE FROM idle_agent_artifacts WHERE id = ?", (safe_id,))
+    return cursor.rowcount > 0
+
+
 def list_idle_agent_runs(status: str = "", limit: int = 100) -> Dict[str, object]:
     clauses = []
     params: List[object] = []
@@ -6474,6 +6482,15 @@ def artifacts_endpoint(
         order=order,
         sort_seed=sort_seed,
     )
+
+
+@app.delete("/api/artifacts/{artifact_id}")
+def delete_artifact_endpoint(artifact_id: int, request: Request) -> Dict[str, object]:
+    init_db()
+    if not delete_idle_agent_artifact(artifact_id):
+        raise HTTPException(status_code=404, detail="artifact not found")
+    record_event(None, "idle_agent_artifact_delete", visitor_ip(request), {"artifact_id": artifact_id})
+    return {"id": artifact_id, "ok": True}
 
 
 @app.post("/api/artifacts/{artifact_id}/like")

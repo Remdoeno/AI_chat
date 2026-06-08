@@ -1860,6 +1860,65 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertEqual(self.app.dislike_idle_agent_artifact(artifact_id)["likes"], 0)
         self.assertEqual(self.app.dislike_idle_agent_artifact(artifact_id)["likes"], 0)
 
+    def test_delete_idle_artifact_removes_artifact_and_vector_but_keeps_run(self):
+        run_id = self.app.create_idle_agent_run("notes", "测试任务", "基于摘要生成")
+        original_embed = self.app.embedding_client.embed_text
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0]
+        try:
+            artifact_id = self.app.save_idle_agent_artifact(
+                run_id=run_id,
+                title="删除测试成果",
+                artifact_type="notes",
+                content="一条用于测试删除成果的数据。",
+            )
+        finally:
+            self.app.embedding_client.embed_text = original_embed
+
+        with self.app.connect_db() as conn:
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) AS c FROM idle_agent_artifacts").fetchone()["c"],
+                1,
+            )
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) AS c FROM idle_artifact_vectors").fetchone()["c"],
+                1,
+            )
+
+        self.assertTrue(self.app.delete_idle_agent_artifact(artifact_id))
+
+        with self.app.connect_db() as conn:
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) AS c FROM idle_agent_artifacts").fetchone()["c"],
+                0,
+            )
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) AS c FROM idle_artifact_vectors").fetchone()["c"],
+                0,
+            )
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) AS c FROM idle_agent_runs WHERE id = ?", (run_id,)).fetchone()["c"],
+                1,
+            )
+        self.assertFalse(self.app.delete_idle_agent_artifact(artifact_id))
+
+    def test_delete_artifact_endpoint_removes_card_data(self):
+        client = TestClient(self.app.app)
+        run_id = self.app.create_idle_agent_run("notes", "测试任务", "基于摘要生成")
+        artifact_id = self.app.save_idle_agent_artifact(
+            run_id=run_id,
+            title="接口删除测试",
+            artifact_type="notes",
+            content="一条用于测试删除接口的数据。",
+        )
+
+        response = client.delete(f"/api/artifacts/{artifact_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"id": artifact_id, "ok": True})
+        payload = self.app.list_idle_agent_artifacts()
+        self.assertEqual(payload["items"], [])
+        self.assertEqual(client.delete(f"/api/artifacts/{artifact_id}").status_code, 404)
+
     def test_idle_artifact_save_creates_vector_index(self):
         run_id = self.app.create_idle_agent_run("worldbuilding", "测试任务", "基于摘要生成")
         original_embed = self.app.embedding_client.embed_text
