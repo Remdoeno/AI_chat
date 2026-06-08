@@ -135,6 +135,8 @@ WEB_SEARCH_PLANNER_MAX_QUERIES = int(os.environ.get("QWEN_WEB_SEARCH_PLANNER_MAX
 WEB_SEARCH_PLANNER_CONTEXT_MESSAGES = int(os.environ.get("QWEN_WEB_SEARCH_PLANNER_CONTEXT_MESSAGES", "10"))
 WEB_SEARCH_PLANNER_CONTEXT_CHARS = int(os.environ.get("QWEN_WEB_SEARCH_PLANNER_CONTEXT_CHARS", "2600"))
 WEB_SEARCH_PLANNER_TIMEOUT = float(os.environ.get("QWEN_WEB_SEARCH_PLANNER_TIMEOUT", "45"))
+MEMORY_PLANNER_CONTEXT_MESSAGES = int(os.environ.get("QWEN_MEMORY_PLANNER_CONTEXT_MESSAGES", "10"))
+MEMORY_PLANNER_CONTEXT_CHARS = int(os.environ.get("QWEN_MEMORY_PLANNER_CONTEXT_CHARS", "2200"))
 MEMORY_QUERY_PLANNER_TIMEOUT = float(os.environ.get("QWEN_MEMORY_QUERY_PLANNER_TIMEOUT", "25"))
 WEB_SEARCH_MAX_RESULTS = WEB_SEARCH_MAX_CANDIDATES
 WEB_SEARCH_READ_PAGES = WEB_SEARCH_MAX_READ_PAGES
@@ -940,24 +942,38 @@ def fallback_memory_retrieval_query(user_message: str) -> str:
     return query or clean_search_text(text, 120)
 
 
+def build_memory_retrieval_query_prompt(
+    user_message: str,
+    context_messages: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    context = format_search_planner_context(
+        context_messages,
+        max_chars=MEMORY_PLANNER_CONTEXT_CHARS,
+    )
+    context_block = f"{context}\n\n" if context else ""
+    return (
+        f"{current_date_context()}\n\n"
+        f"{context_block}"
+        "请为下面问题生成长期记忆检索词。"
+        "检索词应描述要找的记忆类型，而不是照抄用户原话。"
+        "如果当前问题依赖上文，例如“他、这件事、刚才那个、那我、它、这个”等，"
+        "必须结合最近会话上下文补全要检索的用户身份、偏好、事件、称呼、作品或规则。\n\n"
+        f"用户问题：{user_message}"
+    )
+
+
 def build_memory_retrieval_query(
     user_message: str,
     session_id: str = "",
     visitor_ip: str = "unknown",
     analysis_trace_id: str = "",
+    context_messages: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     fallback = fallback_memory_retrieval_query(user_message)
+    user_prompt = build_memory_retrieval_query_prompt(user_message, context_messages=context_messages)
     planner_messages = [
         {"role": "system", "content": MEMORY_QUERY_PLANNER_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"{current_date_context()}\n\n"
-                "请为下面问题生成长期记忆检索词。"
-                "检索词应描述要找的记忆类型，而不是照抄用户原话。\n\n"
-                f"用户问题：{user_message}"
-            ),
-        },
+        {"role": "user", "content": user_prompt},
     ]
     started = time.perf_counter()
     http_client = httpx.Client(trust_env=False, timeout=MEMORY_QUERY_PLANNER_TIMEOUT)
@@ -1055,24 +1071,38 @@ def fallback_memory_gate(user_message: str) -> bool:
     return any(term in text for term in explicit_terms)
 
 
+def build_memory_gate_user_prompt(
+    user_message: str,
+    context_messages: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    context = format_search_planner_context(
+        context_messages,
+        max_chars=MEMORY_PLANNER_CONTEXT_CHARS,
+    )
+    context_block = f"{context}\n\n" if context else ""
+    return (
+        f"{current_date_context()}\n\n"
+        f"{context_block}"
+        "请判断下面用户消息是否需要调用长期记忆。"
+        "如果当前消息承接上文，包含“他、这件事、那我、刚才那个、它、这个”等指代，"
+        "必须结合最近会话上下文判断是否需要回忆；不要只看当前一句。\n\n"
+        f"用户消息：{user_message}"
+    )
+
+
 def should_use_memory_recall(
     user_message: str,
     session_id: str = "",
     visitor_ip: str = "unknown",
     analysis_trace_id: str = "",
+    context_messages: Optional[List[Dict[str, str]]] = None,
 ) -> bool:
     if is_active_recall_request(user_message):
         return True
     fallback = fallback_memory_gate(user_message)
     messages = [
         {"role": "system", "content": MEMORY_GATE_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"{current_date_context()}\n\n"
-                f"用户消息：{user_message}"
-            ),
-        },
+        {"role": "user", "content": build_memory_gate_user_prompt(user_message, context_messages=context_messages)},
     ]
     started = time.perf_counter()
     http_client = httpx.Client(trust_env=False, timeout=MEMORY_GATE_TIMEOUT)
@@ -2818,7 +2848,7 @@ def load_messages(session_id: str) -> List[Dict[str, str]]:
     return [{"role": row["role"], "content": row["content"]} for row in rows]
 
 
-def load_recent_search_planner_messages(
+def load_recent_planner_context_messages(
     session_id: str,
     limit: int = WEB_SEARCH_PLANNER_CONTEXT_MESSAGES,
 ) -> List[Dict[str, str]]:
@@ -2841,6 +2871,13 @@ def load_recent_search_planner_messages(
             (session_id, max_rows),
         ).fetchall()
     return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+
+
+def load_recent_search_planner_messages(
+    session_id: str,
+    limit: int = WEB_SEARCH_PLANNER_CONTEXT_MESSAGES,
+) -> List[Dict[str, str]]:
+    return load_recent_planner_context_messages(session_id, limit=limit)
 
 
 def model_content_for_message(content: str, metadata: object) -> object:
@@ -5824,6 +5861,7 @@ def build_system_prompt(
     analysis_trace_id: str = "",
     memory_debug: Optional[Dict[str, object]] = None,
     precomputed_memory_gate: Optional[bool] = None,
+    planner_context_messages: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     memory_context = ""
     artifact_context = ""
@@ -5833,6 +5871,11 @@ def build_system_prompt(
     timeline_events_context = ""
     date_context = current_date_context()
     if not web_search_context:
+        if planner_context_messages is None:
+            planner_context_messages = load_recent_planner_context_messages(
+                session_id,
+                limit=MEMORY_PLANNER_CONTEXT_MESSAGES,
+            )
         timeline_events_context = build_regular_timeline_events_context(
             user_message,
             visitor_ip,
@@ -5849,6 +5892,7 @@ def build_system_prompt(
                     session_id=session_id,
                     visitor_ip=visitor_ip,
                     analysis_trace_id=analysis_trace_id,
+                    context_messages=planner_context_messages,
                 )
             else:
                 use_memory = bool(precomputed_memory_gate)
@@ -5860,6 +5904,7 @@ def build_system_prompt(
                     session_id=session_id,
                     visitor_ip=visitor_ip,
                     analysis_trace_id=analysis_trace_id,
+                    context_messages=planner_context_messages,
                 )
                 embedding_started = time.perf_counter()
                 query_vector = embedding_client.embed_text(retrieval_query)
@@ -7020,7 +7065,12 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
             else:
                 memory_debug: Dict[str, object] = {}
                 precomputed_memory_gate: Optional[bool] = None
+                memory_planner_context_messages: Optional[List[Dict[str, str]]] = None
                 if not payload.web_search:
+                    memory_planner_context_messages = load_recent_planner_context_messages(
+                        session_id,
+                        limit=MEMORY_PLANNER_CONTEXT_MESSAGES,
+                    )
                     yield format_sse(
                         "memory",
                         {
@@ -7034,6 +7084,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                         session_id=session_id,
                         visitor_ip=ip,
                         analysis_trace_id=analysis_trace_id,
+                        context_messages=memory_planner_context_messages,
                     )
                     memory_debug["memory_gate"] = "run" if precomputed_memory_gate else "skipped"
                 if not payload.web_search and precomputed_memory_gate:
@@ -7064,6 +7115,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                     analysis_trace_id=analysis_trace_id,
                     memory_debug=memory_debug,
                     precomputed_memory_gate=precomputed_memory_gate,
+                    planner_context_messages=memory_planner_context_messages,
                 )
                 if not payload.web_search and precomputed_memory_gate:
                     candidate_count = int(memory_debug.get("candidate_count") or 0)

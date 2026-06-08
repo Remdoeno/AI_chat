@@ -301,6 +301,30 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("具体引用了几篇？他是第几作者？", prompt)
         self.assertIn("必须结合最近会话上下文补全", prompt)
 
+    def test_memory_planners_use_recent_session_context_for_followup(self):
+        session_id = self.app.create_session("device:memory-context", "agent-memory-context")
+        self.app.add_message(session_id, "user", "我刚才说过我的英雄身份吗？")
+        self.app.add_message(session_id, "assistant", "你说自己是绿手侠。")
+        self.app.add_message(session_id, "user", "那我最喜欢的技能是什么？")
+
+        context_messages = self.app.load_recent_planner_context_messages(session_id)
+        query_prompt = self.app.build_memory_retrieval_query_prompt(
+            "那我最喜欢的技能是什么？",
+            context_messages=context_messages,
+        )
+        gate_prompt = self.app.build_memory_gate_user_prompt(
+            "那我最喜欢的技能是什么？",
+            context_messages=context_messages,
+        )
+
+        self.assertIn("最近会话上下文", query_prompt)
+        self.assertIn("绿手侠", query_prompt)
+        self.assertIn("那我最喜欢的技能是什么？", query_prompt)
+        self.assertIn("必须结合最近会话上下文补全", query_prompt)
+        self.assertIn("最近会话上下文", gate_prompt)
+        self.assertIn("绿手侠", gate_prompt)
+        self.assertIn("承接上文", gate_prompt)
+
     def test_perform_web_search_reuses_existing_plan(self):
         calls = []
         original_build_plan = self.app.build_search_plan
@@ -3086,6 +3110,49 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("当前真实日期", prompt)
         self.assertEqual(captured["embedding_input"], "用户 食物 偏好 喜欢")
         self.assertEqual(captured["query_text"], "用户 食物 偏好 喜欢")
+
+    def test_build_system_prompt_passes_recent_context_to_memory_planners(self):
+        identity = "device:memory-chain"
+        session_id = self.app.create_session(identity, "agent-memory-chain")
+        self.app.add_message(session_id, "user", "我刚才说过我的英雄身份吗？")
+        self.app.add_message(session_id, "assistant", "你说自己是绿手侠。")
+        self.app.add_message(session_id, "user", "那我最喜欢的技能是什么？")
+        captured = {}
+
+        original_gate = self.app.should_use_memory_recall
+        original_planner = self.app.build_memory_retrieval_query
+        original_embed = self.app.embedding_client.embed_text
+        original_recall_pool = self.app.retrieve_curated_memory_recall_pool
+        original_artifacts = self.app.retrieve_idle_artifacts
+
+        def fake_gate(*_args, **kwargs):
+            captured["gate_context"] = kwargs.get("context_messages")
+            return True
+
+        def fake_planner(*_args, **kwargs):
+            captured["query_context"] = kwargs.get("context_messages")
+            return "用户 英雄身份 绿手侠 技能 偏好"
+
+        self.app.should_use_memory_recall = fake_gate
+        self.app.build_memory_retrieval_query = fake_planner
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0]
+        self.app.retrieve_curated_memory_recall_pool = lambda *_args, **_kwargs: []
+        self.app.retrieve_idle_artifacts = lambda _query_vector: []
+        try:
+            prompt = self.app.build_system_prompt(session_id, "那我最喜欢的技能是什么？", identity)
+        finally:
+            self.app.should_use_memory_recall = original_gate
+            self.app.build_memory_retrieval_query = original_planner
+            self.app.embedding_client.embed_text = original_embed
+            self.app.retrieve_curated_memory_recall_pool = original_recall_pool
+            self.app.retrieve_idle_artifacts = original_artifacts
+
+        gate_text = json.dumps(captured["gate_context"], ensure_ascii=False)
+        query_text = json.dumps(captured["query_context"], ensure_ascii=False)
+        self.assertIn("当前真实日期", prompt)
+        self.assertIn("绿手侠", gate_text)
+        self.assertIn("绿手侠", query_text)
+        self.assertIn("那我最喜欢的技能是什么？", query_text)
 
     def test_analysis_background_endpoint_requires_login_and_lists_idle_work(self):
         client = TestClient(self.app.app)
