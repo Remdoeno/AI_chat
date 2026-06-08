@@ -40,6 +40,7 @@ const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const IMAGE_COMPRESSION_NOTICE_BYTES = 2 * 1024 * 1024;
 const PREVIOUS_SESSION_ARM_MS = 3600;
 const PREVIOUS_SESSION_MIN_RETRY_MS = 1000;
+const PREVIOUS_SESSION_TOP_SETTLE_MS = 420;
 const PREVIOUS_SESSION_PULL_THRESHOLD = 72;
 const IMAGE_EXTENSION_MIME = {
   avif: "image/avif",
@@ -73,6 +74,7 @@ let activeSearchQuery = "";
 let isMessageComposing = false;
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
 let previousSessionArmedAt = 0;
+let previousSessionTopReadyAt = Date.now();
 let isLoadingPreviousSession = false;
 let hasMorePreviousSessions = true;
 let touchStartY = 0;
@@ -277,11 +279,17 @@ function isAtMessagesTop() {
   return messagesEl.scrollTop <= 4;
 }
 
-function removeHistoryLoadIndicator() {
+function removeHistoryLoadIndicator(animated = false) {
   const current = messagesEl.querySelector(".history-load");
-  if (current) {
-    current.remove();
+  if (!current) {
+    return;
   }
+  if (!animated) {
+    current.remove();
+    return;
+  }
+  current.classList.add("is-hiding");
+  setTimeout(() => current.remove(), 240);
 }
 
 function setHistoryLoadState(state, text) {
@@ -290,9 +298,12 @@ function setHistoryLoadState(state, text) {
     return;
   }
   const indicator = document.createElement("div");
-  indicator.className = `history-load is-${state}`;
+  indicator.className = `history-load is-${state} is-entering`;
   indicator.textContent = text;
   messagesEl.prepend(indicator);
+  requestAnimationFrame(() => {
+    indicator.classList.remove("is-entering");
+  });
 }
 
 function escapeHtml(text) {
@@ -495,9 +506,33 @@ function clearMessages() {
 
 function resetPreviousSessionLoadState() {
   previousSessionArmedAt = 0;
+  previousSessionTopReadyAt = Date.now();
   isLoadingPreviousSession = false;
   hasMorePreviousSessions = true;
   removeHistoryLoadIndicator();
+}
+
+function resetPreviousSessionArmFromScroll() {
+  if (!previousSessionArmedAt) {
+    return;
+  }
+  previousSessionArmedAt = 0;
+  removeHistoryLoadIndicator(true);
+}
+
+function handleMessagesScroll() {
+  if (!isAtMessagesTop()) {
+    previousSessionTopReadyAt = 0;
+    resetPreviousSessionArmFromScroll();
+    return;
+  }
+  if (!previousSessionTopReadyAt) {
+    previousSessionTopReadyAt = Date.now() + PREVIOUS_SESSION_TOP_SETTLE_MS;
+  }
+}
+
+function isPreviousSessionTopReady() {
+  return isAtMessagesTop() && previousSessionTopReadyAt > 0 && Date.now() >= previousSessionTopReadyAt;
 }
 
 function prependHistoryMessages(messages) {
@@ -541,7 +576,7 @@ async function loadPreviousSessionContext() {
     if (!payload.loaded) {
       setHistoryLoadState("done", "已经到第一段对话了");
       setStatus("已到最早对话");
-      setTimeout(removeHistoryLoadIndicator, 1400);
+      setTimeout(() => removeHistoryLoadIndicator(true), 1400);
       return;
     }
 
@@ -550,7 +585,7 @@ async function loadPreviousSessionContext() {
   } catch (error) {
     setHistoryLoadState("error", `加载失败：${error.message}`);
     setStatus("历史加载失败");
-    setTimeout(removeHistoryLoadIndicator, 1800);
+    setTimeout(() => removeHistoryLoadIndicator(true), 1800);
   } finally {
     isLoadingPreviousSession = false;
     previousSessionArmedAt = 0;
@@ -559,6 +594,10 @@ async function loadPreviousSessionContext() {
 
 function armOrLoadPreviousSession() {
   if (activeController || isLoadingPreviousSession || !hasMorePreviousSessions || !sessionId) {
+    return;
+  }
+  if (!isPreviousSessionTopReady()) {
+    handleMessagesScroll();
     return;
   }
 
@@ -581,7 +620,7 @@ function armOrLoadPreviousSession() {
   setTimeout(() => {
     if (Date.now() - previousSessionArmedAt >= PREVIOUS_SESSION_ARM_MS && !isLoadingPreviousSession) {
       previousSessionArmedAt = 0;
-      removeHistoryLoadIndicator();
+      removeHistoryLoadIndicator(true);
     }
   }, PREVIOUS_SESSION_ARM_MS + 80);
 }
@@ -1162,6 +1201,7 @@ webSearchButton.addEventListener("click", () => {
   setStatus(webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭");
   messageInput.focus();
 });
+messagesEl.addEventListener("scroll", handleMessagesScroll, { passive: true });
 messagesEl.addEventListener("wheel", (event) => {
   if (event.deltaY < -24 && isAtMessagesTop()) {
     event.preventDefault();
