@@ -41,6 +41,7 @@ const IMAGE_COMPRESSION_NOTICE_BYTES = 2 * 1024 * 1024;
 const PREVIOUS_SESSION_ARM_MS = 3600;
 const PREVIOUS_SESSION_MIN_RETRY_MS = 800;
 const PREVIOUS_SESSION_PULL_THRESHOLD = 72;
+const PREVIOUS_SESSION_DESKTOP_TOP_BUFFER = 96;
 const IMAGE_EXTENSION_MIME = {
   avif: "image/avif",
   bmp: "image/bmp",
@@ -275,6 +276,10 @@ function scrollToBottom() {
 
 function isAtMessagesTop() {
   return messagesEl.scrollTop <= 4;
+}
+
+function isNearMessagesTop() {
+  return messagesEl.scrollTop <= PREVIOUS_SESSION_DESKTOP_TOP_BUFFER;
 }
 
 function removeHistoryLoadIndicator(animated = false) {
@@ -632,6 +637,15 @@ function armOrLoadPreviousSession() {
   }
 
   enterPreviousSessionArmed();
+}
+
+function handleDesktopPreviousSessionWheel(event) {
+  if (event.deltaY >= -24 || !isNearMessagesTop()) {
+    return;
+  }
+  event.preventDefault();
+  messagesEl.scrollTop = 0;
+  armOrLoadPreviousSession();
 }
 
 function renderAttachmentPreview() {
@@ -1211,12 +1225,7 @@ webSearchButton.addEventListener("click", () => {
   messageInput.focus();
 });
 messagesEl.addEventListener("scroll", handleMessagesScroll, { passive: true });
-messagesEl.addEventListener("wheel", (event) => {
-  if (event.deltaY < -24 && isAtMessagesTop()) {
-    event.preventDefault();
-    armOrLoadPreviousSession();
-  }
-}, { passive: false });
+messagesEl.addEventListener("wheel", handleDesktopPreviousSessionWheel, { passive: false });
 messagesEl.addEventListener("touchstart", (event) => {
   if (event.touches.length !== 1) {
     return;
