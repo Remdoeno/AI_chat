@@ -89,7 +89,7 @@ MEMORY_WRITE_DEDUPE_THRESHOLD = float(os.environ.get("QWEN_MEMORY_WRITE_DEDUPE_T
 IDLE_AGENT_MIN_IDLE_SECONDS = float(os.environ.get("QWEN_IDLE_AGENT_MIN_IDLE_SECONDS", "90"))
 IDLE_AGENT_LOOP_SECONDS = float(os.environ.get("QWEN_IDLE_AGENT_LOOP_SECONDS", "30"))
 IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS = float(os.environ.get("QWEN_IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS", "300"))
-IDLE_AGENT_MAX_TOKENS = int(os.environ.get("QWEN_IDLE_AGENT_MAX_TOKENS", "1200"))
+IDLE_AGENT_MAX_TOKENS = int(os.environ.get("QWEN_IDLE_AGENT_MAX_TOKENS", "2400"))
 IDLE_AGENT_TEMPERATURE = float(os.environ.get("QWEN_IDLE_AGENT_TEMPERATURE", "1.0"))
 IDLE_AGENT_TOP_P = float(os.environ.get("QWEN_IDLE_AGENT_TOP_P", "0.95"))
 IDLE_ARTIFACT_TOP_K = int(os.environ.get("QWEN_IDLE_ARTIFACT_TOP_K", "2"))
@@ -221,6 +221,8 @@ IDLE_AGENT_SYSTEM_PROMPT = (
     "你可以写短篇小说、诗歌、剧本、世界观、角色档案、自我背景知识、设定集或研究札记。"
     "灵感来自已整理长期记忆和用户偏好，但不要复述或泄露原始聊天。"
     "保持足够自由度，产出应该像一个自主系统在空闲时留下的作品。"
+    "content 控制在约 800 到 1400 个中文字，宁可短而完整，也不要写到 JSON 被截断。"
+    "必须输出完整、可被 json.loads 解析的 JSON，不要输出 Markdown 代码块、注释或 JSON 以外的文字。"
     "只输出 JSON：{\"task_type\":\"novel|poetry|script|worldbuilding|persona|notes|other\","
     "\"title\":\"...\",\"content\":\"...\",\"series_title\":\"...\","
     "\"episode_index\":数字或null,\"summary\":\"...\"}。"
@@ -1465,7 +1467,7 @@ def ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, c
 
 
 def normalize_artifact_type(artifact_type: str, title: str = "", content: str = "") -> str:
-    raw_type = normalize_hero_terms(artifact_type).strip().lower()
+    raw_type = normalize_idle_artifact_terms(artifact_type).strip().lower()
     text = f"{title}\n{content}"
     if raw_type in {"poem", "poetry", "诗", "诗歌", "七言绝句", "五言绝句"}:
         return "poetry"
@@ -4305,11 +4307,11 @@ def artifact_memory_text(
     episode_index: Optional[int] = None,
     summary: str = "",
 ) -> str:
-    clean_title = normalize_hero_terms(title).strip()
-    clean_type = normalize_hero_terms(artifact_type).strip()
-    clean_content = normalize_hero_terms(content)
-    clean_summary = normalize_hero_terms(summary)
-    series = normalize_hero_terms(series_title).strip()
+    clean_title = normalize_idle_artifact_terms(title).strip()
+    clean_type = normalize_idle_artifact_terms(artifact_type).strip()
+    clean_content = normalize_idle_artifact_terms(content)
+    clean_summary = normalize_idle_artifact_terms(summary)
+    series = normalize_idle_artifact_terms(series_title).strip()
     episode_text = f"第 {int(episode_index)} 集" if episode_index is not None else ""
     short_summary = clean_summary.strip() or compact_idle_artifact_content(clean_content, 220)
     parts = [
@@ -4365,10 +4367,10 @@ def save_idle_agent_artifact(
     episode_index: Optional[int] = None,
     summary: str = "",
 ) -> int:
-    clean_title = normalize_hero_terms(title)
-    clean_series = normalize_hero_terms(series_title)
-    clean_summary = normalize_hero_terms(summary)
-    text = normalize_hero_terms(content).strip()
+    clean_title = normalize_idle_artifact_terms(title)
+    clean_series = normalize_idle_artifact_terms(series_title)
+    clean_summary = normalize_idle_artifact_terms(summary)
+    text = normalize_idle_artifact_terms(content).strip()
     clean_type = normalize_artifact_type(artifact_type, clean_title, text)
     if not text:
         raise ValueError("idle artifact content is empty")
@@ -4764,7 +4766,7 @@ def build_idle_agent_prompt() -> Tuple[str, str]:
 
 
 def fallback_idle_agent_payload(text: str) -> Dict[str, object]:
-    cleaned = normalize_hero_terms(text).strip()
+    cleaned = normalize_idle_artifact_terms(text).strip()
     return {
         "task_type": "notes",
         "title": "未命名成果",
