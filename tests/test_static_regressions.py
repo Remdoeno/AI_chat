@@ -58,6 +58,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("cached_opening", js)
         self.assertIn("hidden_user", js)
         self.assertIn("openingPlaceholder", js)
+        self.assertNotIn("早，我在。今天有没有会议", js)
         self.assertIn("hasReceivedToken", js)
         self.assertIn("开场生成中", js)
         self.assertIn("isMessageComposing", js)

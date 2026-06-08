@@ -506,7 +506,6 @@ async function startOpeningPrompt(payload, openingPrompt = true) {
     showUser: false,
     maxTokens: 512,
     cachedOpening: true,
-    openingPlaceholder: "早，我在。今天有没有会议、截止时间、日程，或者需要我记住并提醒你的事？",
   });
 }
 
