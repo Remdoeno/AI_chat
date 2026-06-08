@@ -2533,6 +2533,76 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn(payload["opening_source"], {"prepared_memory", "cached_memory"})
         self.assertIn("要开心呐", payload["opening_prompt"])
 
+    def test_deleting_last_opening_memory_clears_cached_opening_prompt(self):
+        identity = "device:dev_clearopen0123"
+        old_session = self.app.create_session(identity, "agent-clear-opening")
+        first = self.app.add_message(old_session, "user", "我是绿手侠")
+        memory_id = self.app.save_curated_memory(
+            old_session,
+            first,
+            first,
+            "用户自称是绿手侠。",
+            importance_label="identity",
+            confidence=0.95,
+        )
+        cached = self.app.refresh_cached_opening_prompt(identity)
+        self.assertIn("绿手侠", cached)
+
+        deleted = self.app.delete_admin_memory(memory_id)
+
+        self.assertTrue(deleted)
+        self.assertNotIn("绿手侠", self.app.get_cached_opening_prompt(identity))
+
+    def test_regular_chat_completion_refreshes_cached_opening_prompt(self):
+        client = TestClient(self.app.app)
+        identity = "device:dev_refreshopen01"
+        session_id = self.app.create_session(identity, "agent-refresh-opening")
+        self.app.set_app_setting(
+            self.app.opening_prompt_cache_key(identity),
+            "旧缓存：不要保留这句话。",
+        )
+        calls = []
+
+        original_model = self.app.iter_model_deltas
+        original_worker = self.app.start_memory_agent_worker
+        original_refresh = self.app.refresh_cached_opening_prompt
+        self.app.iter_model_deltas = lambda *_args, **_kwargs: iter(["收到。"])
+        self.app.start_memory_agent_worker = lambda: None
+
+        def tracked_refresh(visitor_ip):
+            calls.append(visitor_ip)
+            self.app.set_app_setting(
+                self.app.opening_prompt_cache_key(visitor_ip),
+                "新缓存：聊天结束后刷新。",
+            )
+            return "新缓存：聊天结束后刷新。"
+
+        self.app.refresh_cached_opening_prompt = tracked_refresh
+        try:
+            with client.stream(
+                "POST",
+                "/api/chat/stream",
+                json={
+                    "session_id": session_id,
+                    "message": "普通聊天",
+                    "max_tokens": 16,
+                    "temperature": 0.75,
+                    "top_p": 0.95,
+                },
+                headers={"X-Qwen-Device-Id": "dev_refreshopen01"},
+            ) as response:
+                body = "".join(response.iter_text())
+        finally:
+            self.app.iter_model_deltas = original_model
+            self.app.start_memory_agent_worker = original_worker
+            self.app.refresh_cached_opening_prompt = original_refresh
+            self.app.release_generation(session_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("收到", body)
+        self.assertEqual(calls, [identity])
+        self.assertIn("新缓存", self.app.get_cached_opening_prompt(identity))
+
     def test_opening_rule_is_not_injected_into_regular_system_prompt(self):
         identity = "device:dev_openonlyrule01"
         old_session = self.app.create_session(identity, "agent-opening-only-rule")

@@ -1860,6 +1860,11 @@ def set_app_setting(key: str, value: str) -> None:
         )
 
 
+def delete_app_setting(key: str) -> None:
+    with connect_db() as conn:
+        conn.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+
+
 def get_idle_agent_custom_prompt() -> str:
     return get_app_setting("idle_agent_custom_prompt", IDLE_AGENT_CUSTOM_PROMPT_DEFAULT)
 
@@ -2636,6 +2641,7 @@ def refresh_cached_opening_prompt(visitor_ip: str) -> str:
     future_events = retrieve_future_event_memories(ip)
     memory_count = count_device_curated_memories(ip)
     if not profile_memories and not opening_memories and not future_events and memory_count <= 0:
+        delete_app_setting(opening_prompt_cache_key(ip))
         return ""
 
     if profile_memories:
@@ -7292,10 +7298,14 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                     },
                 )
             record_event(session_id, "message_assistant", ip, {"chars": len(answer)})
-            yield format_sse("done", {"message_id": assistant_id, "content": answer})
             try:
                 if payload.hidden_user:
+                    yield format_sse("done", {"message_id": assistant_id, "content": answer})
                     return
+                try:
+                    refresh_cached_opening_prompt(ip)
+                except Exception as exc:
+                    record_event(session_id, "opening_cache_refresh_error", ip, {"error": str(exc)})
                 job_id = enqueue_memory_agent_job(
                     session_id,
                     user_message_id,
@@ -7319,6 +7329,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                 queued_memory_job = True
             except Exception as exc:
                 record_event(session_id, "memory_agent_enqueue_error", ip, {"error": str(exc)})
+            yield format_sse("done", {"message_id": assistant_id, "content": answer})
         except Exception as exc:
             message_text = f"模型服务调用失败: {exc}"
             add_message(session_id, "assistant", message_text, status="failed")
