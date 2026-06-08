@@ -42,8 +42,8 @@ class StaticRegressionTests(unittest.TestCase):
 
         self.assertIn("searchActivity", html)
         self.assertIn("searchActivityList", html)
-        self.assertIn("20260608_mobile_chrome_fix", html)
-        self.assertIn("/static/app.js?v=20260608_no_opening_placeholder_flash", html)
+        self.assertIn("20260608_session_continuation_v11", html)
+        self.assertIn("/static/app.js?v=20260608_session_continuation_v11", html)
         self.assertIn("searchActivityList", js)
         self.assertIn("搜索：", js)
         self.assertNotIn("正在访问", js)
@@ -130,7 +130,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("MODEL_API_KEY", app_py)
         self.assertIn("QWEN_IDLE_AGENT_ENABLED", app_py)
         self.assertIn("QWEN_EMBEDDING_API_KEY", embedding_py)
-        self.assertIn("旺财1.0", readme)
+        self.assertIn("旺财1.1", readme)
         self.assertIn("家庭本地部署", readme)
         self.assertIn("QWEN_MODEL_BASE_URL", readme)
         self.assertIn("QWEN_MODEL_API_KEY", readme)
@@ -312,7 +312,7 @@ class StaticRegressionTests(unittest.TestCase):
         css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn("20260608_mobile_chrome_fix", html)
+        self.assertIn("20260608_session_continuation_v11", html)
         self.assertIn("height: 100dvh", css)
         self.assertIn("flex-wrap: wrap", css)
         self.assertIn("position: static", css)
@@ -324,6 +324,22 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn('"preview preview"', css)
         self.assertIn(".composer-tools", css)
         self.assertIn("grid-area: tools", css)
+
+    def test_chat_supports_scroll_loading_previous_sessions(self):
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
+        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn("旺财1.1 Ai助手聊天", html)
+        self.assertIn("PREVIOUS_SESSION_ARM_MS", js)
+        self.assertIn("loadPreviousSessionContext", js)
+        self.assertIn("/load-previous", js)
+        self.assertIn("touchmove", js)
+        self.assertIn("wheel", js)
+        self.assertIn("history-load", css)
+        self.assertIn("@app.post(\"/api/sessions/{session_id}/load-previous\")", app_py)
+        self.assertIn("session_context_links", app_py)
 
     def test_index_exposes_public_analysis_button(self):
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")

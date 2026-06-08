@@ -151,6 +151,36 @@ h1 {
   padding: 32px clamp(18px, 4vw, 56px);
 }
 
+.history-load {
+  margin: 0 auto 14px;
+  max-width: 360px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(24, 36, 50, 0.04);
+}
+
+.history-load.is-armed {
+  border-color: rgba(31, 132, 103, 0.26);
+  color: var(--green);
+  transform: translateY(4px);
+}
+
+.history-load.is-loading {
+  border-color: rgba(31, 132, 103, 0.35);
+  color: var(--green);
+}
+
+.history-load.is-error {
+  border-color: rgba(194, 47, 47, 0.3);
+  color: var(--danger);
+}
+
 .message {
   display: grid;
   grid-template-columns: 72px minmax(0, 680px) auto;

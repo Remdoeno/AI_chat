@@ -38,6 +38,8 @@ const DEFAULT_SAMPLING_SETTINGS = {
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const IMAGE_COMPRESSION_NOTICE_BYTES = 2 * 1024 * 1024;
+const PREVIOUS_SESSION_ARM_MS = 2200;
+const PREVIOUS_SESSION_PULL_THRESHOLD = 72;
 const IMAGE_EXTENSION_MIME = {
   avif: "image/avif",
   bmp: "image/bmp",
@@ -69,6 +71,11 @@ let webSearchEnabled = false;
 let activeSearchQuery = "";
 let isMessageComposing = false;
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
+let previousSessionArmedAt = 0;
+let isLoadingPreviousSession = false;
+let hasMorePreviousSessions = true;
+let touchStartY = 0;
+let touchPullDistance = 0;
 
 function isUsableDeviceId(value) {
   return /^[A-Za-z0-9_-]{12,96}$/.test(String(value || "").trim());
@@ -265,6 +272,28 @@ function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+function isAtMessagesTop() {
+  return messagesEl.scrollTop <= 4;
+}
+
+function removeHistoryLoadIndicator() {
+  const current = messagesEl.querySelector(".history-load");
+  if (current) {
+    current.remove();
+  }
+}
+
+function setHistoryLoadState(state, text) {
+  removeHistoryLoadIndicator();
+  if (!text) {
+    return;
+  }
+  const indicator = document.createElement("div");
+  indicator.className = `history-load is-${state}`;
+  indicator.textContent = text;
+  messagesEl.prepend(indicator);
+}
+
 function escapeHtml(text) {
   return String(text || "")
     .replace(/&/g, "&amp;")
@@ -392,7 +421,7 @@ function getRawMarkdown(element) {
   return element.dataset.rawMarkdown || element.textContent || "";
 }
 
-function createBubble(role, content = "", attachments = []) {
+function createBubble(role, content = "", attachments = [], options = {}) {
   const item = document.createElement("article");
   item.className = `message ${role}`;
 
@@ -428,8 +457,14 @@ function createBubble(role, content = "", attachments = []) {
   }
 
   item.append(label, body);
-  messagesEl.appendChild(item);
-  scrollToBottom();
+  if (options.prepend) {
+    messagesEl.prepend(item);
+  } else {
+    messagesEl.appendChild(item);
+    if (options.scroll !== false) {
+      scrollToBottom();
+    }
+  }
   return body;
 }
 
@@ -455,6 +490,92 @@ function removeInlineStopButton() {
 
 function clearMessages() {
   messagesEl.replaceChildren();
+}
+
+function resetPreviousSessionLoadState() {
+  previousSessionArmedAt = 0;
+  isLoadingPreviousSession = false;
+  hasMorePreviousSessions = true;
+  removeHistoryLoadIndicator();
+}
+
+function prependHistoryMessages(messages) {
+  const history = Array.isArray(messages) ? messages : [];
+  if (!history.length) {
+    return;
+  }
+
+  removeHistoryLoadIndicator();
+  const previousHeight = messagesEl.scrollHeight;
+  const previousTop = messagesEl.scrollTop;
+  for (const message of [...history].reverse()) {
+    createBubble(message.role === "assistant" ? "assistant" : "user", message.content || "", [], {
+      prepend: true,
+      scroll: false,
+    });
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight - previousHeight + previousTop;
+}
+
+async function loadPreviousSessionContext() {
+  if (!sessionId || activeController || isLoadingPreviousSession || !hasMorePreviousSessions) {
+    return;
+  }
+
+  isLoadingPreviousSession = true;
+  setHistoryLoadState("loading", "正在加载上一段对话...");
+  setStatus("加载历史中");
+
+  try {
+    const response = await fetch(`/api/sessions/${sessionId}/load-previous`, {
+      method: "POST",
+      headers: deviceIdentityHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const payload = await response.json();
+    hasMorePreviousSessions = Boolean(payload.has_more);
+
+    if (!payload.loaded) {
+      setHistoryLoadState("done", "已经到第一段对话了");
+      setStatus("已到最早对话");
+      setTimeout(removeHistoryLoadIndicator, 1400);
+      return;
+    }
+
+    prependHistoryMessages(payload.messages || []);
+    setStatus(hasMorePreviousSessions ? "已加载上一段对话" : "已加载到最早对话");
+  } catch (error) {
+    setHistoryLoadState("error", `加载失败：${error.message}`);
+    setStatus("历史加载失败");
+    setTimeout(removeHistoryLoadIndicator, 1800);
+  } finally {
+    isLoadingPreviousSession = false;
+    previousSessionArmedAt = 0;
+  }
+}
+
+function armOrLoadPreviousSession() {
+  if (activeController || isLoadingPreviousSession || !hasMorePreviousSessions || !sessionId) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - previousSessionArmedAt <= PREVIOUS_SESSION_ARM_MS) {
+    previousSessionArmedAt = 0;
+    loadPreviousSessionContext();
+    return;
+  }
+
+  previousSessionArmedAt = now;
+  setHistoryLoadState("armed", "再拉/滚一次加载上一段对话");
+  setTimeout(() => {
+    if (Date.now() - previousSessionArmedAt >= PREVIOUS_SESSION_ARM_MS && !isLoadingPreviousSession) {
+      previousSessionArmedAt = 0;
+      removeHistoryLoadIndicator();
+    }
+  }, PREVIOUS_SESSION_ARM_MS + 80);
 }
 
 function renderAttachmentPreview() {
@@ -651,6 +772,7 @@ async function createSession(options = {}) {
   }
   const payload = await response.json();
   sessionId = payload.session_id;
+  resetPreviousSessionLoadState();
   clearMessages();
   clearPendingAttachments();
   setStatus("就绪");
@@ -731,6 +853,7 @@ async function resetChat() {
     }
     const payload = await response.json();
     sessionId = payload.session_id;
+    resetPreviousSessionLoadState();
     clearMessages();
     clearPendingAttachments();
     setStatus("就绪");
@@ -1031,6 +1154,31 @@ webSearchButton.addEventListener("click", () => {
   setStatus(webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭");
   messageInput.focus();
 });
+messagesEl.addEventListener("wheel", (event) => {
+  if (event.deltaY < -24 && isAtMessagesTop()) {
+    event.preventDefault();
+    armOrLoadPreviousSession();
+  }
+}, { passive: false });
+messagesEl.addEventListener("touchstart", (event) => {
+  if (event.touches.length !== 1) {
+    return;
+  }
+  touchStartY = event.touches[0].clientY;
+  touchPullDistance = 0;
+}, { passive: true });
+messagesEl.addEventListener("touchmove", (event) => {
+  if (event.touches.length !== 1 || !isAtMessagesTop()) {
+    return;
+  }
+  touchPullDistance = event.touches[0].clientY - touchStartY;
+  if (touchPullDistance > PREVIOUS_SESSION_PULL_THRESHOLD) {
+    event.preventDefault();
+    armOrLoadPreviousSession();
+    touchStartY = event.touches[0].clientY;
+    touchPullDistance = 0;
+  }
+}, { passive: false });
 imageInput.addEventListener("change", async () => {
   try {
     await addImageFiles(imageInput.files || []);

@@ -686,6 +686,88 @@ class AppBehaviorTests(unittest.TestCase):
             ["第一轮", "第一答", "第二轮"],
         )
 
+    def test_load_previous_session_context_links_same_device_history(self):
+        identity = "device:dev_contextchain01"
+        old_session = self.app.create_session(identity, "agent-old")
+        self.app.add_message(old_session, "user", "旧会话问题")
+        self.app.add_message(old_session, "assistant", "旧会话回答")
+        current_session = self.app.create_session(identity, "agent-current")
+
+        result = self.app.load_previous_session_context(current_session)
+
+        self.assertTrue(result["loaded"])
+        self.assertEqual(result["session"]["id"], old_session)
+        self.assertEqual(
+            [(item["role"], item["content"]) for item in result["messages"]],
+            [("user", "旧会话问题"), ("assistant", "旧会话回答")],
+        )
+        self.assertFalse(result["has_more"])
+        self.assertEqual(self.app.linked_context_session_ids(current_session), [old_session])
+
+    def test_repeated_previous_session_loads_walk_backwards(self):
+        identity = "device:dev_contextchain02"
+        first = self.app.create_session(identity, "agent-first")
+        self.app.add_message(first, "user", "最早一段")
+        second = self.app.create_session(identity, "agent-second")
+        self.app.add_message(second, "user", "中间一段")
+        current = self.app.create_session(identity, "agent-current")
+
+        first_load = self.app.load_previous_session_context(current)
+        second_load = self.app.load_previous_session_context(current)
+        third_load = self.app.load_previous_session_context(current)
+
+        self.assertEqual(first_load["session"]["id"], second)
+        self.assertEqual(second_load["session"]["id"], first)
+        self.assertFalse(third_load["loaded"])
+        self.assertEqual(self.app.linked_context_session_ids(current), [first, second])
+
+    def test_model_messages_include_loaded_context_sessions_before_current(self):
+        identity = "device:dev_contextchain03"
+        old_session = self.app.create_session(identity, "agent-old")
+        self.app.add_message(old_session, "user", "旧问题")
+        self.app.add_message(old_session, "assistant", "旧回答")
+        current = self.app.create_session(identity, "agent-current")
+        self.app.add_message(current, "user", "新问题")
+        self.app.load_previous_session_context(current)
+
+        messages = self.app.build_model_messages_for_request(
+            session_id=current,
+            current_message="新问题",
+            attachments=[],
+            isolate_history=False,
+        )
+
+        self.assertEqual(
+            [item["content"] for item in messages],
+            ["旧问题", "旧回答", "新问题"],
+        )
+
+    def test_model_context_trims_oldest_half_when_over_budget(self):
+        identity = "device:dev_contexttrim01"
+        old_session = self.app.create_session(identity, "agent-old")
+        for index in range(8):
+            self.app.add_message(old_session, "user", f"旧消息{index} " + ("x" * 30))
+        current = self.app.create_session(identity, "agent-current")
+        self.app.add_message(current, "user", "当前关键问题")
+        self.app.load_previous_session_context(current)
+
+        original_budget = self.app.MODEL_CONTEXT_CHAR_BUDGET
+        self.app.MODEL_CONTEXT_CHAR_BUDGET = 120
+        try:
+            messages = self.app.build_model_messages_for_request(
+                session_id=current,
+                current_message="当前关键问题",
+                attachments=[],
+                isolate_history=False,
+            )
+        finally:
+            self.app.MODEL_CONTEXT_CHAR_BUDGET = original_budget
+
+        contents = [str(item["content"]) for item in messages]
+        self.assertIn("当前关键问题", contents)
+        self.assertNotIn("旧消息0 " + ("x" * 30), contents)
+        self.assertLess(len(contents), 9)
+
     def test_current_date_context_includes_precise_local_time_for_reminders(self):
         now = datetime(2026, 6, 8, 14, 35)
 
@@ -2684,6 +2766,22 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("当前真实时间", payload["opening_prompt"])
         self.assertIn("隐藏首轮输入", payload["opening_prompt"])
         self.assertIn("第一次见到这个浏览器身份", payload["opening_prompt"])
+
+    def test_known_device_without_memories_still_gets_default_opening_prompt(self):
+        client = TestClient(self.app.app)
+        identity = "dev_knownempty0001"
+
+        first = client.post("/api/sessions", headers={"X-Qwen-Device-Id": identity})
+        self.assertEqual(first.status_code, 200)
+
+        second = client.post("/api/sessions", headers={"X-Qwen-Device-Id": identity})
+
+        self.assertEqual(second.status_code, 200)
+        payload = second.json()
+        self.assertEqual(payload["opening_source"], "light_known_no_memory")
+        self.assertIn("当前真实时间", payload["opening_prompt"])
+        self.assertIn("欢迎回来", payload["opening_prompt"])
+        self.assertNotIn("第一次见到这个浏览器身份", payload["opening_prompt"])
 
     def test_create_session_returns_fast_prepared_hidden_opening_prompt_for_known_device(self):
         client = TestClient(self.app.app)

@@ -1,12 +1,13 @@
-# 旺财1.0
+# 旺财1.1
 
-旺财1.0 是一个面向家庭本地部署的 AI 助手网页端。它把本地大模型、长期记忆、浏览器设备身份、联网搜索、多模态图片输入、后台空闲创作和管理员观察界面整合在一个 FastAPI 单体服务里。
+旺财1.1 是一个面向家庭本地部署的 AI 助手网页端。它把本地大模型、长期记忆、浏览器设备身份、联网搜索、多模态图片输入、后台空闲创作和管理员观察界面整合在一个 FastAPI 单体服务里。
 
 本仓库只包含 Web 服务代码，不包含任何模型权重、数据库、聊天记录、记忆、日志、私有 prompt、代理地址或本地参数配置。
 
 ## 功能概览
 
 - 网页聊天：浏览器打开即创建新会话，支持连续对话、流式输出、停止生成、reset。
+- 上段对话续接：同一个浏览器设备可以在聊天区顶部连续上拉/滚动，加载更早 session，并把当前 session 变成旧 session 的延续。
 - 设备身份：首次打开网页生成浏览器本地 `device_id`，用于区分不同用户。
 - 长期记忆：后台从用户发言中整理身份、偏好、规则、事件、风险等记忆，并用 embedding 做召回。
 - 未来事件提醒：带时间的 event 会在开场和相关对话里被读取，用于提醒日程、会议、截止时间等。
@@ -39,6 +40,7 @@ export QWEN_MODEL_NAME="qwen3.6-35b-a3b-262k"
 export QWEN_MODEL_API_KEY="EMPTY"
 export QWEN_WEB_DB="./data/chat_history.sqlite3"
 export QWEN_AUTH_CONFIG="./data/admin_auth.json"
+export QWEN_MODEL_CONTEXT_CHAR_BUDGET=180000
 ```
 
 如果使用本地 vLLM / SGLang / LM Studio 等 OpenAI-compatible 服务，通常 `QWEN_MODEL_API_KEY=EMPTY` 即可。
@@ -135,6 +137,16 @@ WEB_PORT=7777 ./start_qwen_web.sh
 ```bash
 curl http://127.0.0.1:7777/api/health
 ```
+
+## 续接上次聊天
+
+旺财1.1 默认每次打开网页仍会创建一个新 session，这样普通刷新不会直接把旧聊天搬回来。需要续接时：
+
+- 手机：在聊天区滚到顶部，持续向下拉。第一次会提示“再拉一次加载上一段对话”，第二次开始加载。
+- 电脑：在聊天区滚到顶部，继续向上滚动。第一次提示，第二次加载。
+- 加载后，旧 session 会作为当前 session 的上下文前缀参与后续回答，并在页面顶部显示出来。
+
+如果上下文过长，服务端会优先截掉更早的一部分历史，避免超过模型上下文预算。可通过 `QWEN_MODEL_CONTEXT_CHAR_BUDGET` 调整近似字符预算。
 
 ## 数据与隐私
 

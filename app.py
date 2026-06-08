@@ -282,6 +282,7 @@ ALLOWED_MEMORY_LABELS = {"preference", "identity", "rule", "persona", "risk", "e
 OPENING_FUTURE_EVENT_LIMIT = int(os.environ.get("QWEN_OPENING_FUTURE_EVENT_LIMIT", "8"))
 OPENING_FUTURE_EVENT_WINDOW_DAYS = int(os.environ.get("QWEN_OPENING_FUTURE_EVENT_WINDOW_DAYS", "30"))
 OPENING_PROMPT_CACHE_VERSION = "v2"
+MODEL_CONTEXT_CHAR_BUDGET = int(os.environ.get("QWEN_MODEL_CONTEXT_CHAR_BUDGET", "180000"))
 
 MAX_CHAT_ATTACHMENTS = int(os.environ.get("QWEN_MAX_CHAT_ATTACHMENTS", "4"))
 MAX_CHAT_ATTACHMENT_BYTES = int(os.environ.get("QWEN_MAX_CHAT_ATTACHMENT_BYTES", str(8 * 1024 * 1024)))
@@ -1614,6 +1615,17 @@ def init_db() -> None:
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
             );
 
+            CREATE TABLE IF NOT EXISTS session_context_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                current_session_id TEXT NOT NULL,
+                source_session_id TEXT NOT NULL,
+                order_index INTEGER NOT NULL,
+                loaded_at TEXT NOT NULL,
+                UNIQUE(current_session_id, source_session_id),
+                FOREIGN KEY(current_session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY(source_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT,
@@ -1639,6 +1651,10 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_messages_session_created
                 ON messages(session_id, id);
+            CREATE INDEX IF NOT EXISTS idx_session_context_current
+                ON session_context_links(current_session_id, order_index);
+            CREATE INDEX IF NOT EXISTS idx_session_context_source
+                ON session_context_links(source_session_id);
             CREATE INDEX IF NOT EXISTS idx_events_session_created
                 ON events(session_id, id);
             CREATE INDEX IF NOT EXISTS idx_analysis_trace_session_created
@@ -2626,16 +2642,25 @@ def count_device_curated_memories(visitor_ip: str) -> int:
     return int(count or 0)
 
 
+def default_opening_prompt(first_seen: bool) -> str:
+    relationship_line = (
+        "这是你第一次见到这个浏览器身份；不要假装认识用户，也不要读取不存在的长期记忆。"
+        if first_seen
+        else "你见过这个浏览器身份，但目前还没有可用的长期记忆；可以自然地欢迎回来，不要假装知道具体身份或经历。"
+    )
+    return (
+        "这是浏览器打开时的隐藏首轮输入，不要提到这是隐藏输入，也不要复述系统提示。\n"
+        f"当前真实时间：{opening_time_text()}。\n"
+        f"{relationship_line}\n"
+        "请自然地回复用户：简短问候，并询问他今天是否有会议、截止时间、日程、约定，"
+        "或者其他需要你记住并提醒的事情。"
+    )
+
+
 def prepared_opening_prompt(visitor_ip: str, known_before_session: bool) -> Dict[str, str]:
     if not known_before_session:
         return {
-            "opening_prompt": (
-                "这是浏览器打开时的隐藏首轮输入，不要提到这是隐藏输入，也不要复述系统提示。\n"
-                f"当前真实时间：{opening_time_text()}。\n"
-                "这是你第一次见到这个浏览器身份；不要假装认识用户，也不要读取不存在的长期记忆。\n"
-                "请自然地回复用户：简短问候，并询问他今天是否有会议、截止时间、日程、约定，"
-                "或者其他需要你记住并提醒的事情。"
-            ),
+            "opening_prompt": default_opening_prompt(first_seen=True),
             "opening_source": "light_new_device",
         }
 
@@ -2653,7 +2678,10 @@ def prepared_opening_prompt(visitor_ip: str, known_before_session: bool) -> Dict
             "opening_source": "prepared_memory",
         }
 
-    return {"opening_prompt": "", "opening_source": "none"}
+    return {
+        "opening_prompt": default_opening_prompt(first_seen=False),
+        "opening_source": "light_known_no_memory",
+    }
 
 
 def opening_prompt_cache_key(visitor_ip: str) -> str:
@@ -2905,6 +2933,171 @@ def load_messages(session_id: str) -> List[Dict[str, str]]:
     return [{"role": row["role"], "content": row["content"]} for row in rows]
 
 
+def session_start_event_id(conn: sqlite3.Connection, session_id: str) -> int:
+    row = conn.execute(
+        """
+        SELECT id
+        FROM events
+        WHERE session_id = ?
+          AND event_type = 'session_start'
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (session_id,),
+    ).fetchone()
+    return int(row["id"]) if row else 0
+
+
+def load_session_visible_messages(session_id: str) -> List[Dict[str, object]]:
+    with connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, role, content, created_at
+            FROM messages
+            WHERE session_id = ?
+              AND status = 'completed'
+              AND role IN ('user', 'assistant')
+              AND NOT (
+                role = 'user'
+                AND COALESCE(json_extract(metadata_json, '$.hidden'), 0) = 1
+              )
+            ORDER BY id ASC
+            """,
+            (session_id,),
+        ).fetchall()
+    return [
+        {
+            "id": int(row["id"]),
+            "role": str(row["role"]),
+            "content": str(row["content"]),
+            "created_at": str(row["created_at"]),
+        }
+        for row in rows
+    ]
+
+
+def linked_context_session_ids(session_id: str) -> List[str]:
+    with connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT l.source_session_id
+            FROM session_context_links l
+            JOIN events e
+              ON e.session_id = l.source_session_id
+             AND e.event_type = 'session_start'
+            WHERE l.current_session_id = ?
+            ORDER BY e.id ASC, l.id ASC
+            """,
+            (session_id,),
+        ).fetchall()
+    return [str(row["source_session_id"]) for row in rows]
+
+
+def previous_context_candidate(
+    conn: sqlite3.Connection,
+    current_session_id: str,
+) -> Optional[sqlite3.Row]:
+    current = conn.execute(
+        "SELECT id, visitor_ip FROM sessions WHERE id = ?",
+        (current_session_id,),
+    ).fetchone()
+    if current is None:
+        return None
+    visitor = str(current["visitor_ip"] or "")
+    if not visitor or is_anonymous_identity(visitor):
+        return None
+
+    linked_rows = conn.execute(
+        "SELECT source_session_id FROM session_context_links WHERE current_session_id = ?",
+        (current_session_id,),
+    ).fetchall()
+    linked_ids = [str(row["source_session_id"]) for row in linked_rows]
+    boundary_ids = [session_start_event_id(conn, current_session_id)]
+    boundary_ids.extend(session_start_event_id(conn, source_id) for source_id in linked_ids)
+    boundary_ids = [value for value in boundary_ids if value > 0]
+    boundary_event_id = min(boundary_ids) if boundary_ids else 1 << 60
+
+    excluded = [current_session_id] + linked_ids
+    placeholders = ",".join("?" for _ in excluded)
+    return conn.execute(
+        f"""
+        SELECT s.id, s.visitor_ip, s.user_agent, s.started_at, s.ended_at, s.end_reason,
+               e.id AS start_event_id
+        FROM sessions s
+        JOIN events e
+          ON e.session_id = s.id
+         AND e.event_type = 'session_start'
+        WHERE s.visitor_ip = ?
+          AND s.id NOT IN ({placeholders})
+          AND e.id < ?
+          AND EXISTS (
+              SELECT 1
+              FROM messages m
+              WHERE m.session_id = s.id
+                AND m.status = 'completed'
+                AND m.role IN ('user', 'assistant')
+                AND NOT (
+                  m.role = 'user'
+                  AND COALESCE(json_extract(m.metadata_json, '$.hidden'), 0) = 1
+                )
+          )
+        ORDER BY e.id DESC
+        LIMIT 1
+        """,
+        [visitor, *excluded, boundary_event_id],
+    ).fetchone()
+
+
+def has_previous_context_session(
+    conn: sqlite3.Connection,
+    current_session_id: str,
+    before_event_id: Optional[int] = None,
+) -> bool:
+    candidate = previous_context_candidate(conn, current_session_id)
+    if candidate is None:
+        return False
+    if before_event_id is None:
+        return True
+    return int(candidate["start_event_id"]) < int(before_event_id)
+
+
+def load_previous_session_context(session_id: str) -> Dict[str, object]:
+    now = utc_now()
+    with connect_db() as conn:
+        candidate = previous_context_candidate(conn, session_id)
+        if candidate is None:
+            return {"loaded": False, "session": None, "messages": [], "has_more": False}
+        source_session_id = str(candidate["id"])
+        row = conn.execute(
+            "SELECT COALESCE(MAX(order_index), 0) AS max_order FROM session_context_links WHERE current_session_id = ?",
+            (session_id,),
+        ).fetchone()
+        next_order = int(row["max_order"] or 0) + 1
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO session_context_links (
+                current_session_id, source_session_id, order_index, loaded_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (session_id, source_session_id, next_order, now),
+        )
+        source_start_event_id = int(candidate["start_event_id"])
+        has_more = has_previous_context_session(conn, session_id, before_event_id=source_start_event_id)
+
+    return {
+        "loaded": True,
+        "session": {
+            "id": source_session_id,
+            "started_at": str(candidate["started_at"]),
+            "ended_at": str(candidate["ended_at"] or ""),
+            "end_reason": str(candidate["end_reason"] or ""),
+        },
+        "messages": load_session_visible_messages(source_session_id),
+        "has_more": has_more,
+    }
+
+
 def load_recent_planner_context_messages(
     session_id: str,
     limit: int = WEB_SEARCH_PLANNER_CONTEXT_MESSAGES,
@@ -2955,20 +3148,22 @@ def model_content_for_message(content: str, metadata: object) -> object:
     return parts or content
 
 
-def load_model_messages(session_id: str) -> List[Dict[str, object]]:
-    with connect_db() as conn:
-        rows = conn.execute(
-            """
-            SELECT role, content, metadata_json
-            FROM messages
-            WHERE session_id = ?
-              AND status = 'completed'
-              AND role IN ('user', 'assistant')
-              AND COALESCE(json_extract(metadata_json, '$.opening_turn'), 0) != 1
-            ORDER BY id ASC
-            """,
-            (session_id,),
-        ).fetchall()
+def load_model_message_rows_for_session(conn: sqlite3.Connection, session_id: str) -> List[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT role, content, metadata_json
+        FROM messages
+        WHERE session_id = ?
+          AND status = 'completed'
+          AND role IN ('user', 'assistant')
+          AND COALESCE(json_extract(metadata_json, '$.opening_turn'), 0) != 1
+        ORDER BY id ASC
+        """,
+        (session_id,),
+    ).fetchall()
+
+
+def rows_to_model_messages(rows: List[sqlite3.Row]) -> List[Dict[str, object]]:
     return [
         {
             "role": row["role"],
@@ -2978,6 +3173,75 @@ def load_model_messages(session_id: str) -> List[Dict[str, object]]:
     ]
 
 
+def estimate_model_message_chars(message: Dict[str, object]) -> int:
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        total = 0
+        for part in content:
+            if not isinstance(part, dict):
+                total += len(str(part))
+                continue
+            if part.get("type") == "text":
+                total += len(str(part.get("text", "")))
+            elif part.get("type") == "image_url":
+                total += 2000
+            else:
+                total += len(json.dumps(part, ensure_ascii=False))
+        return total
+    return len(str(content))
+
+
+def trim_model_messages_to_context_budget(
+    messages: List[Dict[str, object]],
+    max_chars: Optional[int] = None,
+) -> List[Dict[str, object]]:
+    budget = int(max_chars if max_chars is not None else MODEL_CONTEXT_CHAR_BUDGET)
+    if budget <= 0:
+        return messages
+    total = sum(estimate_model_message_chars(message) for message in messages)
+    if total <= budget or len(messages) <= 1:
+        return messages
+
+    keep_from = max(1, len(messages) // 2)
+    trimmed = messages[keep_from:]
+    while len(trimmed) > 1 and sum(estimate_model_message_chars(message) for message in trimmed) > budget:
+        trim_count = max(1, len(trimmed) // 2)
+        trimmed = trimmed[trim_count:]
+    return trimmed or messages[-1:]
+
+
+def load_model_messages(session_id: str) -> List[Dict[str, object]]:
+    with connect_db() as conn:
+        rows = load_model_message_rows_for_session(conn, session_id)
+    return rows_to_model_messages(rows)
+
+
+def load_model_messages_with_context(session_id: str) -> List[Dict[str, object]]:
+    with connect_db() as conn:
+        source_ids = [
+            str(row["source_session_id"])
+            for row in conn.execute(
+                """
+                SELECT l.source_session_id
+                FROM session_context_links l
+                JOIN events e
+                  ON e.session_id = l.source_session_id
+                 AND e.event_type = 'session_start'
+                WHERE l.current_session_id = ?
+                ORDER BY e.id ASC, l.id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+        ]
+        rows: List[sqlite3.Row] = []
+        for source_id in source_ids:
+            rows.extend(load_model_message_rows_for_session(conn, source_id))
+        rows.extend(load_model_message_rows_for_session(conn, session_id))
+    return trim_model_messages_to_context_budget(rows_to_model_messages(rows))
+
+
 def build_model_messages_for_request(
     session_id: str,
     current_message: str,
@@ -2985,7 +3249,7 @@ def build_model_messages_for_request(
     isolate_history: bool = False,
 ) -> List[Dict[str, object]]:
     if not isolate_history:
-        return load_model_messages(session_id)
+        return load_model_messages_with_context(session_id)
     return [
         {
             "role": "user",
@@ -7413,6 +7677,48 @@ def create_session_endpoint(request: Request) -> Dict[str, object]:
     session_id = create_session(current_visitor, user_agent(request))
     opening = prepared_opening_prompt(current_visitor, known_before_session)
     return {"session_id": session_id, "messages": [], **opening}
+
+
+@app.get("/api/sessions/{session_id}/previous-context")
+def previous_session_context_endpoint(session_id: str, request: Request) -> Dict[str, object]:
+    init_db()
+    session = ensure_active_session(session_id)
+    current_visitor = visitor_ip(request)
+    if normalize_visitor_ip(str(session.get("visitor_ip", ""))) != normalize_visitor_ip(current_visitor):
+        raise HTTPException(status_code=403, detail="device identity does not match session")
+    with connect_db() as conn:
+        candidate = previous_context_candidate(conn, session_id)
+    return {
+        "has_previous": candidate is not None,
+        "session": None if candidate is None else {
+            "id": str(candidate["id"]),
+            "started_at": str(candidate["started_at"]),
+            "ended_at": str(candidate["ended_at"] or ""),
+            "end_reason": str(candidate["end_reason"] or ""),
+        },
+    }
+
+
+@app.post("/api/sessions/{session_id}/load-previous")
+def load_previous_session_context_endpoint(session_id: str, request: Request) -> Dict[str, object]:
+    init_db()
+    session = ensure_active_session(session_id)
+    current_visitor = visitor_ip(request)
+    if normalize_visitor_ip(str(session.get("visitor_ip", ""))) != normalize_visitor_ip(current_visitor):
+        raise HTTPException(status_code=403, detail="device identity does not match session")
+    result = load_previous_session_context(session_id)
+    record_event(
+        session_id,
+        "session_context_load_previous",
+        current_visitor,
+        {
+            "loaded": bool(result.get("loaded")),
+            "source_session_id": (result.get("session") or {}).get("id") if isinstance(result.get("session"), dict) else "",
+            "message_count": len(result.get("messages") or []),
+            "has_more": bool(result.get("has_more")),
+        },
+    )
+    return result
 
 
 @app.post("/api/sessions/{session_id}/reset")
