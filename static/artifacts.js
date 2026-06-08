@@ -228,12 +228,43 @@ function updateLoadMoreButton() {
   loadMoreButton.disabled = artifactLoading;
 }
 
+function iconSvg(className, paths) {
+  return `
+    <svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">
+      ${paths}
+    </svg>
+  `;
+}
+
+function likeIconSvg() {
+  return iconSvg(
+    "artifact-like-icon",
+    `
+      <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+      <path d="M7 11l4-8a3 3 0 0 1 3 3v4h5a2 2 0 0 1 2 2l-1 7a3 3 0 0 1-3 3H7z" />
+    `,
+  );
+}
+
+function commentIconSvg() {
+  return iconSvg(
+    "artifact-comment-icon",
+    `
+      <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5a8 8 0 1 1 18-6z" />
+      <path d="M8 11h8" />
+      <path d="M8 15h5" />
+    `,
+  );
+}
+
 function renderLikeButton(item, className = "like-button") {
   const button = document.createElement("button");
   button.className = className;
   button.type = "button";
   button.dataset.artifactId = String(item.id);
-  button.innerHTML = `赞 <span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
+  button.title = "点赞";
+  button.setAttribute("aria-label", `点赞 ${item.title || item.id}`);
+  button.innerHTML = `${likeIconSvg()}<span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     handleLikeClick(event, item.id);
@@ -246,7 +277,9 @@ function renderCommentButton(item) {
   button.className = "comment-count-button";
   button.type = "button";
   button.dataset.artifactId = String(item.id);
-  button.innerHTML = `评 <span class="comment-count" data-artifact-id="${item.id}">${Number(item.comment_count || 0)}</span>`;
+  button.title = "评论";
+  button.setAttribute("aria-label", `评论 ${item.title || item.id}`);
+  button.innerHTML = `${commentIconSvg()}<span class="comment-count" data-artifact-id="${item.id}">${Number(item.comment_count || 0)}</span>`;
   button.addEventListener("click", (event) => {
     event.stopPropagation();
     openArtifactDialog(Number(item.id), { focusComment: true });
@@ -614,7 +647,7 @@ function openArtifactDialog(artifactId, options = {}) {
   artifactDialogSummary.hidden = !item.summary;
   setRenderedMarkdown(artifactDialogBody, item.content || "");
   artifactDialogLike.dataset.artifactId = String(item.id);
-  artifactDialogLike.innerHTML = `赞 <span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
+  artifactDialogLike.innerHTML = `${likeIconSvg()}<span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
   artifactDialogDelete.dataset.artifactId = String(item.id);
   artifactCommentInput.value = "";
   clearChildren(artifactComments);
@@ -786,6 +819,12 @@ artifactDialog.addEventListener("close", () => {
 artifactDialog.addEventListener("click", (event) => {
   if (event.target === artifactDialog) {
     artifactDialog.close();
+  }
+});
+artifactCommentInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    artifactCommentForm.requestSubmit();
   }
 });
 artifactCommentForm.addEventListener("submit", async (event) => {
