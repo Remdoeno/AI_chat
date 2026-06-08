@@ -132,6 +132,8 @@ WEB_SEARCH_MIN_RELEVANCE = float(os.environ.get("QWEN_WEB_SEARCH_MIN_RELEVANCE",
 MEMORY_TEXT_MIN_RELEVANCE = float(os.environ.get("QWEN_MEMORY_TEXT_MIN_RELEVANCE", "0.25"))
 MEMORY_TEXT_GATE_MIN_VECTOR_SCORE = float(os.environ.get("QWEN_MEMORY_TEXT_GATE_MIN_VECTOR_SCORE", "0.68"))
 WEB_SEARCH_PLANNER_MAX_QUERIES = int(os.environ.get("QWEN_WEB_SEARCH_PLANNER_MAX_QUERIES", "5"))
+WEB_SEARCH_PLANNER_CONTEXT_MESSAGES = int(os.environ.get("QWEN_WEB_SEARCH_PLANNER_CONTEXT_MESSAGES", "10"))
+WEB_SEARCH_PLANNER_CONTEXT_CHARS = int(os.environ.get("QWEN_WEB_SEARCH_PLANNER_CONTEXT_CHARS", "2600"))
 WEB_SEARCH_PLANNER_TIMEOUT = float(os.environ.get("QWEN_WEB_SEARCH_PLANNER_TIMEOUT", "45"))
 MEMORY_QUERY_PLANNER_TIMEOUT = float(os.environ.get("QWEN_MEMORY_QUERY_PLANNER_TIMEOUT", "25"))
 WEB_SEARCH_MAX_RESULTS = WEB_SEARCH_MAX_CANDIDATES
@@ -1135,18 +1137,60 @@ def search_plan_display_query(plan: Dict[str, object], fallback: str = "") -> st
     return clean_search_text(fallback, 120)
 
 
-def build_search_planner_user_prompt(user_message: str) -> str:
+def format_search_planner_context(
+    context_messages: Optional[List[Dict[str, str]]] = None,
+    max_chars: int = WEB_SEARCH_PLANNER_CONTEXT_CHARS,
+) -> str:
+    if not context_messages:
+        return ""
+    lines: List[str] = []
+    remaining = max(int(max_chars), 400)
+    for message in context_messages:
+        role = str(message.get("role", "")).strip()
+        content = re.sub(r"\s+", " ", str(message.get("content", "")).strip())
+        if role not in {"user", "assistant"} or not content:
+            continue
+        line = f"[{role}] {clean_search_text(content, 420)}"
+        if len(line) > remaining:
+            if remaining > 80:
+                lines.append(line[:remaining].rstrip() + "...")
+            break
+        lines.append(line)
+        remaining -= len(line)
+        if remaining <= 80:
+            break
+    if not lines:
+        return ""
+    return (
+        "最近会话上下文（仅用于解析当前问题里的代词、承接对象、论文标题、人名、时间等，"
+        "不是搜索结果，也不能当作事实来源）：\n"
+        + "\n".join(lines)
+    )
+
+
+def build_search_planner_user_prompt(
+    user_message: str,
+    context_messages: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    context = format_search_planner_context(context_messages)
+    context_block = f"{context}\n\n" if context else ""
     return (
         f"{current_date_context()}\n\n"
+        f"{context_block}"
         "请为下面用户问题生成搜索查询 JSON。"
         "注意不要把“昨天/前年/是什么/这个/那个”这类弱指代单独作为查询；"
-        "查询必须保留用户问题里的核心对象和限定条件。\n\n"
+        "查询必须保留用户问题里的核心对象和限定条件。"
+        "如果当前问题依赖上文，例如“他、这篇、刚才那个、具体引用了几篇、第几作者”等，"
+        "必须结合最近会话上下文补全搜索对象，再生成可直接搜索的完整查询。\n\n"
         f"用户问题：{user_message}"
     )
 
 
-def build_search_plan(user_message: str) -> Dict[str, object]:
-    user_prompt = build_search_planner_user_prompt(user_message)
+def build_search_plan(
+    user_message: str,
+    context_messages: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, object]:
+    user_prompt = build_search_planner_user_prompt(user_message, context_messages=context_messages)
     http_client = httpx.Client(trust_env=False, timeout=WEB_SEARCH_PLANNER_TIMEOUT)
     client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
     try:
@@ -2772,6 +2816,31 @@ def load_messages(session_id: str) -> List[Dict[str, str]]:
             (session_id,),
         ).fetchall()
     return [{"role": row["role"], "content": row["content"]} for row in rows]
+
+
+def load_recent_search_planner_messages(
+    session_id: str,
+    limit: int = WEB_SEARCH_PLANNER_CONTEXT_MESSAGES,
+) -> List[Dict[str, str]]:
+    max_rows = min(max(int(limit), 1), 30)
+    with connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT role, content
+            FROM messages
+            WHERE session_id = ?
+              AND status = 'completed'
+              AND role IN ('user', 'assistant')
+              AND NOT (
+                role = 'user'
+                AND COALESCE(json_extract(metadata_json, '$.hidden'), 0) = 1
+              )
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (session_id, max_rows),
+        ).fetchall()
+    return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
 
 
 def model_content_for_message(content: str, metadata: object) -> object:
@@ -6690,12 +6759,19 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
             web_search_sources: List[Dict[str, Any]] = []
             if payload.web_search:
                 try:
+                    search_context_messages = load_recent_search_planner_messages(session_id)
                     planner_messages = [
                         {"role": "system", "content": SEARCH_PLANNER_SYSTEM_PROMPT},
-                        {"role": "user", "content": build_search_planner_user_prompt(message)},
+                        {
+                            "role": "user",
+                            "content": build_search_planner_user_prompt(
+                                message,
+                                context_messages=search_context_messages,
+                            ),
+                        },
                     ]
                     search_plan_started = time.perf_counter()
-                    search_plan = build_search_plan(message)
+                    search_plan = build_search_plan(message, context_messages=search_context_messages)
                     if analysis_trace_id:
                         record_analysis_trace(
                             session_id=session_id,

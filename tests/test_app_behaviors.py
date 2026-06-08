@@ -279,6 +279,28 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertEqual(label, "2025 北京高考数学真题；2025 北京高考数学试卷 答案")
         self.assertNotIn("去年的高考数学题目北京", label)
 
+    def test_search_planner_prompt_uses_recent_session_context_for_followup(self):
+        session_id = self.app.create_session("device:search-context", "agent-search-context")
+        self.app.add_message(session_id, "user", "魏祥毓教授被引最高的文章是哪篇？")
+        self.app.add_message(
+            session_id,
+            "assistant",
+            '被引最高的文章通常被认为是 "Highly sensitive and flexible wireless sensor for in situ cellular mechanobiology"。',
+        )
+        self.app.add_message(session_id, "user", "具体引用了几篇？他是第几作者？")
+
+        context_messages = self.app.load_recent_search_planner_messages(session_id)
+        prompt = self.app.build_search_planner_user_prompt(
+            "具体引用了几篇？他是第几作者？",
+            context_messages=context_messages,
+        )
+
+        self.assertIn("最近会话上下文", prompt)
+        self.assertIn("魏祥毓教授", prompt)
+        self.assertIn("Highly sensitive and flexible wireless sensor", prompt)
+        self.assertIn("具体引用了几篇？他是第几作者？", prompt)
+        self.assertIn("必须结合最近会话上下文补全", prompt)
+
     def test_perform_web_search_reuses_existing_plan(self):
         calls = []
         original_build_plan = self.app.build_search_plan
@@ -607,7 +629,7 @@ class AppBehaviorTests(unittest.TestCase):
             ],
         )
 
-    def test_web_search_model_messages_use_current_turn_only(self):
+    def test_web_search_model_messages_keep_answer_generation_isolated_from_history(self):
         session_id = self.app.create_session("5.5.5.5", "agent-search-isolate")
         self.app.add_message(session_id, "user", "去年高考作文河北")
         self.app.add_message(session_id, "assistant", "错误地回答了作文。")
