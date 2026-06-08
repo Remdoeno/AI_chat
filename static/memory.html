@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Qwen Memory</title>
+    <link rel="stylesheet" href="/static/memory.css?v=20260603_artifact_memory" />
+  </head>
+  <body>
+    <main class="memory-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Qwen3.6</p>
+          <h1>Memory Console</h1>
+        </div>
+        <nav>
+          <a href="/">Chat</a>
+          <button id="refreshButton" type="button">刷新</button>
+        </nav>
+      </header>
+
+      <section class="summary-grid" aria-label="状态汇总">
+        <div class="metric">
+          <span>长期记忆</span>
+          <strong id="memoryCount">-</strong>
+        </div>
+        <div class="metric">
+          <span>调用记录</span>
+          <strong id="retrievalCount">-</strong>
+        </div>
+        <div class="metric">
+          <span>系统操作</span>
+          <strong id="operationCount">-</strong>
+        </div>
+      </section>
+
+      <section class="panel-grid">
+        <article class="panel">
+          <header class="panel-header">
+            <div>
+              <h2>记忆</h2>
+              <p>整理后的长期记忆，不含原始对话。</p>
+            </div>
+          </header>
+          <div class="filters">
+            <input id="memoryKeyword" type="search" placeholder="关键词" />
+            <select id="memoryLabel">
+              <option value="">全部 label</option>
+              <option value="preference">preference</option>
+              <option value="identity">identity</option>
+              <option value="rule">rule</option>
+              <option value="persona">persona</option>
+              <option value="artifact">artifact</option>
+              <option value="risk">risk</option>
+              <option value="event">event</option>
+              <option value="other">other</option>
+            </select>
+          </div>
+          <div id="memoryList" class="list"></div>
+        </article>
+
+        <article class="panel">
+          <header class="panel-header">
+            <div>
+              <h2>记忆调用记录</h2>
+              <p>只记录 query hash、命中的 memory id 和分数。</p>
+            </div>
+          </header>
+          <div class="filters">
+            <input id="retrievalMemoryId" type="number" min="1" placeholder="memory id" />
+          </div>
+          <div id="retrievalList" class="list compact"></div>
+        </article>
+
+        <article class="panel wide">
+          <header class="panel-header">
+            <div>
+              <h2>系统操作</h2>
+              <p>回答、reset、后台整理、压缩任务等事件。</p>
+            </div>
+          </header>
+          <div class="filters">
+            <select id="operationKind">
+              <option value="">全部类型</option>
+              <option value="event">event</option>
+              <option value="memory_agent_job">memory agent job</option>
+            </select>
+            <select id="operationStatus">
+              <option value="">全部 job 状态</option>
+              <option value="pending">pending</option>
+              <option value="running">running</option>
+              <option value="completed">completed</option>
+              <option value="skipped">skipped</option>
+              <option value="failed">failed</option>
+              <option value="cancelled">cancelled</option>
+            </select>
+            <input id="operationEventType" type="search" placeholder="event type" />
+          </div>
+          <div id="operationList" class="list operations"></div>
+        </article>
+      </section>
+    </main>
+    <script src="/static/memory.js?v=20260603_artifact_memory"></script>
+  </body>
+</html>

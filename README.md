@@ -1,0 +1,116 @@
+# 旺财1.0
+
+旺财1.0 是一个面向家庭本地部署的 AI 助手网页端。它把本地大模型、长期记忆、浏览器设备身份、联网搜索、多模态图片输入、后台空闲创作和管理员观察界面整合在一个 FastAPI 单体服务里。
+
+本仓库只包含 Web 服务代码，不包含任何模型权重、数据库、聊天记录、记忆、日志、私有 prompt、代理地址或本地参数配置。
+
+## 功能概览
+
+- 网页聊天：浏览器打开即创建新会话，支持连续对话、流式输出、停止生成、reset。
+- 设备身份：首次打开网页生成浏览器本地 `device_id`，用于区分不同用户。
+- 长期记忆：后台从用户发言中整理身份、偏好、规则、事件、风险等记忆，并用 embedding 做召回。
+- 未来事件提醒：带时间的 event 会在开场和相关对话里被读取，用于提醒日程、会议、截止时间等。
+- 联网搜索：可按需开启搜索，搜索过程会在状态栏显示。
+- 多模态图片：支持图片上传；过大图片会在服务端用 Pillow 压缩后再送入多模态模型。
+- Analysis mode：管理员可查看完整 prompt、记忆召回、embedding 调用、搜索过程、网页摘要和模型调用时长。
+- 成果页：空闲时后台 agent 可写小说、诗歌、剧本、世界观等作品，成果支持分类、点赞、排序、随机和分页展示。
+
+## 首次启动与管理员密码
+
+第一次部署时不要在代码里写死管理员密码。启动 Web 服务后，首次访问主页会跳转到 `/auth`，设置管理员密码。这个密码用于管理 memory 和 analysis mode。
+
+已经配置过密码后，也可以访问 `/auth`，输入旧管理员密码并修改为新的。密码 hash 保存到运行期文件：
+
+```text
+data/admin_auth.json
+```
+
+该文件已被 `.gitignore` 排除，不应上传到 GitHub。
+
+## 模型与服务配置
+
+你需要自己下载并启动本地模型服务。本项目默认按 OpenAI-compatible API 调用模型。
+
+常用环境变量：
+
+```bash
+export QWEN_MODEL_BASE_URL="http://127.0.0.1:8000/v1"
+export QWEN_MODEL_NAME="qwen3.6-35b-a3b-262k"
+export QWEN_WEB_DB="./data/chat_history.sqlite3"
+export QWEN_AUTH_CONFIG="./data/admin_auth.json"
+```
+
+Embedding 服务配置由 `embedding_client.py` 管理。请在本机或服务器启动兼容的 embedding 模型，并按该文件中的环境变量指向对应接口。
+
+模型权重目录建议放在仓库外，或放在已忽略的 `models/` 目录下。不要提交 `.safetensors`、`.bin`、`.pt`、`.pth`、`.gguf` 等权重文件。
+
+## 联网搜索与代理
+
+联网代理默认为空。普通部署不会默认使用任何私人代理地址。
+
+如果需要代理，有两种方式：
+
+1. 页面内配置：在聊天主页 1 秒内连续点击兔子 4 次，打开高级选项，填写联网代理、temperature 和 top-p，点“确定”保存到浏览器本地。
+2. 服务端默认值：设置环境变量 `QWEN_WEB_SEARCH_PROXY`。
+
+示例：
+
+```bash
+export QWEN_WEB_SEARCH_PROXY="http://127.0.0.1:7890"
+```
+
+## 空闲创作种子
+
+仓库不包含任何私人故事设定。你可以用环境变量或外部文件配置空闲创作方向：
+
+```bash
+export QWEN_IDLE_STORY_SEEDS_FILE="./data/idle_story_seeds.txt"
+```
+
+`idle_story_seeds.txt` 可以写你自己的小说、角色、世界观、写作偏好或长期创作计划。该文件默认不上传。
+
+也可以在成果页里配置空闲创作 prompt，让 idle agent 在不聊天、不整理记忆时进行创作。
+
+如果你的连续作品里有固定译名、角色名或术语，也可以配置结果归一化映射：
+
+```bash
+export QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS='{"旧术语":"标准术语"}'
+```
+
+## 启动 Web 服务
+
+安装依赖后运行：
+
+```bash
+WEB_PORT=7777 ./start_qwen_web.sh
+```
+
+停止服务：
+
+```bash
+./stop_qwen_web.sh
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:7777/api/health
+```
+
+## 数据与隐私
+
+以下内容都属于运行期私有数据，不应提交：
+
+- `data/`：数据库、管理员密码 hash、本地故事种子。
+- `logs/`：服务日志、模型日志、调试日志。
+- `models/`：模型权重。
+- `.env`：本地端口、代理、模型路径、token 等配置。
+
+发布前请运行：
+
+```bash
+git status --short
+git ls-files
+```
+
+确认没有数据库、日志、模型权重、私有 prompt 或本地配置被纳入版本控制。

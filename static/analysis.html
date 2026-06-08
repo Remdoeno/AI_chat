@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Qwen Analysis Mode</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/analysis.css?v=20260608_ime_enter_fix" />
+  </head>
+  <body>
+    <main id="analysisMode" class="analysis-shell">
+      <aside class="analysis-sidebar">
+        <a class="analysis-back analysis-back-button" href="/" aria-label="返回聊天主页">返回聊天</a>
+        <div>
+          <p class="analysis-kicker">Qwen3.6</p>
+          <h1>Analysis</h1>
+        </div>
+        <div class="analysis-field">
+          <span>状态</span>
+          <strong id="statusText">连接中</strong>
+        </div>
+        <label class="analysis-field" for="temperatureInput">
+          <span>Temperature</span>
+          <input id="temperatureInput" type="number" min="0" max="2" step="0.05" value="0.75" />
+        </label>
+        <label class="analysis-field" for="topPInput">
+          <span>Top-p</span>
+          <input id="topPInput" type="number" min="0" max="1" step="0.01" value="0.95" />
+        </label>
+        <label class="analysis-field" for="proxyInput">
+          <span>联网代理</span>
+          <input id="proxyInput" type="url" value="" placeholder="可选，例如 http://127.0.0.1:7890" />
+        </label>
+        <label class="analysis-toggle">
+          <input id="webSearchInput" type="checkbox" />
+          <span>联网搜索</span>
+        </label>
+        <button id="resetButton" class="analysis-secondary" type="button">Reset</button>
+      </aside>
+
+      <section class="analysis-chat" aria-label="Analysis chat">
+        <div id="messages" class="analysis-messages"></div>
+        <form id="chatForm" class="analysis-composer">
+          <div class="analysis-input-stack">
+            <textarea id="messageInput" rows="3" placeholder="输入消息"></textarea>
+            <div id="analysisAttachmentPreview" class="analysis-attachment-preview" aria-label="已选择图片"></div>
+            <div class="analysis-tools">
+              <button id="analysisAttachImageButton" class="analysis-secondary" type="button">图片</button>
+              <input id="analysisImageInput" type="file" accept="image/*,.avif,.bmp,.gif,.heic,.heif,.ico,.jfif,.jpg,.jpeg,.pjpeg,.png,.svg,.tif,.tiff,.webp" multiple hidden />
+            </div>
+          </div>
+          <button id="sendButton" type="submit">发送</button>
+          <button id="stopButton" class="analysis-stop-button" type="button" aria-label="停止生成" title="停止生成" hidden>■</button>
+        </form>
+      </section>
+
+      <section class="analysis-trace" aria-label="Trace panel">
+        <div class="analysis-trace-header">
+          <div>
+            <p class="analysis-kicker">Trace</p>
+            <h2>后台明细</h2>
+          </div>
+          <button id="refreshTraceButton" class="analysis-secondary" type="button">刷新</button>
+        </div>
+        <div id="tracePanel" class="trace-panel"></div>
+        <div class="analysis-trace-header analysis-background-header">
+          <div>
+            <p class="analysis-kicker">Idle Agent</p>
+            <h2>后台写作</h2>
+          </div>
+        </div>
+        <div id="backgroundPanel" class="background-panel"></div>
+      </section>
+    </main>
+    <script src="/static/analysis.js?v=20260608_ime_enter_fix"></script>
+  </body>
+</html>

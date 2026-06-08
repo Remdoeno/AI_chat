@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>旺财1.0 Ai助手聊天</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260608_mobile_chrome_fix" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <button id="bunnyLogoButton" class="logo-button" type="button" aria-label="Qwen logo">
+            <span aria-hidden="true">🐰</span>
+          </button>
+          <div>
+            <p class="eyebrow">Qwen3.6</p>
+            <h1>Ai助手聊天</h1>
+          </div>
+        </div>
+        <div class="session-panel">
+          <span class="label">状态</span>
+          <strong id="statusText">连接中</strong>
+        </div>
+        <section id="advancedOptions" class="advanced-options" aria-label="高级采样选项" hidden>
+          <div class="advanced-header">
+            <span>高级选项</span>
+            <span id="samplingSummary" class="sampling-summary">Temp 1.00 · Top-p 0.95</span>
+          </div>
+          <div class="sampling-grid">
+            <label class="sampling-control" for="temperatureRange">
+              <span class="control-header">
+                <span>Temperature</span>
+                <output id="temperatureValue" for="temperatureRange">1.00</output>
+              </span>
+              <input id="temperatureRange" type="range" min="0" max="2" step="0.05" value="1" />
+            </label>
+
+            <label class="sampling-control" for="topPRange">
+              <span class="control-header">
+                <span>Top-p</span>
+                <output id="topPValue" for="topPRange">0.95</output>
+              </span>
+              <input id="topPRange" type="range" min="0.05" max="1" step="0.01" value="0.95" />
+            </label>
+
+            <label class="sampling-control proxy-control" for="webSearchProxyInput">
+              <span class="control-header">
+                <span>联网代理</span>
+              </span>
+              <input
+                id="webSearchProxyInput"
+                type="url"
+                autocomplete="off"
+                spellcheck="false"
+                value=""
+                placeholder="可选，例如 http://127.0.0.1:7890"
+              />
+            </label>
+          </div>
+          <button id="confirmSamplingButton" class="primary-button compact-button" type="button">
+            确定
+          </button>
+        </section>
+        <button id="resetButton" class="secondary-button" type="button" aria-label="重置会话">
+          <span aria-hidden="true">↻</span>
+          <span>Reset</span>
+        </button>
+        <a class="sidebar-link" href="/artifacts" aria-label="查看空闲成果">
+          <span aria-hidden="true">✦</span>
+          <span>成果</span>
+        </a>
+        <a class="sidebar-link" href="/analysis" aria-label="进入 Analysis Mode">
+          <span aria-hidden="true">⌁</span>
+          <span>Analysis</span>
+        </a>
+        <button id="memoryAdminButton" class="sidebar-link sidebar-button" type="button" aria-label="进入记忆后台">
+          <span aria-hidden="true">▣</span>
+          <span>记忆</span>
+        </button>
+      </aside>
+
+      <section class="chat-area" aria-label="聊天窗口">
+        <div id="messages" class="messages"></div>
+        <form id="chatForm" class="composer">
+          <div id="searchActivity" class="search-activity" hidden>
+            <div id="searchActivityList" class="search-activity-list" aria-live="polite"></div>
+          </div>
+          <div class="composer-main">
+            <textarea
+              id="messageInput"
+              name="message"
+              rows="3"
+              autocomplete="off"
+              placeholder="输入消息"
+            ></textarea>
+            <div id="attachmentPreview" class="attachment-preview" aria-label="已选择图片"></div>
+            <div class="composer-tools">
+              <button id="attachImageButton" class="tool-button" type="button" aria-label="上传图片" title="上传图片">
+                图片
+              </button>
+              <button id="webSearchButton" class="tool-button toggle-tool-button" type="button" aria-pressed="false" aria-label="启用联网搜索" title="启用联网搜索">
+                联网
+              </button>
+              <input id="imageInput" type="file" accept="image/*,.avif,.bmp,.gif,.heic,.heif,.ico,.jfif,.jpg,.jpeg,.pjpeg,.png,.svg,.tif,.tiff,.webp" multiple hidden />
+            </div>
+            <button id="sendButton" class="primary-button" type="submit">发送</button>
+          </div>
+        </form>
+      </section>
+    </main>
+    <dialog id="memoryAdminDialog" class="admin-login-dialog" aria-labelledby="memoryAdminDialogTitle">
+      <form id="memoryAdminLoginForm" class="admin-login-form" method="dialog">
+        <h2 id="memoryAdminDialogTitle">记忆后台</h2>
+        <label class="field" for="memoryAdminPassword">
+          <span>密码</span>
+          <input id="memoryAdminPassword" type="password" autocomplete="current-password" required />
+        </label>
+        <p id="memoryAdminLoginStatus" class="dialog-status"></p>
+        <div class="dialog-actions">
+          <button id="memoryAdminCancelButton" class="secondary-button compact-button" type="button">取消</button>
+          <button class="primary-button compact-button" type="submit">进入</button>
+        </div>
+      </form>
+    </dialog>
+    <script src="/static/app.js?v=20260608_mobile_chrome_fix"></script>
+  </body>
+</html>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Qwen3.6 成果</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/artifacts.css?v=20260608_xhs_wall" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <aside class="side">
+        <a class="back-link" href="/">← 返回聊天</a>
+        <div class="brand">
+          <p>Qwen3.6</p>
+          <h1>空闲成果</h1>
+        </div>
+
+        <label class="field">
+          <span>类型</span>
+          <select id="typeFilter">
+            <option value="">全部</option>
+            <option value="novel">小说</option>
+            <option value="poetry">诗歌</option>
+            <option value="script">剧本</option>
+            <option value="worldbuilding">世界观</option>
+            <option value="persona">自我设定</option>
+            <option value="notes">札记</option>
+            <option value="other">其他</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>关键词</span>
+          <input id="keywordFilter" type="search" autocomplete="off" />
+        </label>
+
+        <label class="field">
+          <span>系列</span>
+          <input id="seriesFilter" type="search" autocomplete="off" placeholder="例如 示例城市档案" />
+        </label>
+
+        <div class="sort-grid">
+          <label class="field">
+            <span>排序</span>
+            <select id="sortSelect">
+              <option value="created">时间</option>
+              <option value="likes">点赞数</option>
+              <option value="title">标题</option>
+              <option value="random">随机</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>方向</span>
+            <select id="orderSelect">
+              <option value="desc">倒序</option>
+              <option value="asc">正序</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="refreshButton" class="button" type="button">刷新</button>
+        <button id="shuffleButton" class="button secondary-action" type="button">打乱顺序</button>
+        <p id="statusText" class="status">读取中</p>
+
+        <section class="prompt-panel" aria-label="空闲创作 prompt">
+          <h2>创作 Prompt</h2>
+          <label class="field">
+            <span>空闲时写什么</span>
+            <textarea id="idlePromptInput" rows="8" placeholder="留空则由系统自由选择创作方向"></textarea>
+          </label>
+          <button id="savePromptButton" class="button" type="button">保存 Prompt</button>
+        </section>
+      </aside>
+
+      <section class="content">
+        <div class="section-head">
+          <h2>作品</h2>
+          <span id="artifactCount">0</span>
+        </div>
+        <div id="artifactList" class="artifact-list"></div>
+        <button id="loadMoreButton" class="button load-more" type="button" hidden>加载更多</button>
+
+        <div class="section-head">
+          <h2>后台运行</h2>
+          <span id="runCount">0</span>
+        </div>
+        <div id="runList" class="run-list"></div>
+      </section>
+    </main>
+    <dialog id="artifactDialog" class="artifact-dialog" aria-labelledby="artifactDialogTitle">
+      <div class="artifact-dialog-shell">
+        <div class="artifact-dialog-head">
+          <div>
+            <p id="artifactDialogMeta" class="meta"></p>
+            <h2 id="artifactDialogTitle"></h2>
+          </div>
+          <button id="artifactDialogClose" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <p id="artifactDialogSummary" class="artifact-summary"></p>
+        <div id="artifactDialogBody" class="artifact-body"></div>
+        <div class="artifact-dialog-actions">
+          <button id="artifactDialogLike" class="like-button" type="button">赞 <span>0</span></button>
+        </div>
+      </div>
+    </dialog>
+    <script src="/static/artifacts.js?v=20260608_xhs_wall"></script>
+  </body>
+</html>

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Qwen 记忆后台登录</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260603_cache_fix" />
+  </head>
+  <body class="login-page">
+    <main class="admin-login-dialog login-panel">
+      <form id="memoryAdminLoginForm" class="admin-login-form">
+        <h2>记忆后台</h2>
+        <label class="field" for="memoryAdminPassword">
+          <span>密码</span>
+          <input id="memoryAdminPassword" type="password" autocomplete="current-password" required autofocus />
+        </label>
+        <p id="memoryAdminLoginStatus" class="dialog-status"></p>
+        <div class="dialog-actions">
+          <a class="secondary-button compact-button" href="/">返回</a>
+          <button class="primary-button compact-button" type="submit">进入</button>
+        </div>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById("memoryAdminLoginForm");
+      const password = document.getElementById("memoryAdminPassword");
+      const statusText = document.getElementById("memoryAdminLoginStatus");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        statusText.textContent = "验证中";
+        const response = await fetch("/api/admin/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: password.value }),
+        });
+        if (!response.ok) {
+          statusText.textContent = "密码错误";
+          password.select();
+          return;
+        }
+        window.location.href = "/memory-admin";
+      });
+    </script>
+  </body>
+</html>

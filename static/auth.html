@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>设置管理员密码</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260608_auth_release" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-card">
+        <p class="eyebrow">WANGCAI 1.0</p>
+        <h1>管理员密码</h1>
+        <p id="authHint" class="muted">读取状态中</p>
+        <form id="authForm" class="auth-form">
+          <label class="field" id="oldPasswordField" for="oldPassword">
+            <span>旧管理员密码</span>
+            <input id="oldPassword" type="password" autocomplete="current-password" />
+          </label>
+          <label class="field" for="newPassword">
+            <span>新管理员密码</span>
+            <input id="newPassword" type="password" autocomplete="new-password" minlength="6" required />
+          </label>
+          <label class="field" for="confirmPassword">
+            <span>确认新密码</span>
+            <input id="confirmPassword" type="password" autocomplete="new-password" minlength="6" required />
+          </label>
+          <button class="primary-button" type="submit">保存密码</button>
+        </form>
+        <p id="authStatus" class="status">准备中</p>
+      </section>
+    </main>
+    <script src="/static/auth.js?v=20260608_auth_release"></script>
+  </body>
+</html>

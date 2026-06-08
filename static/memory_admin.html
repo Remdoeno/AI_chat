@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Qwen 记忆后台</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/memory_admin.css?v=20260608_auth_release" />
+  </head>
+  <body>
+    <main class="admin-shell">
+      <aside class="admin-side">
+        <a class="back-link" href="/">返回聊天</a>
+        <div class="brand">
+          <p>Qwen3.6</p>
+          <h1>记忆编辑</h1>
+        </div>
+
+        <label class="field" for="keywordInput">
+          <span>关键词</span>
+          <input id="keywordInput" type="search" autocomplete="off" />
+        </label>
+
+        <label class="field" for="labelFilter">
+          <span>标签</span>
+          <select id="labelFilter">
+            <option value="">全部</option>
+            <option value="preference">preference</option>
+            <option value="identity">identity</option>
+            <option value="rule">rule</option>
+            <option value="persona">persona</option>
+            <option value="artifact">artifact</option>
+            <option value="risk">risk</option>
+            <option value="event">event</option>
+            <option value="other">other</option>
+          </select>
+        </label>
+
+        <label class="field" for="ipFilter">
+          <span>设备身份</span>
+          <input id="ipFilter" type="search" autocomplete="off" />
+        </label>
+
+        <button id="refreshButton" class="button" type="button">刷新</button>
+        <p id="statusText" class="status">读取中</p>
+
+        <section class="create-panel" aria-label="新增记忆">
+          <h2>新增记忆</h2>
+          <label class="field" for="newLabel">
+            <span>标签</span>
+            <select id="newLabel">
+              <option value="preference">preference</option>
+              <option value="identity">identity</option>
+              <option value="rule">rule</option>
+              <option value="persona">persona</option>
+              <option value="artifact">artifact</option>
+              <option value="risk">risk</option>
+              <option value="event">event</option>
+              <option value="other" selected>other</option>
+            </select>
+          </label>
+          <label class="field" for="newIp">
+            <span>关联设备身份</span>
+            <input id="newIp" type="text" autocomplete="off" placeholder="留空为全局，例如 device:..." />
+          </label>
+          <label class="field" for="newContent">
+            <span>内容</span>
+            <textarea id="newContent" rows="6"></textarea>
+          </label>
+          <button id="createButton" class="button" type="button">新增</button>
+        </section>
+      </aside>
+
+      <section class="admin-content">
+        <div class="section-head">
+          <h2>记忆列表</h2>
+          <span id="memoryCount">0</span>
+        </div>
+        <div id="memoryList" class="memory-list"></div>
+      </section>
+    </main>
+    <script src="/static/memory_admin.js?v=20260608_auth_release"></script>
+  </body>
+</html>

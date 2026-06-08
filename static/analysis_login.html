@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Analysis Mode Login</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/analysis.css?v=20260608_analysis_markdown_artifacts" />
+  </head>
+  <body class="analysis-login-page">
+    <main class="analysis-login-card">
+      <p class="analysis-kicker">Qwen3.6</p>
+      <h1>Analysis Mode</h1>
+      <p class="analysis-muted">该入口会显示设备身份、完整 prompt、检索内容和模型调用耗时。</p>
+      <form id="analysisLoginForm" class="analysis-login-form">
+        <label for="analysisPassword">密码</label>
+        <input id="analysisPassword" type="password" autocomplete="current-password" required />
+        <p id="analysisLoginStatus" class="analysis-status"></p>
+        <button type="submit">进入</button>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById("analysisLoginForm");
+      const password = document.getElementById("analysisPassword");
+      const statusText = document.getElementById("analysisLoginStatus");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        statusText.textContent = "验证中";
+        try {
+          const response = await fetch("/api/analysis/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: password.value }),
+          });
+          if (!response.ok) {
+            throw new Error("密码错误");
+          }
+          window.location.href = "/analysis";
+        } catch (error) {
+          statusText.textContent = error.message || "验证失败";
+        }
+      });
+    </script>
+  </body>
+</html>
