@@ -22,6 +22,7 @@ html,
 body {
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -148,6 +149,7 @@ h1 {
 .messages {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 32px clamp(18px, 4vw, 56px);
 }
 
@@ -169,6 +171,12 @@ h1 {
   border-color: rgba(31, 132, 103, 0.26);
   color: var(--green);
   transform: translateY(4px);
+  animation: history-load-hint 3.4s ease forwards;
+}
+
+.history-load.is-waiting {
+  border-color: rgba(31, 132, 103, 0.2);
+  color: var(--muted);
 }
 
 .history-load.is-loading {
@@ -179,6 +187,18 @@ h1 {
 .history-load.is-error {
   border-color: rgba(194, 47, 47, 0.3);
   color: var(--danger);
+}
+
+@keyframes history-load-hint {
+  0%,
+  55% {
+    opacity: 1;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 0.22;
+    transform: translateY(-2px);
+  }
 }
 
 .message {

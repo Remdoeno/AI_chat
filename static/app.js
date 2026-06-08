@@ -38,7 +38,8 @@ const DEFAULT_SAMPLING_SETTINGS = {
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const IMAGE_COMPRESSION_NOTICE_BYTES = 2 * 1024 * 1024;
-const PREVIOUS_SESSION_ARM_MS = 2200;
+const PREVIOUS_SESSION_ARM_MS = 3600;
+const PREVIOUS_SESSION_MIN_RETRY_MS = 1000;
 const PREVIOUS_SESSION_PULL_THRESHOLD = 72;
 const IMAGE_EXTENSION_MIME = {
   avif: "image/avif",
@@ -562,14 +563,21 @@ function armOrLoadPreviousSession() {
   }
 
   const now = Date.now();
-  if (now - previousSessionArmedAt <= PREVIOUS_SESSION_ARM_MS) {
-    previousSessionArmedAt = 0;
-    loadPreviousSessionContext();
-    return;
+  if (previousSessionArmedAt) {
+    const elapsed = now - previousSessionArmedAt;
+    if (elapsed < PREVIOUS_SESSION_MIN_RETRY_MS) {
+      setHistoryLoadState("waiting", "再等一下，再拉/滚一次接上段对话");
+      return;
+    }
+    if (elapsed <= PREVIOUS_SESSION_ARM_MS) {
+      previousSessionArmedAt = 0;
+      loadPreviousSessionContext();
+      return;
+    }
   }
 
   previousSessionArmedAt = now;
-  setHistoryLoadState("armed", "再拉/滚一次加载上一段对话");
+  setHistoryLoadState("armed", "再拉/滚一次接上段对话");
   setTimeout(() => {
     if (Date.now() - previousSessionArmedAt >= PREVIOUS_SESSION_ARM_MS && !isLoadingPreviousSession) {
       previousSessionArmedAt = 0;
@@ -1172,8 +1180,10 @@ messagesEl.addEventListener("touchmove", (event) => {
     return;
   }
   touchPullDistance = event.touches[0].clientY - touchStartY;
-  if (touchPullDistance > PREVIOUS_SESSION_PULL_THRESHOLD) {
+  if (touchPullDistance > 0) {
     event.preventDefault();
+  }
+  if (touchPullDistance > PREVIOUS_SESSION_PULL_THRESHOLD) {
     armOrLoadPreviousSession();
     touchStartY = event.touches[0].clientY;
     touchPullDistance = 0;
