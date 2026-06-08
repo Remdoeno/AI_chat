@@ -47,8 +47,17 @@ DATA_DIR = APP_DIR / "data"
 DB_PATH = Path(os.environ.get("QWEN_WEB_DB", DATA_DIR / "chat_history.sqlite3"))
 AUTH_CONFIG_PATH = Path(os.environ.get("QWEN_AUTH_CONFIG", DATA_DIR / "admin_auth.json"))
 
+
+def env_bool(name: str, default: bool = True) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
 BASE_URL = os.environ.get("QWEN_MODEL_BASE_URL", "http://127.0.0.1:8000/v1")
 MODEL_NAME = os.environ.get("QWEN_MODEL_NAME", "qwen3.6-35b-a3b-262k")
+MODEL_API_KEY = os.environ.get("QWEN_MODEL_API_KEY", os.environ.get("OPENAI_API_KEY", "EMPTY")).strip() or "EMPTY"
 REQUEST_TIMEOUT = float(os.environ.get("QWEN_MODEL_TIMEOUT", "1200"))
 SYSTEM_PROMPT = os.environ.get(
     "QWEN_SYSTEM_PROMPT",
@@ -86,6 +95,7 @@ MEMORY_AGENT_TEMPERATURE = float(os.environ.get("QWEN_MEMORY_AGENT_TEMPERATURE",
 MEMORY_AGENT_TOP_P = float(os.environ.get("QWEN_MEMORY_AGENT_TOP_P", "0.8"))
 MEMORY_AGENT_STALE_RUNNING_SECONDS = float(os.environ.get("QWEN_MEMORY_AGENT_STALE_RUNNING_SECONDS", "900"))
 MEMORY_WRITE_DEDUPE_THRESHOLD = float(os.environ.get("QWEN_MEMORY_WRITE_DEDUPE_THRESHOLD", "0.88"))
+IDLE_AGENT_ENABLED = env_bool("QWEN_IDLE_AGENT_ENABLED", True)
 IDLE_AGENT_MIN_IDLE_SECONDS = float(os.environ.get("QWEN_IDLE_AGENT_MIN_IDLE_SECONDS", "90"))
 IDLE_AGENT_LOOP_SECONDS = float(os.environ.get("QWEN_IDLE_AGENT_LOOP_SECONDS", "30"))
 IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS = float(os.environ.get("QWEN_IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS", "300"))
@@ -950,7 +960,7 @@ def build_memory_retrieval_query(
     started = time.perf_counter()
     http_client = httpx.Client(trust_env=False, timeout=MEMORY_QUERY_PLANNER_TIMEOUT)
     try:
-        client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+        client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
         resp = client.chat.completions.create(
             model=MODEL_NAME,
             messages=planner_messages,
@@ -1065,7 +1075,7 @@ def should_use_memory_recall(
     started = time.perf_counter()
     http_client = httpx.Client(trust_env=False, timeout=MEMORY_GATE_TIMEOUT)
     try:
-        client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+        client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
         resp = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
@@ -1138,7 +1148,7 @@ def build_search_planner_user_prompt(user_message: str) -> str:
 def build_search_plan(user_message: str) -> Dict[str, object]:
     user_prompt = build_search_planner_user_prompt(user_message)
     http_client = httpx.Client(trust_env=False, timeout=WEB_SEARCH_PLANNER_TIMEOUT)
-    client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+    client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
     try:
         resp = client.chat.completions.create(
             model=MODEL_NAME,
@@ -3440,7 +3450,7 @@ def judge_curated_memories_with_qwen(
     started = time.perf_counter()
     http_client = httpx.Client(trust_env=False, timeout=MEMORY_JUDGE_TIMEOUT)
     try:
-        client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+        client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
         resp = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
@@ -4840,7 +4850,7 @@ def parse_idle_agent_response(text: str) -> Dict[str, object]:
 
 def call_idle_agent_model(prompt: str) -> Dict[str, str]:
     http_client = httpx.Client(trust_env=False, timeout=REQUEST_TIMEOUT)
-    client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+    client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
     try:
         stream = client.chat.completions.create(
             model=MODEL_NAME,
@@ -4933,6 +4943,8 @@ def recent_idle_agent_run_exists() -> bool:
 
 
 def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
+    if not IDLE_AGENT_ENABLED:
+        return False, "idle_disabled"
     if force:
         return True, "forced"
     with ACTIVE_GENERATIONS_LOCK:
@@ -4953,6 +4965,8 @@ def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
 def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
     can_run, reason = idle_agent_can_run(force=force)
     if not can_run:
+        if reason == "idle_disabled":
+            return {"status": "skipped", "reason": reason}
         return {"status": "busy", "reason": reason}
     if not IDLE_AGENT_WORKER_LOCK.acquire(blocking=False):
         return {"status": "busy", "reason": "idle_agent_running"}
@@ -5021,6 +5035,8 @@ def idle_agent_worker_loop() -> None:
 
 def start_idle_agent_worker() -> None:
     global IDLE_AGENT_THREAD_STARTED
+    if not IDLE_AGENT_ENABLED:
+        return
     if IDLE_AGENT_THREAD_STARTED:
         return
     IDLE_AGENT_THREAD_STARTED = True
@@ -5337,7 +5353,7 @@ def memory_agent_decision_items(decision: Dict[str, object]) -> List[Dict[str, o
 
 def call_memory_agent_model(source: str) -> Dict[str, object]:
     http_client = httpx.Client(trust_env=False, timeout=REQUEST_TIMEOUT)
-    client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+    client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
     try:
         stream = client.chat.completions.create(
             model=MODEL_NAME,
@@ -5689,7 +5705,7 @@ def format_compressed_memory_context(summary: str) -> str:
 
 def call_memory_compressor_model(user_message: str, source: str) -> str:
     http_client = httpx.Client(trust_env=False, timeout=REQUEST_TIMEOUT)
-    client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+    client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
     try:
         resp = client.chat.completions.create(
             model=MODEL_NAME,
@@ -6116,7 +6132,7 @@ def iter_model_deltas(
     top_p: float,
 ) -> Iterable[str]:
     http_client = httpx.Client(trust_env=False, timeout=REQUEST_TIMEOUT)
-    client = OpenAI(api_key="EMPTY", base_url=BASE_URL, http_client=http_client)
+    client = OpenAI(api_key=MODEL_API_KEY, base_url=BASE_URL, http_client=http_client)
     try:
         stream = client.chat.completions.create(
             model=MODEL_NAME,

@@ -1740,6 +1740,18 @@ class AppBehaviorTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "busy")
 
+    def test_idle_agent_can_be_disabled_by_environment_switch(self):
+        self.app.IDLE_AGENT_ENABLED = False
+        self.app.LAST_USER_ACTIVITY_AT = 0
+
+        can_run, reason = self.app.idle_agent_can_run(force=True)
+        result = self.app.run_idle_agent_once(force=True)
+
+        self.assertFalse(can_run)
+        self.assertEqual(reason, "idle_disabled")
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "idle_disabled")
+
     def test_idle_agent_kicks_memory_worker_when_pending_jobs_block_it(self):
         session_id = self.app.create_session("7.7.7.7", "agent-idle-memory")
         user_id = self.app.add_message(session_id, "user", "我喜欢慢慢写连续剧")
