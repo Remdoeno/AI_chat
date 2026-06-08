@@ -5,7 +5,7 @@ const backgroundPanel = document.getElementById("backgroundPanel");
 const chatForm = document.getElementById("chatForm");
 const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
-const stopButton = document.getElementById("stopButton");
+const loadPreviousButton = document.getElementById("loadPreviousButton");
 const resetButton = document.getElementById("resetButton");
 const refreshTraceButton = document.getElementById("refreshTraceButton");
 const temperatureInput = document.getElementById("temperatureInput");
@@ -13,6 +13,7 @@ const topPInput = document.getElementById("topPInput");
 const proxyInput = document.getElementById("proxyInput");
 const webSearchInput = document.getElementById("webSearchInput");
 const analysisAttachImageButton = document.getElementById("analysisAttachImageButton");
+const analysisWebSearchButton = document.getElementById("analysisWebSearchButton");
 const analysisImageInput = document.getElementById("analysisImageInput");
 const analysisAttachmentPreview = document.getElementById("analysisAttachmentPreview");
 
@@ -22,6 +23,10 @@ let traceTimer = null;
 let pendingAttachments = [];
 let userStoppedGeneration = false;
 let isMessageComposing = false;
+let isLoadingPreviousSession = false;
+let hasMorePreviousSessions = true;
+let previousSessionArmedAt = 0;
+let previousSessionHideTimer = 0;
 const openTraceKeys = new Set();
 const closedTraceKeys = new Set();
 const openBackgroundKeys = new Set();
@@ -29,12 +34,18 @@ const closedBackgroundKeys = new Set();
 const tracePayloadScrollPositions = new Map();
 const backgroundPayloadScrollPositions = new Map();
 const DEVICE_STORAGE_KEY = "qwen_device_id";
+const CHAT_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
 const ANALYSIS_SAMPLING_STORAGE_KEY = "qwen_analysis_sampling_settings";
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const IMAGE_COMPRESSION_NOTICE_BYTES = 2 * 1024 * 1024;
+const PREVIOUS_SESSION_ARM_MS = 1500;
+const PREVIOUS_SESSION_MIN_RETRY_MS = 800;
+const PREVIOUS_SESSION_DESKTOP_TOP_BUFFER = 96;
+const HISTORY_REVEAL_ANIMATION_MS = 420;
+const HISTORY_REVEAL_GAP_PX = 14;
 const IMAGE_EXTENSION_MIME = {
   avif: "image/avif",
   bmp: "image/bmp",
@@ -73,11 +84,71 @@ function hasLargeAttachment(attachments) {
   return (attachments || []).some((attachment) => Number(attachment.size || 0) > IMAGE_COMPRESSION_NOTICE_BYTES);
 }
 
+function ordinalSuffix(day) {
+  if (day % 100 >= 11 && day % 100 <= 13) {
+    return "th";
+  }
+  if (day % 10 === 1) {
+    return "st";
+  }
+  if (day % 10 === 2) {
+    return "nd";
+  }
+  if (day % 10 === 3) {
+    return "rd";
+  }
+  return "th";
+}
+
+function formatMessageTimestamp(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May.", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
+  let hours = safeDate.getHours();
+  const minutes = String(safeDate.getMinutes()).padStart(2, "0");
+  const period = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  const day = safeDate.getDate();
+  return `${String(hours).padStart(2, "0")}:${minutes} ${period}, ${months[safeDate.getMonth()]} ${day}${ordinalSuffix(day)}, ${safeDate.getFullYear()}`;
+}
+
+function setAnalysisSendButtonGenerating(generating) {
+  sendButton.classList.toggle("is-stopping", generating);
+  if (generating) {
+    sendButton.textContent = "■";
+    sendButton.type = "button";
+    sendButton.setAttribute("aria-label", "停止生成");
+    sendButton.title = "停止生成";
+    return;
+  }
+  sendButton.textContent = "发送";
+  sendButton.type = "submit";
+  sendButton.setAttribute("aria-label", "发送消息");
+  sendButton.title = "发送消息";
+}
+
 function setAnalysisBusy(busy) {
-  sendButton.disabled = busy;
+  setAnalysisSendButtonGenerating(Boolean(busy && activeController));
+  sendButton.disabled = false;
   messageInput.disabled = busy;
-  stopButton.hidden = !busy;
-  stopButton.disabled = !busy;
+  analysisAttachImageButton.disabled = busy;
+  analysisWebSearchButton.disabled = busy;
+  syncPreviousAnalysisSessionButton();
+}
+
+function setAnalysisWebSearchEnabled(enabled) {
+  webSearchInput.checked = Boolean(enabled);
+  analysisWebSearchButton.classList.toggle("is-active", webSearchInput.checked);
+  analysisWebSearchButton.setAttribute("aria-pressed", String(webSearchInput.checked));
+  analysisWebSearchButton.title = webSearchInput.checked ? "本轮会联网搜索" : "启用联网搜索";
+}
+
+function syncPreviousAnalysisSessionButton() {
+  if (!loadPreviousButton) {
+    return;
+  }
+  loadPreviousButton.disabled = Boolean(activeController || isLoadingPreviousSession || !sessionId || !hasMorePreviousSessions);
+  loadPreviousButton.textContent = hasMorePreviousSessions ? "加载上一段对话" : "已到第一段";
 }
 
 function isUsableDeviceId(value) {
@@ -241,10 +312,33 @@ function getRawMarkdown(element) {
   return element.dataset.rawMarkdown || element.textContent || "";
 }
 
+function scrollAnalysisChatToBottom() {
+  if (analysisUsesMobileHistoryButton()) {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
+    return;
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function readChatModeProxyDefault() {
+  try {
+    const raw = localStorage.getItem(CHAT_SAMPLING_STORAGE_KEY);
+    if (!raw) {
+      return "";
+    }
+    const payload = JSON.parse(raw);
+    return typeof payload.web_search_proxy === "string" ? payload.web_search_proxy.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 function loadAnalysisSamplingSettings() {
+  const chatModeProxy = readChatModeProxyDefault();
   try {
     const raw = localStorage.getItem(ANALYSIS_SAMPLING_STORAGE_KEY);
     if (!raw) {
+      proxyInput.value = chatModeProxy;
       return;
     }
     const payload = JSON.parse(raw);
@@ -254,8 +348,12 @@ function loadAnalysisSamplingSettings() {
     if (payload && payload.top_p !== undefined) {
       topPInput.value = String(clampNumber(payload.top_p, 0, 1, 0.95));
     }
+    proxyInput.value = typeof payload.web_search_proxy === "string" && payload.web_search_proxy.trim()
+      ? payload.web_search_proxy.trim()
+      : chatModeProxy;
   } catch {
     localStorage.removeItem(ANALYSIS_SAMPLING_STORAGE_KEY);
+    proxyInput.value = chatModeProxy;
   }
 }
 
@@ -263,6 +361,7 @@ function saveAnalysisSamplingSettings() {
   const payload = {
     temperature: clampNumber(temperatureInput.value, 0, 2, 0.75),
     top_p: clampNumber(topPInput.value, 0, 1, 0.95),
+    web_search_proxy: proxyInput.value.trim(),
   };
   localStorage.setItem(ANALYSIS_SAMPLING_STORAGE_KEY, JSON.stringify(payload));
 }
@@ -335,12 +434,18 @@ async function handleImageFiles(files) {
   }
 }
 
-function appendMessage(role, text, attachments = []) {
+function appendMessage(role, text, attachments = [], options = {}) {
   const row = document.createElement("article");
   row.className = `analysis-message ${role}`;
   const label = document.createElement("div");
   label.className = "analysis-message-label";
-  label.textContent = role === "user" ? "你" : "Qwen";
+  label.textContent = role === "user" ? "你" : "助手";
+  const timestamp = document.createElement("div");
+  timestamp.className = "analysis-message-timestamp";
+  timestamp.textContent = formatMessageTimestamp(options.createdAt);
+  const meta = document.createElement("div");
+  meta.className = "analysis-message-meta";
+  meta.append(label, timestamp);
   const body = document.createElement("div");
   body.className = "analysis-message-body";
   if (role === "assistant") {
@@ -359,10 +464,263 @@ function appendMessage(role, text, attachments = []) {
     });
     body.append(images);
   }
-  row.append(label, body);
-  messagesEl.append(row);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  row.append(meta, body);
+  if (options.prepend) {
+    messagesEl.prepend(row);
+  } else {
+    messagesEl.append(row);
+    if (options.scroll !== false) {
+      scrollAnalysisChatToBottom();
+    }
+  }
   return body;
+}
+
+function resetPreviousAnalysisSessionLoadState() {
+  previousSessionArmedAt = 0;
+  window.clearTimeout(previousSessionHideTimer);
+  previousSessionHideTimer = 0;
+  isLoadingPreviousSession = false;
+  hasMorePreviousSessions = true;
+  removeAnalysisHistoryLoadIndicator();
+  syncPreviousAnalysisSessionButton();
+}
+
+function analysisUsesMobileHistoryButton() {
+  return window.matchMedia("(max-width: 760px)").matches;
+}
+
+function isNearAnalysisMessagesTop() {
+  return messagesEl.scrollTop <= PREVIOUS_SESSION_DESKTOP_TOP_BUFFER;
+}
+
+function cancelPreviousAnalysisSessionPreparation() {
+  if (!previousSessionArmedAt) {
+    return;
+  }
+  previousSessionArmedAt = 0;
+  removeAnalysisHistoryLoadIndicator(true);
+}
+
+function ensureAnalysisHistoryLoadIndicator() {
+  let indicator = messagesEl.querySelector(".analysis-history-load");
+  if (!indicator) {
+    indicator = document.createElement("div");
+    indicator.className = "analysis-history-load is-idle";
+    indicator.textContent = "加载上一段对话";
+    messagesEl.prepend(indicator);
+  }
+  return indicator;
+}
+
+function removeAnalysisHistoryLoadIndicator(animated = false) {
+  const current = messagesEl.querySelector(".analysis-history-load");
+  if (!current) {
+    return;
+  }
+  if (!animated) {
+    current.className = "analysis-history-load is-idle";
+    current.textContent = "加载上一段对话";
+    return;
+  }
+  current.classList.add("is-hiding");
+  window.setTimeout(() => {
+    current.className = "analysis-history-load is-idle";
+    current.textContent = "加载上一段对话";
+  }, 500);
+}
+
+function setAnalysisHistoryLoadState(state, text) {
+  if (!text) {
+    return;
+  }
+  const indicator = ensureAnalysisHistoryLoadIndicator();
+  indicator.replaceChildren();
+  indicator.className = `analysis-history-load is-${state}`;
+  if (state === "loading") {
+    const spinner = document.createElement("span");
+    spinner.className = "analysis-history-load-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = text;
+    indicator.append(spinner, label);
+  } else {
+    indicator.textContent = text;
+  }
+}
+
+function enterPreviousAnalysisSessionArmed() {
+  if (
+    analysisUsesMobileHistoryButton() ||
+    activeController ||
+    isLoadingPreviousSession ||
+    !hasMorePreviousSessions ||
+    !sessionId ||
+    previousSessionArmedAt
+  ) {
+    return;
+  }
+  window.clearTimeout(previousSessionHideTimer);
+  previousSessionHideTimer = 0;
+  previousSessionArmedAt = Date.now();
+  setAnalysisHistoryLoadState("armed", "加载上一段对话");
+  previousSessionHideTimer = window.setTimeout(() => {
+    if (Date.now() - previousSessionArmedAt >= PREVIOUS_SESSION_ARM_MS && !isLoadingPreviousSession) {
+      previousSessionArmedAt = 0;
+      removeAnalysisHistoryLoadIndicator(true);
+    }
+  }, PREVIOUS_SESSION_ARM_MS);
+}
+
+function armOrLoadPreviousAnalysisSession() {
+  if (activeController || isLoadingPreviousSession || !hasMorePreviousSessions || !sessionId) {
+    return;
+  }
+  if (!isNearAnalysisMessagesTop()) {
+    cancelPreviousAnalysisSessionPreparation();
+    return;
+  }
+
+  const now = Date.now();
+  if (!previousSessionArmedAt) {
+    enterPreviousAnalysisSessionArmed();
+    return;
+  }
+
+  const elapsed = now - previousSessionArmedAt;
+  if (elapsed < PREVIOUS_SESSION_MIN_RETRY_MS) {
+    setAnalysisHistoryLoadState("waiting", "加载上一段对话");
+    return;
+  }
+  if (elapsed <= PREVIOUS_SESSION_ARM_MS) {
+    previousSessionArmedAt = 0;
+    loadPreviousAnalysisSessionContext();
+    return;
+  }
+
+  enterPreviousAnalysisSessionArmed();
+}
+
+function handleDesktopPreviousAnalysisSessionWheel(event) {
+  if (analysisUsesMobileHistoryButton() || event.deltaY >= -24 || !isNearAnalysisMessagesTop()) {
+    return;
+  }
+  event.preventDefault();
+  messagesEl.scrollTop = 0;
+  armOrLoadPreviousAnalysisSession();
+}
+
+function dampedHistoryScrollProgress(progress) {
+  const t = Math.min(1, Math.max(0, progress));
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function animateHistoryScrollTo(targetTop, duration = HISTORY_REVEAL_ANIMATION_MS) {
+  const startTop = messagesEl.scrollTop;
+  const maxTop = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
+  const endTop = Math.max(0, Math.min(maxTop, targetTop));
+  const delta = endTop - startTop;
+  if (Math.abs(delta) < 1) {
+    messagesEl.scrollTop = endTop;
+    return;
+  }
+
+  const startedAt = performance.now();
+  function step(now) {
+    const progress = (now - startedAt) / duration;
+    messagesEl.scrollTop = startTop + delta * dampedHistoryScrollProgress(progress);
+    if (progress < 1) {
+      window.requestAnimationFrame(step);
+    } else {
+      messagesEl.scrollTop = endTop;
+    }
+  }
+  window.requestAnimationFrame(step);
+}
+
+function revealLastLoadedHistoryMessage(lastItem, preservedTop) {
+  if (!lastItem) {
+    messagesEl.scrollTop = preservedTop;
+    return;
+  }
+
+  if (analysisUsesMobileHistoryButton()) {
+    const targetTop = Math.max(0, lastItem.getBoundingClientRect().top + window.scrollY - HISTORY_REVEAL_GAP_PX);
+    window.scrollTo({ top: targetTop, behavior: "smooth" });
+    return;
+  }
+
+  const maxTop = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
+  const safePreservedTop = Math.max(0, Math.min(maxTop, preservedTop));
+  messagesEl.scrollTop = safePreservedTop;
+  const targetTop = Math.max(0, Math.min(safePreservedTop, lastItem.offsetTop - HISTORY_REVEAL_GAP_PX));
+  animateHistoryScrollTo(targetTop);
+}
+
+function prependAnalysisHistoryMessages(messages) {
+  const history = Array.isArray(messages) ? messages : [];
+  if (!history.length) {
+    return;
+  }
+  const indicator = messagesEl.querySelector(".analysis-history-load");
+  if (indicator) {
+    indicator.remove();
+  }
+  const previousHeight = messagesEl.scrollHeight;
+  const previousTop = messagesEl.scrollTop;
+  const loadedMessageItems = [];
+  for (const message of [...history].reverse()) {
+    const body = appendMessage(message.role === "assistant" ? "assistant" : "user", message.content || "", [], {
+      prepend: true,
+      scroll: false,
+      createdAt: message.created_at,
+    });
+    loadedMessageItems.unshift(body.parentElement);
+  }
+  ensureAnalysisHistoryLoadIndicator();
+  const preservedTop = messagesEl.scrollHeight - previousHeight + previousTop;
+  revealLastLoadedHistoryMessage(loadedMessageItems.at(-1), preservedTop);
+}
+
+async function loadPreviousAnalysisSessionContext() {
+  if (!sessionId || activeController || isLoadingPreviousSession || !hasMorePreviousSessions) {
+    return;
+  }
+  isLoadingPreviousSession = true;
+  syncPreviousAnalysisSessionButton();
+  setAnalysisHistoryLoadState("loading", "加载上一段对话");
+  setStatus("加载历史中");
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/load-previous?analysis_mode=1`, {
+      method: "POST",
+      headers: deviceIdentityHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const payload = await response.json();
+    hasMorePreviousSessions = Boolean(payload.has_more);
+    if (!payload.loaded) {
+      setAnalysisHistoryLoadState("done", "已经到第一段对话了");
+      setStatus("已到最早对话");
+      hasMorePreviousSessions = false;
+      setTimeout(() => removeAnalysisHistoryLoadIndicator(true), 1400);
+      return;
+    }
+    prependAnalysisHistoryMessages(payload.messages || []);
+    setStatus(hasMorePreviousSessions ? "已加载上一段对话" : "已加载到最早对话");
+    await refreshTraces();
+  } catch (error) {
+    setAnalysisHistoryLoadState("error", `加载失败：${error.message || error}`);
+    setStatus("历史加载失败");
+    setTimeout(() => removeAnalysisHistoryLoadIndicator(true), 1800);
+  } finally {
+    isLoadingPreviousSession = false;
+    previousSessionArmedAt = 0;
+    window.clearTimeout(previousSessionHideTimer);
+    previousSessionHideTimer = 0;
+    syncPreviousAnalysisSessionButton();
+  }
 }
 
 async function createSession() {
@@ -375,6 +733,9 @@ async function createSession() {
   }
   const data = await response.json();
   sessionId = data.session_id;
+  resetPreviousAnalysisSessionLoadState();
+  ensureAnalysisHistoryLoadIndicator();
+  syncPreviousAnalysisSessionButton();
   setStatus(`session ${sessionId.slice(0, 8)}`);
   await refreshTraces();
   await startOpeningPrompt(data);
@@ -409,7 +770,10 @@ async function resetSession() {
   }
   const data = await response.json();
   sessionId = data.session_id;
+  resetPreviousAnalysisSessionLoadState();
   messagesEl.replaceChildren();
+  ensureAnalysisHistoryLoadIndicator();
+  syncPreviousAnalysisSessionButton();
   tracePanel.replaceChildren();
   setStatus(`session ${sessionId.slice(0, 8)}`);
   await startOpeningPrompt(data);
@@ -697,7 +1061,7 @@ async function stopActiveGeneration() {
     return;
   }
   userStoppedGeneration = true;
-  stopButton.disabled = true;
+  sendButton.disabled = true;
   try {
     if (sessionId) {
       await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cancel`, {
@@ -730,8 +1094,8 @@ async function sendMessage(text, options = {}) {
   const assistantBody = appendMessage("assistant", "");
   let assistantMarkdown = "";
   userStoppedGeneration = false;
-  setAnalysisBusy(true);
   activeController = new AbortController();
+  setAnalysisBusy(true);
   setStatus(hasLargeAttachment(attachmentsForMessage) ? "图片过大，狠狠压缩中..." : "生成中");
   try {
     const response = await fetch("/api/chat/stream", {
@@ -826,6 +1190,14 @@ chatForm.addEventListener("submit", async (event) => {
   await sendMessage(text || "请分析这张图片。");
 });
 
+sendButton.addEventListener("click", async (event) => {
+  if (!activeController) {
+    return;
+  }
+  event.preventDefault();
+  await stopActiveGeneration();
+});
+
 messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !isImeCompositionEvent(event)) {
     event.preventDefault();
@@ -851,13 +1223,21 @@ resetButton.addEventListener("click", async () => {
 });
 
 refreshTraceButton.addEventListener("click", refreshTraces);
-stopButton.addEventListener("click", stopActiveGeneration);
 temperatureInput.addEventListener("change", saveAnalysisSamplingSettings);
 topPInput.addEventListener("change", saveAnalysisSamplingSettings);
+proxyInput.addEventListener("change", saveAnalysisSamplingSettings);
 temperatureInput.addEventListener("input", saveAnalysisSamplingSettings);
 topPInput.addEventListener("input", saveAnalysisSamplingSettings);
+proxyInput.addEventListener("input", saveAnalysisSamplingSettings);
 analysisAttachImageButton.addEventListener("click", () => analysisImageInput.click());
+analysisWebSearchButton.addEventListener("click", () => {
+  setAnalysisWebSearchEnabled(!webSearchInput.checked);
+  setStatus(webSearchInput.checked ? "联网搜索已开启" : "联网搜索已关闭");
+  messageInput.focus();
+});
 analysisImageInput.addEventListener("change", () => handleImageFiles(analysisImageInput.files));
+loadPreviousButton.addEventListener("click", () => loadPreviousAnalysisSessionContext());
+messagesEl.addEventListener("wheel", handleDesktopPreviousAnalysisSessionWheel, { passive: false });
 
 window.addEventListener("beforeunload", () => {
   if (sessionId) {
@@ -873,6 +1253,7 @@ window.addEventListener("beforeunload", () => {
 });
 
 loadAnalysisSamplingSettings();
+setAnalysisWebSearchEnabled(false);
 
 createSession()
   .then(() => {

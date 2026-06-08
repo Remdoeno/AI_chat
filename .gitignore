@@ -12,10 +12,12 @@ log/
 logs/
 backups/
 output/
+__upload_tmp__/
 *.sqlite3
 *.sqlite3-*
 *.db
 *.pid
+*.bundle
 
 models/
 model/

@@ -38,10 +38,13 @@ const DEFAULT_SAMPLING_SETTINGS = {
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const IMAGE_COMPRESSION_NOTICE_BYTES = 2 * 1024 * 1024;
-const PREVIOUS_SESSION_ARM_MS = 3600;
+const PREVIOUS_SESSION_ARM_MS = 1500;
 const PREVIOUS_SESSION_MIN_RETRY_MS = 800;
 const PREVIOUS_SESSION_PULL_THRESHOLD = 72;
 const PREVIOUS_SESSION_DESKTOP_TOP_BUFFER = 96;
+const TOUCH_TOP_INERTIA_WINDOW_MS = 800;
+const HISTORY_REVEAL_ANIMATION_MS = 420;
+const HISTORY_REVEAL_GAP_PX = 14;
 const IMAGE_EXTENSION_MIME = {
   avif: "image/avif",
   bmp: "image/bmp",
@@ -66,7 +69,6 @@ let isResetting = false;
 let bunnyClickTimes = [];
 let samplingSettings = loadSamplingSettings();
 let activeAssistantBody = null;
-let activeStopButton = null;
 let userStoppedGeneration = false;
 let pendingAttachments = [];
 let webSearchEnabled = false;
@@ -74,10 +76,15 @@ let activeSearchQuery = "";
 let isMessageComposing = false;
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
 let previousSessionArmedAt = 0;
+let previousSessionHideTimer = 0;
 let isLoadingPreviousSession = false;
 let hasMorePreviousSessions = true;
 let touchStartY = 0;
 let touchPullDistance = 0;
+let touchHistoryGestureFired = false;
+let wasTouchScrollingTowardTop = false;
+let touchHistoryArmOnTop = false;
+let touchHistoryClearTimer = 0;
 
 function isUsableDeviceId(value) {
   return /^[A-Za-z0-9_-]{12,96}$/.test(String(value || "").trim());
@@ -110,8 +117,24 @@ function jsonHeaders() {
   return { "Content-Type": "application/json", ...deviceIdentityHeaders() };
 }
 
+function setSendButtonGenerating(generating) {
+  sendButton.classList.toggle("is-stopping", generating);
+  if (generating) {
+    sendButton.textContent = "■";
+    sendButton.type = "button";
+    sendButton.setAttribute("aria-label", "停止生成");
+    sendButton.title = "停止生成";
+    return;
+  }
+  sendButton.textContent = "发送";
+  sendButton.type = "submit";
+  sendButton.setAttribute("aria-label", "发送消息");
+  sendButton.title = "发送消息";
+}
+
 function setBusy(busy) {
-  sendButton.disabled = busy;
+  setSendButtonGenerating(Boolean(busy && activeController));
+  sendButton.disabled = isResetting && !activeController;
   resetButton.disabled = isResetting;
   messageInput.disabled = busy || isResetting;
   temperatureRange.disabled = busy || isResetting;
@@ -193,6 +216,34 @@ function clampNumber(value, min, max, fallback) {
 
 function isImeCompositionEvent(event) {
   return isMessageComposing || event.isComposing || event.keyCode === 229;
+}
+
+function ordinalSuffix(day) {
+  if (day % 100 >= 11 && day % 100 <= 13) {
+    return "th";
+  }
+  if (day % 10 === 1) {
+    return "st";
+  }
+  if (day % 10 === 2) {
+    return "nd";
+  }
+  if (day % 10 === 3) {
+    return "rd";
+  }
+  return "th";
+}
+
+function formatMessageTimestamp(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const months = ["Jan.", "Feb.", "Mar.", "Apr.", "May.", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
+  let hours = safeDate.getHours();
+  const minutes = String(safeDate.getMinutes()).padStart(2, "0");
+  const period = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  const day = safeDate.getDate();
+  return `${String(hours).padStart(2, "0")}:${minutes} ${period}, ${months[safeDate.getMonth()]} ${day}${ordinalSuffix(day)}, ${safeDate.getFullYear()}`;
 }
 
 function formatSamplingValue(value) {
@@ -287,21 +338,27 @@ function removeHistoryLoadIndicator(animated = false) {
   if (!current) {
     return;
   }
+  window.clearTimeout(previousSessionHideTimer);
+  previousSessionHideTimer = 0;
   if (!animated) {
-    current.remove();
+    current.className = "history-load is-idle";
+    current.textContent = "加载上一段对话";
     return;
   }
   current.classList.add("is-hiding");
-  setTimeout(() => current.remove(), 240);
+  window.setTimeout(() => {
+    current.className = "history-load is-idle";
+    current.textContent = "加载上一段对话";
+  }, 500);
 }
 
 function setHistoryLoadState(state, text) {
-  removeHistoryLoadIndicator();
   if (!text) {
     return;
   }
-  const indicator = document.createElement("div");
-  indicator.className = `history-load is-${state} is-entering`;
+  const indicator = ensureHistoryLoadIndicator();
+  indicator.replaceChildren();
+  indicator.className = `history-load is-${state}`;
   if (state === "loading") {
     const spinner = document.createElement("span");
     spinner.className = "history-load-spinner";
@@ -312,10 +369,6 @@ function setHistoryLoadState(state, text) {
   } else {
     indicator.textContent = text;
   }
-  messagesEl.prepend(indicator);
-  requestAnimationFrame(() => {
-    indicator.classList.remove("is-entering");
-  });
 }
 
 function escapeHtml(text) {
@@ -451,10 +504,16 @@ function createBubble(role, content = "", attachments = [], options = {}) {
 
   const label = document.createElement("div");
   label.className = "message-label";
-  label.textContent = role === "user" ? "你" : "Qwen";
+  label.textContent = role === "user" ? "你" : "助手";
 
   const body = document.createElement("div");
   body.className = "message-body";
+  const timestamp = document.createElement("div");
+  timestamp.className = "message-timestamp";
+  timestamp.textContent = formatMessageTimestamp(options.createdAt);
+  const meta = document.createElement("div");
+  meta.className = "message-meta";
+  meta.append(label, timestamp);
   if (attachments.length) {
     if (content) {
       const text = document.createElement("div");
@@ -480,7 +539,7 @@ function createBubble(role, content = "", attachments = [], options = {}) {
     body.textContent = content;
   }
 
-  item.append(label, body);
+  item.append(meta, body);
   if (options.prepend) {
     messagesEl.prepend(item);
   } else {
@@ -492,32 +551,15 @@ function createBubble(role, content = "", attachments = [], options = {}) {
   return body;
 }
 
-function attachInlineStopButton(assistantBody) {
-  const item = assistantBody.parentElement;
-  const button = document.createElement("button");
-  button.className = "message-stop-button";
-  button.type = "button";
-  button.textContent = "■";
-  button.setAttribute("aria-label", "停止生成");
-  button.title = "停止生成";
-  button.addEventListener("click", stopActiveGeneration);
-  item.appendChild(button);
-  activeStopButton = button;
-}
-
-function removeInlineStopButton() {
-  if (activeStopButton) {
-    activeStopButton.remove();
-    activeStopButton = null;
-  }
-}
-
 function clearMessages() {
   messagesEl.replaceChildren();
+  ensureHistoryLoadIndicator();
 }
 
 function resetPreviousSessionLoadState() {
   previousSessionArmedAt = 0;
+  window.clearTimeout(previousSessionHideTimer);
+  previousSessionHideTimer = 0;
   isLoadingPreviousSession = false;
   hasMorePreviousSessions = true;
   removeHistoryLoadIndicator();
@@ -531,26 +573,95 @@ function cancelPreviousSessionPreparation() {
   removeHistoryLoadIndicator(true);
 }
 
+function ensureHistoryLoadIndicator() {
+  let indicator = messagesEl.querySelector(".history-load");
+  if (!indicator) {
+    indicator = document.createElement("div");
+    indicator.className = "history-load is-idle";
+    indicator.textContent = "加载上一段对话";
+    messagesEl.prepend(indicator);
+  }
+  return indicator;
+}
+
 function enterPreviousSessionArmed() {
   if (activeController || isLoadingPreviousSession || !hasMorePreviousSessions || !sessionId || previousSessionArmedAt) {
     return;
   }
+  window.clearTimeout(previousSessionHideTimer);
+  previousSessionHideTimer = 0;
   previousSessionArmedAt = Date.now();
   setHistoryLoadState("armed", "加载上一段对话");
-  setTimeout(() => {
+  previousSessionHideTimer = window.setTimeout(() => {
     if (Date.now() - previousSessionArmedAt >= PREVIOUS_SESSION_ARM_MS && !isLoadingPreviousSession) {
       previousSessionArmedAt = 0;
       removeHistoryLoadIndicator(true);
     }
-  }, PREVIOUS_SESSION_ARM_MS + 80);
+  }, PREVIOUS_SESSION_ARM_MS);
 }
 
 function handleMessagesScroll() {
-  if (!isAtMessagesTop()) {
-    cancelPreviousSessionPreparation();
+  if (isAtMessagesTop() && touchHistoryArmOnTop && wasTouchScrollingTowardTop && !touchHistoryGestureFired) {
+    touchHistoryGestureFired = true;
+    touchHistoryArmOnTop = false;
+    window.clearTimeout(touchHistoryClearTimer);
+    touchHistoryClearTimer = 0;
+    armOrLoadPreviousSession();
     return;
   }
-  enterPreviousSessionArmed();
+  if (!isAtMessagesTop()) {
+    cancelPreviousSessionPreparation();
+  }
+}
+
+function scheduleTouchHistoryStateClear() {
+  window.clearTimeout(touchHistoryClearTimer);
+  touchHistoryClearTimer = window.setTimeout(() => {
+    wasTouchScrollingTowardTop = false;
+    touchHistoryArmOnTop = false;
+    touchHistoryClearTimer = 0;
+  }, TOUCH_TOP_INERTIA_WINDOW_MS);
+}
+
+function dampedHistoryScrollProgress(progress) {
+  const t = Math.min(1, Math.max(0, progress));
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function animateHistoryScrollTo(targetTop, duration = HISTORY_REVEAL_ANIMATION_MS) {
+  const startTop = messagesEl.scrollTop;
+  const maxTop = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
+  const endTop = Math.max(0, Math.min(maxTop, targetTop));
+  const delta = endTop - startTop;
+  if (Math.abs(delta) < 1) {
+    messagesEl.scrollTop = endTop;
+    return;
+  }
+
+  const startedAt = performance.now();
+  function step(now) {
+    const progress = (now - startedAt) / duration;
+    messagesEl.scrollTop = startTop + delta * dampedHistoryScrollProgress(progress);
+    if (progress < 1) {
+      window.requestAnimationFrame(step);
+    } else {
+      messagesEl.scrollTop = endTop;
+    }
+  }
+  window.requestAnimationFrame(step);
+}
+
+function revealLastLoadedHistoryMessage(lastItem, preservedTop) {
+  if (!lastItem) {
+    messagesEl.scrollTop = preservedTop;
+    return;
+  }
+
+  const maxTop = Math.max(0, messagesEl.scrollHeight - messagesEl.clientHeight);
+  const safePreservedTop = Math.max(0, Math.min(maxTop, preservedTop));
+  messagesEl.scrollTop = safePreservedTop;
+  const targetTop = Math.max(0, Math.min(safePreservedTop, lastItem.offsetTop - HISTORY_REVEAL_GAP_PX));
+  animateHistoryScrollTo(targetTop);
 }
 
 function prependHistoryMessages(messages) {
@@ -559,16 +670,24 @@ function prependHistoryMessages(messages) {
     return;
   }
 
-  removeHistoryLoadIndicator();
+  const indicator = messagesEl.querySelector(".history-load");
+  if (indicator) {
+    indicator.remove();
+  }
   const previousHeight = messagesEl.scrollHeight;
   const previousTop = messagesEl.scrollTop;
+  const loadedMessageItems = [];
   for (const message of [...history].reverse()) {
-    createBubble(message.role === "assistant" ? "assistant" : "user", message.content || "", [], {
+    const body = createBubble(message.role === "assistant" ? "assistant" : "user", message.content || "", [], {
       prepend: true,
       scroll: false,
+      createdAt: message.created_at,
     });
+    loadedMessageItems.unshift(body.parentElement);
   }
-  messagesEl.scrollTop = messagesEl.scrollHeight - previousHeight + previousTop;
+  ensureHistoryLoadIndicator();
+  const preservedTop = messagesEl.scrollHeight - previousHeight + previousTop;
+  revealLastLoadedHistoryMessage(loadedMessageItems.at(-1), preservedTop);
 }
 
 async function loadPreviousSessionContext() {
@@ -646,6 +765,29 @@ function handleDesktopPreviousSessionWheel(event) {
   event.preventDefault();
   messagesEl.scrollTop = 0;
   armOrLoadPreviousSession();
+}
+
+function handleMobilePreviousSessionPull(event) {
+  if (event.touches.length !== 1) {
+    return;
+  }
+  touchPullDistance = event.touches[0].clientY - touchStartY;
+  wasTouchScrollingTowardTop = touchPullDistance > 0;
+  if (touchPullDistance <= 0) {
+    return;
+  }
+  touchHistoryArmOnTop = true;
+  if (!isNearMessagesTop()) {
+    return;
+  }
+  event.preventDefault();
+  if (touchPullDistance > 8 && !touchHistoryGestureFired) {
+    touchHistoryGestureFired = true;
+    messagesEl.scrollTop = 0;
+    armOrLoadPreviousSession();
+    touchStartY = event.touches[0].clientY;
+    touchPullDistance = 0;
+  }
 }
 
 function renderAttachmentPreview() {
@@ -870,9 +1012,7 @@ async function stopActiveGeneration() {
     return;
   }
   userStoppedGeneration = true;
-  if (activeStopButton) {
-    activeStopButton.disabled = true;
-  }
+  sendButton.disabled = true;
   try {
     if (sessionId) {
       await fetch(`/api/sessions/${sessionId}/cancel`, {
@@ -1013,7 +1153,6 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
   }
   const assistantBody = createBubble("assistant", openingPlaceholder);
   let hasReceivedToken = false;
-  attachInlineStopButton(assistantBody);
   activeAssistantBody = assistantBody;
   userStoppedGeneration = false;
   activeController = new AbortController();
@@ -1139,7 +1278,6 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
       setStatus("错误");
     }
   } finally {
-    removeInlineStopButton();
     activeController = null;
     activeAssistantBody = null;
     userStoppedGeneration = false;
@@ -1200,6 +1338,14 @@ chatForm.addEventListener("submit", async (event) => {
   await sendMessage(text, attachments, useWebSearch);
 });
 
+sendButton.addEventListener("click", async (event) => {
+  if (!activeController) {
+    return;
+  }
+  event.preventDefault();
+  await stopActiveGeneration();
+});
+
 messageInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !isImeCompositionEvent(event)) {
     event.preventDefault();
@@ -1232,21 +1378,14 @@ messagesEl.addEventListener("touchstart", (event) => {
   }
   touchStartY = event.touches[0].clientY;
   touchPullDistance = 0;
+  touchHistoryGestureFired = false;
+  wasTouchScrollingTowardTop = false;
+  touchHistoryArmOnTop = false;
+  window.clearTimeout(touchHistoryClearTimer);
+  touchHistoryClearTimer = 0;
 }, { passive: true });
-messagesEl.addEventListener("touchmove", (event) => {
-  if (event.touches.length !== 1 || !isAtMessagesTop()) {
-    return;
-  }
-  touchPullDistance = event.touches[0].clientY - touchStartY;
-  if (touchPullDistance > 0) {
-    event.preventDefault();
-  }
-  if (touchPullDistance > PREVIOUS_SESSION_PULL_THRESHOLD) {
-    armOrLoadPreviousSession();
-    touchStartY = event.touches[0].clientY;
-    touchPullDistance = 0;
-  }
-}, { passive: false });
+messagesEl.addEventListener("touchmove", handleMobilePreviousSessionPull, { passive: false });
+messagesEl.addEventListener("touchend", scheduleTouchHistoryStateClear, { passive: true });
 imageInput.addEventListener("change", async () => {
   try {
     await addImageFiles(imageInput.files || []);

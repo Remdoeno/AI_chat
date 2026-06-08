@@ -103,6 +103,7 @@ MEMORY_AGENT_MAX_TOKENS = int(os.environ.get("QWEN_MEMORY_AGENT_MAX_TOKENS", "30
 MEMORY_AGENT_TEMPERATURE = float(os.environ.get("QWEN_MEMORY_AGENT_TEMPERATURE", "0.1"))
 MEMORY_AGENT_TOP_P = float(os.environ.get("QWEN_MEMORY_AGENT_TOP_P", "0.8"))
 MEMORY_AGENT_STALE_RUNNING_SECONDS = float(os.environ.get("QWEN_MEMORY_AGENT_STALE_RUNNING_SECONDS", "900"))
+MEMORY_AGENT_CONTEXT_TURNS = int(os.environ.get("QWEN_MEMORY_AGENT_CONTEXT_TURNS", "3"))
 MEMORY_WRITE_DEDUPE_THRESHOLD = float(os.environ.get("QWEN_MEMORY_WRITE_DEDUPE_THRESHOLD", "0.88"))
 IDLE_AGENT_ENABLED = env_bool("QWEN_IDLE_AGENT_ENABLED", True)
 IDLE_AGENT_MIN_IDLE_SECONDS = float(os.environ.get("QWEN_IDLE_AGENT_MIN_IDLE_SECONDS", "90"))
@@ -239,8 +240,10 @@ MEMORY_COMPRESS_SYSTEM_PROMPT = (
 
 MEMORY_AGENT_SYSTEM_PROMPT = (
     "你是一个后台长期记忆整理 agent。"
-    "你只判断一轮聊天是否值得写入长期记忆库。"
-    "输入只应包含用户发言；你只能根据用户原话提炼记忆，不能把 assistant 的表达、推测、玩笑或解释当成用户事实。"
+    "你负责判断最近几轮聊天是否值得写入长期记忆库。"
+    "输入会包含最近最多 3 轮 user/assistant 对话；assistant_context_only 行只用于理解上下文和指代，不能作为记忆事实来源。"
+    "提取的信息应只包含用户发言，但需要结合这一段对话整体来看；如果用户说“这件事”“刚才说的”“你会记住吗”等承接前文的话，必须回看前文用户原话判断。"
+    "你要尽量根据用户原话提炼记忆，不能把 assistant 的表达、推测、玩笑、角色扮演或解释当成用户事实。"
     "重要记忆包括：用户稳定身份、称呼、偏好、长期设定、反复出现的规则、明确要求、需要避免的错误、未来日程事件。"
     "identity 只用于当前用户本人身份，不用于第三方人物、论文作者、老师、名人或公开机构信息。"
     "第三方人物、公开事实、检索问题或百科式事实默认不要保存为长期记忆，也不要保存为 identity；"
@@ -250,10 +253,14 @@ MEMORY_AGENT_SYSTEM_PROMPT = (
     "event 的 timeline_at 必须用当前真实时间解析成 ISO 8601 时间；如果只有日期没有具体时刻，选择当天 09:00；如果是晚上，选择 19:00。"
     "如果用户只是在询问、查询或确认已有日程，例如“周三及之后有什么活动吗”，不要保存为 preference、rule 或 event；"
     "只有用户提供新的具体事项、时间、提醒要求，或更正已有事项时才保存日程相关记忆。"
+    "用户对助手的说话风格、性格、语气、称呼、开场白、互动方式或回答习惯提出要求时，"
+    "即使没有写出“用户”二字，也应保存为 preference 或 rule；例如“希望助手更温柔”“每次见面先讲笑话”。"
+    "如果用户表达对助手、某个长期角色、共同设定或关系状态的明确偏好，并追问是否会被记住，应结合前文保存为 preference、persona、rule 或 other。"
+    "每次判断都必须写 rationale，并用一句话说明判据：命中了哪类长期价值，或为什么只是临时闲聊/第三方事实/模型自述而不重要。"
     "不重要内容包括：一次性闲聊、复读、无意义数字、模型回答模板、临时情绪、没有长期价值的玩笑。"
     "如果重要，输出简短自然语言记忆，禁止保存 assistant 自己编出的补充属性，禁止保存设备身份、session、User-Agent。"
-    "只输出 JSON。优先输出：{\"important\": true/false, \"items\": [{\"label\": \"preference|identity|rule|persona|risk|event|fact|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.0到1.0}]}。"
-    "如果只有一条普通记忆，也兼容输出：{\"important\": true/false, \"label\": \"preference|identity|rule|persona|risk|event|fact|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.7}。"
+    "只输出 JSON。优先输出：{\"important\": true/false, \"rationale\":\"一句话说明重要或不重要的原因\", \"items\": [{\"label\": \"preference|identity|rule|persona|risk|event|fact|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.0到1.0}]}。"
+    "如果只有一条普通记忆，也兼容输出：{\"important\": true/false, \"rationale\":\"一句话说明重要或不重要的原因\", \"label\": \"preference|identity|rule|persona|risk|event|fact|other\", \"memory\": \"...\", \"timeline_at\": \"ISO时间或空字符串\", \"confidence\": 0.7}。"
 )
 
 IDLE_AGENT_SYSTEM_PROMPT = (
@@ -3019,7 +3026,7 @@ def previous_context_candidate(
 
     excluded = [current_session_id] + linked_ids
     placeholders = ",".join("?" for _ in excluded)
-    return conn.execute(
+    rows = conn.execute(
         f"""
         SELECT s.id, s.visitor_ip, s.user_agent, s.started_at, s.ended_at, s.end_reason,
                e.id AS start_event_id
@@ -3042,10 +3049,36 @@ def previous_context_candidate(
                 )
           )
         ORDER BY e.id DESC
-        LIMIT 1
+        LIMIT 30
         """,
         [visitor, *excluded, boundary_event_id],
+    ).fetchall()
+    for row in rows:
+        if previous_session_has_loadable_messages(conn, str(row["id"])):
+            return row
+    return None
+
+
+def previous_session_has_loadable_messages(conn: sqlite3.Connection, session_id: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT
+          COUNT(*) AS visible_count,
+          SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) AS assistant_count
+        FROM messages
+        WHERE session_id = ?
+          AND status = 'completed'
+          AND role IN ('user', 'assistant')
+          AND NOT (
+            role = 'user'
+            AND COALESCE(json_extract(metadata_json, '$.hidden'), 0) = 1
+          )
+        """,
+        (session_id,),
     ).fetchone()
+    visible_count = int(row["visible_count"] or 0) if row else 0
+    assistant_count = int(row["assistant_count"] or 0) if row else 0
+    return visible_count > 0 and not (visible_count == 1 and assistant_count == 1)
 
 
 def has_previous_context_session(
@@ -3292,13 +3325,86 @@ def load_messages_by_id_range(
     return [{key: row[key] for key in row.keys()} for row in rows]
 
 
+def load_memory_agent_source_messages(
+    session_id: str,
+    start_message_id: int,
+    end_message_id: int,
+    context_turns: int = MEMORY_AGENT_CONTEXT_TURNS,
+) -> List[Dict[str, object]]:
+    with connect_db() as conn:
+        anchor_users = conn.execute(
+            """
+            SELECT id
+            FROM messages
+            WHERE session_id = ?
+              AND id <= ?
+              AND status = 'completed'
+              AND role = 'user'
+              AND COALESCE(json_extract(metadata_json, '$.hidden'), 0) != 1
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (session_id, int(start_message_id), max(1, int(context_turns))),
+        ).fetchall()
+        if not anchor_users:
+            return []
+        context_start_id = min(int(row["id"]) for row in anchor_users)
+        rows = conn.execute(
+            """
+            SELECT id, role, content, created_at, metadata_json
+            FROM messages
+            WHERE session_id = ?
+              AND id BETWEEN ? AND ?
+              AND status = 'completed'
+              AND role IN ('user', 'assistant')
+            ORDER BY id ASC
+            """,
+            (session_id, context_start_id, int(end_message_id)),
+        ).fetchall()
+    return [{key: row[key] for key in row.keys()} for row in rows]
+
+
 def format_messages_for_memory_agent(messages: List[Dict[str, object]]) -> str:
-    return "\n".join(
-        f"[{message['role']}] {str(message['content']).strip()}"
-        for message in messages
-        if message.get("role") == "user"
-        and not message_is_hidden(message)
-        and str(message.get("content", "")).strip()
+    lines = [
+        "以下是最近对话片段。assistant_context_only 行仅用于理解上下文，不能作为记忆事实来源；只能从 user 行抽取长期记忆。",
+        "",
+        "[recent_dialogue]",
+    ]
+    has_visible_user = False
+    last_user_was_visible = False
+    for message in messages:
+        role = str(message.get("role", "")).strip()
+        content = str(message.get("content", "")).strip()
+        if not content:
+            continue
+        if role == "user":
+            if message_is_hidden(message):
+                last_user_was_visible = False
+                continue
+            has_visible_user = True
+            last_user_was_visible = True
+            lines.append(f"[user] {content}")
+        elif role == "assistant" and has_visible_user and last_user_was_visible:
+            lines.append(f"[assistant_context_only] {content}")
+    if not has_visible_user:
+        return ""
+    return "\n".join(lines)
+
+
+def memory_agent_user_text_from_source(source: str) -> str:
+    user_lines = []
+    for line in str(source or "").splitlines():
+        if line.startswith("[user]"):
+            user_lines.append(line.removeprefix("[user]").strip())
+    return "\n".join(user_lines).strip()
+
+
+def build_memory_agent_user_prompt(source: str) -> str:
+    return (
+        f"当前真实时间：{opening_time_text()}。\n"
+        "请判断下面这一段最近对话是否值得写入长期记忆。"
+        "注意：assistant_context_only 只是语境，不是事实来源；最终记忆只能来自 user 行及其前后文指代。\n\n"
+        f"{source}"
     )
 
 
@@ -6091,7 +6197,7 @@ def enqueue_memory_agent_job(
     end_message_id: int,
     reason: str,
 ) -> int:
-    messages = load_messages_by_id_range(session_id, start_message_id, end_message_id)
+    messages = load_memory_agent_source_messages(session_id, start_message_id, end_message_id)
     source = format_messages_for_memory_agent(messages)
     if not source:
         raise ValueError("memory agent job source is empty")
@@ -6181,8 +6287,31 @@ def memory_text_is_user_centered(text: str) -> bool:
     return bool(re.search(r"(用户|本人|来访者|我|我的|俺|咱|咱们|我们)", cleaned))
 
 
+def memory_text_is_assistant_directive_preference(text: str) -> bool:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return False
+    assistant_subject = re.search(
+        r"(助手|助理|AI|ai|模型|你|你的|回复|回答|说话|语气|口吻|性格|风格|开场|开篇|称呼|聊天|互动|旺财)",
+        cleaned,
+    )
+    directive_marker = re.search(
+        r"(希望|要求|请|让|以后|每次|必须|需要|记住|更|像|不要|不能|可以|偶尔|温柔|调皮|幽默|简短|详细|姐姐|哥哥)",
+        cleaned,
+    )
+    stale_status_marker = re.search(r"(正在|调用|检索|联网|压缩|整理|卡住|失败|报错)", cleaned)
+    if assistant_subject and directive_marker and not stale_status_marker:
+        return True
+    return bool(
+        re.search(
+            r"(希望|要求|请|让|以后|每次|必须|需要|记住).{0,12}(助手|助理|AI|ai|模型|你)",
+            cleaned,
+        )
+    )
+
+
 def source_is_third_party_lookup(source: str) -> bool:
-    text = str(source or "").strip()
+    text = memory_agent_user_text_from_source(source) or str(source or "").strip()
     if not text:
         return False
     lookup_markers = (
@@ -6213,6 +6342,8 @@ def memory_agent_item_skip_reason(item: Dict[str, object], source: str) -> str:
     memory_text = str(item.get("memory", "")).strip()
     if source_is_third_party_lookup(source) and not memory_text_is_user_centered(memory_text):
         return "third_party_fact"
+    if label in {"preference", "rule"} and memory_text_is_assistant_directive_preference(memory_text):
+        return ""
     if label in {"identity", "persona", "preference", "rule"} and not memory_text_is_user_centered(memory_text):
         return "not_user_centered"
     return ""
@@ -6224,6 +6355,7 @@ def parse_memory_agent_response(text: str) -> Dict[str, object]:
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
     payload = json.loads(cleaned)
+    rationale = clean_search_text(str(payload.get("rationale", "") or ""), 400)
     items: List[Dict[str, object]] = []
     raw_items = payload.get("items")
     if isinstance(raw_items, list):
@@ -6242,6 +6374,7 @@ def parse_memory_agent_response(text: str) -> Dict[str, object]:
         "label": str(items[0]["label"]) if items else "other",
         "timeline_at": str(items[0].get("timeline_at", "")) if items else "",
         "confidence": float(items[0].get("confidence", 0.7)) if items else 0.7,
+        "rationale": rationale,
         "items": items,
     }
 
@@ -6269,14 +6402,7 @@ def call_memory_agent_model(source: str) -> Dict[str, object]:
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": MEMORY_AGENT_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"当前真实时间：{opening_time_text()}。\n"
-                        "请判断下面这一轮聊天是否值得写入长期记忆：\n\n"
-                        f"{source}"
-                    ),
-                },
+                {"role": "user", "content": build_memory_agent_user_prompt(source)},
             ],
             temperature=MEMORY_AGENT_TEMPERATURE,
             top_p=MEMORY_AGENT_TOP_P,
@@ -6312,7 +6438,7 @@ def process_memory_agent_job(job_id: int) -> Dict[str, object]:
         return {"status": row["status"]}
 
     mark_memory_agent_job(job_id, "running")
-    messages = load_messages_by_id_range(
+    messages = load_memory_agent_source_messages(
         str(row["session_id"]),
         int(row["start_message_id"]),
         int(row["end_message_id"]),
@@ -6342,14 +6468,7 @@ def process_memory_agent_job(job_id: int) -> Dict[str, object]:
                 "model": MODEL_NAME,
                 "messages": [
                     {"role": "system", "content": MEMORY_AGENT_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"当前真实时间：{opening_time_text()}。\n"
-                            "请判断下面这一轮聊天是否值得写入长期记忆：\n\n"
-                            f"{source}"
-                        ),
-                    },
+                    {"role": "user", "content": build_memory_agent_user_prompt(source)},
                 ],
             },
         )
@@ -7707,17 +7826,21 @@ def load_previous_session_context_endpoint(session_id: str, request: Request) ->
     if normalize_visitor_ip(str(session.get("visitor_ip", ""))) != normalize_visitor_ip(current_visitor):
         raise HTTPException(status_code=403, detail="device identity does not match session")
     result = load_previous_session_context(session_id)
-    record_event(
-        session_id,
-        "session_context_load_previous",
-        current_visitor,
-        {
-            "loaded": bool(result.get("loaded")),
-            "source_session_id": (result.get("session") or {}).get("id") if isinstance(result.get("session"), dict) else "",
-            "message_count": len(result.get("messages") or []),
-            "has_more": bool(result.get("has_more")),
-        },
-    )
+    payload = {
+        "loaded": bool(result.get("loaded")),
+        "source_session_id": (result.get("session") or {}).get("id") if isinstance(result.get("session"), dict) else "",
+        "message_count": len(result.get("messages") or []),
+        "has_more": bool(result.get("has_more")),
+    }
+    record_event(session_id, "session_context_load_previous", current_visitor, payload)
+    if str(request.query_params.get("analysis_mode", "")).strip() in {"1", "true", "yes"}:
+        record_analysis_trace(
+            session_id=session_id,
+            event_type="session_context",
+            visitor_ip=current_visitor,
+            step_name="load 历史 session",
+            payload=payload,
+        )
     return result
 
 

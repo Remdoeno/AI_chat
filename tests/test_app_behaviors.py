@@ -1540,6 +1540,116 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertEqual(job_row["status"], "skipped")
         self.assertIn("third_party_fact", job_row["error"])
 
+    def test_memory_agent_job_saves_assistant_style_preference_without_user_subject(self):
+        session_id = self.app.create_session("device:dev_style_no_subject", "agent-worker-style")
+        user_id = self.app.add_message(
+            session_id,
+            "user",
+            "希望助手性格更温柔，像姐姐一样，并偶尔带有一点小调皮。",
+        )
+        assistant_id = self.app.add_message(session_id, "assistant", "我记住。")
+        job_id = self.app.enqueue_memory_agent_job(session_id, user_id, assistant_id, "turn_complete")
+
+        original_call = self.app.call_memory_agent_model
+        original_embed = self.app.embedding_client.embed_text
+        self.app.call_memory_agent_model = lambda _source: {
+            "important": True,
+            "items": [
+                {
+                    "memory": "希望助手性格更温柔，像姐姐一样，并偶尔带有一点小调皮",
+                    "label": "preference",
+                    "confidence": 0.9,
+                }
+            ],
+        }
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            result = self.app.process_memory_agent_job(job_id)
+        finally:
+            self.app.call_memory_agent_model = original_call
+            self.app.embedding_client.embed_text = original_embed
+
+        self.assertEqual(result["status"], "completed")
+        with self.app.connect_db() as conn:
+            memory_row = conn.execute("SELECT content, importance_label FROM curated_memories").fetchone()
+            vector_count = conn.execute("SELECT COUNT(*) AS c FROM curated_memory_vectors").fetchone()["c"]
+
+        self.assertEqual(memory_row["importance_label"], "preference")
+        self.assertIn("像姐姐一样", memory_row["content"])
+        self.assertEqual(vector_count, 1)
+
+    def test_memory_agent_filter_still_rejects_generic_assistant_status_preference(self):
+        self.assertEqual(
+            self.app.memory_agent_item_skip_reason(
+                {
+                    "memory": "助手正在生成回答，语气比较温柔。",
+                    "label": "preference",
+                },
+                "用户说：刚刚页面有点卡。",
+            ),
+            "not_user_centered",
+        )
+
+    def test_memory_agent_filter_accepts_opening_rule_without_user_subject(self):
+        self.assertEqual(
+            self.app.memory_agent_item_skip_reason(
+                {
+                    "memory": "每次见面先讲一个短笑话开场。",
+                    "label": "rule",
+                },
+                "用户说：以后每次见到我都讲个笑话开场。",
+            ),
+            "",
+        )
+
+    def test_memory_agent_filter_accepts_response_length_preference_without_user_subject(self):
+        self.assertEqual(
+            self.app.memory_agent_item_skip_reason(
+                {
+                    "memory": "不要生成太长的回复。",
+                    "label": "preference",
+                },
+                "用户说：以后回答短一点，不要生成太长的回复。",
+            ),
+            "",
+        )
+
+    def test_parse_memory_agent_response_preserves_important_rationale(self):
+        decision = self.app.parse_memory_agent_response(
+            json.dumps(
+                {
+                    "important": True,
+                    "rationale": "用户明确提出长期助手回复风格要求，应作为稳定偏好。",
+                    "items": [
+                        {
+                            "memory": "用户希望助手更温柔。",
+                            "label": "preference",
+                            "confidence": 0.9,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        self.assertTrue(decision["important"])
+        self.assertEqual(decision["rationale"], "用户明确提出长期助手回复风格要求，应作为稳定偏好。")
+
+    def test_parse_memory_agent_response_preserves_unimportant_rationale(self):
+        decision = self.app.parse_memory_agent_response(
+            json.dumps(
+                {
+                    "important": False,
+                    "rationale": "这只是一次性闲聊，没有稳定偏好、身份、规则或未来事件。",
+                    "items": [],
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        self.assertFalse(decision["important"])
+        self.assertEqual(decision["rationale"], "这只是一次性闲聊，没有稳定偏好、身份、规则或未来事件。")
+
     def test_memory_agent_job_saves_future_events_as_separate_event_memories(self):
         identity = "device:dev_events012345"
         session_id = self.app.create_session(identity, "agent-worker-events")
@@ -1625,7 +1735,7 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("明天上午10点有组会", payload["opening_prompt"])
         self.assertNotIn("昨天已经完成", payload["opening_prompt"])
 
-    def test_memory_agent_source_uses_user_messages_only(self):
+    def test_memory_agent_source_uses_recent_dialogue_but_marks_assistant_as_context_only(self):
         source = self.app.format_messages_for_memory_agent(
             [
                 {"role": "user", "content": "我喜欢冰激凌"},
@@ -1634,8 +1744,8 @@ class AppBehaviorTests(unittest.TestCase):
         )
 
         self.assertIn("[user] 我喜欢冰激凌", source)
-        self.assertNotIn("assistant", source)
-        self.assertNotIn("高甜度", source)
+        self.assertIn("[assistant_context_only] 你喜欢高甜度、低温阈值的物质。", source)
+        self.assertIn("只能从 user 行抽取长期记忆", source)
 
     def test_memory_agent_source_ignores_hidden_user_messages(self):
         source = self.app.format_messages_for_memory_agent(
@@ -1651,7 +1761,45 @@ class AppBehaviorTests(unittest.TestCase):
 
         self.assertEqual(source, "")
 
-    def test_memory_agent_job_does_not_pass_assistant_text_to_memory_model(self):
+    def test_memory_agent_job_expands_source_to_recent_context_turns(self):
+        session_id = self.app.create_session("7.7.7.7", "agent-context-memory")
+        self.app.add_message(session_id, "user", "第一轮旧消息")
+        self.app.add_message(session_id, "assistant", "第一轮旧回答")
+        self.app.add_message(session_id, "user", "第二轮旧消息")
+        self.app.add_message(session_id, "assistant", "第二轮旧回答")
+        self.app.add_message(session_id, "user", "告诉你一个完全不重要的秘密，我喜欢你！")
+        self.app.add_message(session_id, "assistant", "我会把这份心意收下。")
+        user_id = self.app.add_message(session_id, "user", "那你会记住这件事情吗？")
+        assistant_id = self.app.add_message(session_id, "assistant", "当然会。")
+        job_id = self.app.enqueue_memory_agent_job(session_id, user_id, assistant_id, "turn_complete")
+
+        captured = {}
+        original_call = self.app.call_memory_agent_model
+        original_embed = self.app.embedding_client.embed_text
+
+        def fake_call(source):
+            captured["source"] = source
+            return {
+                "important": True,
+                "memory": "用户告诉助手自己喜欢助手，并追问助手是否会记住这件事。",
+                "label": "preference",
+            }
+
+        self.app.call_memory_agent_model = fake_call
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            result = self.app.process_memory_agent_job(job_id)
+        finally:
+            self.app.call_memory_agent_model = original_call
+            self.app.embedding_client.embed_text = original_embed
+
+        self.assertEqual(result["status"], "completed")
+        self.assertIn("告诉你一个完全不重要的秘密，我喜欢你", captured["source"])
+        self.assertIn("那你会记住这件事情吗", captured["source"])
+        self.assertIn("[assistant_context_only] 我会把这份心意收下。", captured["source"])
+        self.assertNotIn("第一轮旧消息", captured["source"])
+
+    def test_memory_agent_job_marks_assistant_text_as_context_only(self):
         session_id = self.app.create_session("7.7.7.7", "agent-user-only-memory")
         user_id = self.app.add_message(session_id, "user", "我喜欢冰激凌")
         assistant_id = self.app.add_message(session_id, "assistant", "所以你喜欢高甜度、低温阈值的东西。")
@@ -1679,7 +1827,8 @@ class AppBehaviorTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertIn("我喜欢冰激凌", captured["source"])
-        self.assertNotIn("高甜度", captured["source"])
+        self.assertIn("[assistant_context_only] 所以你喜欢高甜度、低温阈值的东西。", captured["source"])
+        self.assertIn("只能从 user 行抽取长期记忆", captured["source"])
 
     def test_vector_memory_segments_index_user_messages_only(self):
         session_id = self.app.create_session("7.7.7.7", "agent-user-vector")
@@ -3015,6 +3164,15 @@ class AppBehaviorTests(unittest.TestCase):
     def test_memory_agent_prompt_rejects_schedule_query_as_preference(self):
         self.assertIn("只是在询问、查询或确认已有日程", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
         self.assertIn("不要保存为 preference", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+
+    def test_memory_agent_prompt_saves_assistant_behavior_requirements(self):
+        self.assertIn("用户对助手的说话风格", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("即使没有写出“用户”二字", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("preference 或 rule", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+
+    def test_memory_agent_prompt_requires_rationale(self):
+        self.assertIn("每次判断都必须写 rationale", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("一句话说明重要或不重要的原因", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
 
     def test_memory_agent_prompt_rejects_third_party_facts_as_identity(self):
         self.assertIn("第三方人物", self.app.MEMORY_AGENT_SYSTEM_PROMPT)

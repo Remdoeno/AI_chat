@@ -168,15 +168,15 @@ h1 {
   box-shadow: 0 2px 10px rgba(24, 36, 50, 0.04);
   overflow: hidden;
   transition:
-    opacity 220ms ease,
-    transform 220ms ease,
-    max-height 220ms ease,
-    margin 220ms ease,
-    padding 220ms ease,
-    border-width 220ms ease;
+    opacity 500ms ease,
+    transform 500ms ease,
+    max-height 500ms ease,
+    margin 500ms ease,
+    padding 500ms ease,
+    border-width 500ms ease;
 }
 
-.history-load.is-entering,
+.history-load.is-idle,
 .history-load.is-hiding {
   max-height: 0;
   margin-top: 0;
@@ -185,7 +185,7 @@ h1 {
   padding-bottom: 0;
   border-width: 0;
   opacity: 0;
-  transform: translateY(-8px);
+  transform: translateY(-16px);
 }
 
 .history-load.is-armed {
@@ -246,8 +246,8 @@ h1 {
 
 .message {
   display: grid;
-  grid-template-columns: 72px minmax(0, 680px) auto;
-  gap: 14px;
+  grid-template-columns: minmax(0, 680px) auto;
+  gap: 6px 10px;
   margin: 0 0 18px;
   align-items: start;
   justify-content: start;
@@ -255,30 +255,54 @@ h1 {
 
 .message.user {
   justify-content: end;
-  grid-template-columns: minmax(0, 680px) 42px auto;
+  grid-template-columns: minmax(0, 680px) auto;
+}
+
+.message-meta {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 15px;
+  line-height: 1.2;
+}
+
+.message.user .message-meta {
+  justify-content: flex-end;
 }
 
 .message.user .message-label {
-  grid-column: 2;
-  grid-row: 1;
-  padding-top: 6px;
-  text-align: left;
+  order: 2;
 }
 
 .message.user .message-body {
   grid-column: 1;
-  grid-row: 1;
+  grid-row: 2;
+}
+
+.message.user .message-timestamp {
+  order: 1;
+}
+
+.message-timestamp {
+  color: rgba(102, 112, 133, 0.64);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .message-label {
-  padding-top: 12px;
-  color: var(--muted);
+  color: #000000;
   font-size: 13px;
   font-weight: 700;
-  text-align: right;
 }
 
 .message-body {
+  grid-column: 1;
+  grid-row: 2;
+  width: fit-content;
+  max-width: min(680px, 100%);
+  justify-self: start;
   min-height: 44px;
   padding: 12px 14px;
   border: 1px solid var(--line);
@@ -339,6 +363,7 @@ h1 {
   border-color: rgba(22, 119, 95, 0.24);
   background: var(--panel-soft);
   white-space: pre-wrap;
+  justify-self: end;
 }
 
 .message-attachments {
@@ -365,27 +390,6 @@ h1 {
 .message.stopped .message-body {
   border-color: rgba(28, 95, 168, 0.28);
   color: var(--muted);
-}
-
-.message-stop-button {
-  width: 26px;
-  height: 26px;
-  margin-top: 10px;
-  border: 1px solid rgba(180, 35, 24, 0.28);
-  border-radius: 4px;
-  background: #ffffff;
-  color: var(--danger);
-  cursor: pointer;
-  font-size: 10px;
-  line-height: 1;
-  opacity: 0.72;
-}
-
-.message-stop-button:hover,
-.message-stop-button:focus-visible {
-  border-color: rgba(180, 35, 24, 0.58);
-  opacity: 1;
-  outline: none;
 }
 
 .composer {
@@ -428,8 +432,9 @@ h1 {
     "input send"
     "preview send"
     "tools send";
-  gap: 12px;
-  align-items: stretch;
+  column-gap: 12px;
+  row-gap: 6px;
+  align-items: start;
 }
 
 .composer-main textarea {
@@ -445,7 +450,7 @@ h1 {
 }
 
 .tool-button {
-  height: 34px;
+  height: 32px;
   min-width: 72px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -488,6 +493,20 @@ h1 {
 
 .attachment-preview:empty {
   display: none;
+}
+
+@media (min-width: 761px) {
+  .composer-main {
+    grid-template-areas:
+      "input send"
+      "preview ."
+      "tools .";
+  }
+
+  #sendButton {
+    grid-area: send;
+    align-self: center;
+  }
 }
 
 .attachment-chip {
@@ -569,19 +588,35 @@ textarea:focus {
 }
 
 .primary-button {
-  min-width: 92px;
-  height: 72px;
+  min-width: 112px;
+  height: 44px;
   padding: 0 20px;
+  border-radius: 10px;
   color: #ffffff;
   background: var(--accent);
 }
 
 #sendButton {
   grid-area: send;
+  align-self: center;
 }
 
 .primary-button:hover {
   background: var(--accent-strong);
+}
+
+.primary-button.is-stopping {
+  border-color: rgba(180, 35, 24, 0.72);
+  background: #8f1d18;
+  color: #ffffff;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.primary-button.is-stopping:hover,
+.primary-button.is-stopping:focus-visible {
+  background: #7a1713;
+  outline: none;
 }
 
 .secondary-button,
@@ -778,6 +813,10 @@ input[type="range"] {
   font-size: 20px;
 }
 
+.admin-login-form .field {
+  margin-top: 8px;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -808,10 +847,24 @@ input[type="range"] {
   font-size: 13px;
 }
 
+.dialog-status:empty {
+  min-height: 0;
+}
+
 .dialog-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: stretch;
   gap: 10px;
+}
+
+.dialog-actions .secondary-button.compact-button,
+.dialog-actions .primary-button.compact-button {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  margin-bottom: 0;
+  padding: 0 14px;
 }
 
 button:disabled,
@@ -890,29 +943,35 @@ input:disabled {
     padding: 12px 12px;
   }
 
-  .message,
-  .message.user {
-    grid-template-columns: 1fr auto;
+  .message {
+    grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px;
     justify-content: stretch;
   }
 
-  .message-label {
-    grid-column: 1 / -1;
-    padding: 0;
-    text-align: left;
+  .message.user {
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-content: stretch;
   }
 
-  .message.user .message-label {
-    grid-column: 2;
-    grid-row: 1;
-    padding-top: 12px;
-    text-align: left;
+  .message-meta {
+    gap: 8px;
+  }
+
+  .message-body {
+    width: fit-content;
+    max-width: 80%;
+    justify-self: start;
+  }
+
+  .message:not(.user) .message-body {
+    justify-self: start;
   }
 
   .message.user .message-body {
     grid-column: 1;
-    grid-row: 1;
+    grid-row: 2;
+    justify-self: end;
   }
 
   .composer {

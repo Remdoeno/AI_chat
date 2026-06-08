@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Qwen Analysis Mode</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/analysis.css?v=20260608_ime_enter_fix" />
+    <link rel="stylesheet" href="/static/analysis.css?v=20260609_dialog_analysis_send_align" />
   </head>
   <body>
     <main id="analysisMode" class="analysis-shell">
@@ -31,14 +31,13 @@
           <span>联网代理</span>
           <input id="proxyInput" type="url" value="" placeholder="可选，例如 http://127.0.0.1:7890" />
         </label>
-        <label class="analysis-toggle">
-          <input id="webSearchInput" type="checkbox" />
-          <span>联网搜索</span>
-        </label>
         <button id="resetButton" class="analysis-secondary" type="button">Reset</button>
       </aside>
 
       <section class="analysis-chat" aria-label="Analysis chat">
+        <div class="analysis-chat-history-actions">
+          <button id="loadPreviousButton" class="analysis-secondary analysis-load-previous-button" type="button">加载上一段对话</button>
+        </div>
         <div id="messages" class="analysis-messages"></div>
         <form id="chatForm" class="analysis-composer">
           <div class="analysis-input-stack">
@@ -46,11 +45,12 @@
             <div id="analysisAttachmentPreview" class="analysis-attachment-preview" aria-label="已选择图片"></div>
             <div class="analysis-tools">
               <button id="analysisAttachImageButton" class="analysis-secondary" type="button">图片</button>
+              <button id="analysisWebSearchButton" class="analysis-secondary analysis-toggle-tool-button" type="button" aria-pressed="false">联网</button>
+              <input id="webSearchInput" type="checkbox" hidden />
               <input id="analysisImageInput" type="file" accept="image/*,.avif,.bmp,.gif,.heic,.heif,.ico,.jfif,.jpg,.jpeg,.pjpeg,.png,.svg,.tif,.tiff,.webp" multiple hidden />
             </div>
           </div>
           <button id="sendButton" type="submit">发送</button>
-          <button id="stopButton" class="analysis-stop-button" type="button" aria-label="停止生成" title="停止生成" hidden>■</button>
         </form>
       </section>
 
@@ -72,6 +72,6 @@
         <div id="backgroundPanel" class="background-panel"></div>
       </section>
     </main>
-    <script src="/static/analysis.js?v=20260608_ime_enter_fix"></script>
+    <script src="/static/analysis.js?v=20260609_analysis_scroll_restore"></script>
   </body>
 </html>
