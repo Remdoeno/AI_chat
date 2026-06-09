@@ -181,6 +181,130 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertTrue(payload.web_search)
         self.assertEqual(payload.web_search_proxy, "http://127.0.0.1:7890")
 
+    def test_user_memory_binding_endpoint_tracks_host_and_history_flags(self):
+        client = TestClient(self.app.app)
+
+        first = client.put(
+            "/api/user-memory-binding",
+            headers={"X-Qwen-Device-Id": "dev_bindhost0001"},
+            json={"shared_user_id": "family-alpha", "share_chat_history": True, "is_host": True},
+        )
+        second = client.put(
+            "/api/user-memory-binding",
+            headers={"X-Qwen-Device-Id": "dev_bindhost0002"},
+            json={"shared_user_id": "family-alpha", "share_chat_history": False, "is_host": True},
+        )
+        first_after = client.get(
+            "/api/user-memory-binding",
+            headers={"X-Qwen-Device-Id": "dev_bindhost0001"},
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["shared_user_id"], "family-alpha")
+        self.assertTrue(first.json()["is_host"])
+        self.assertEqual(second.json()["host_device_id"], "device:dev_bindhost0002")
+        self.assertTrue(second.json()["is_host"])
+        self.assertEqual(first_after.status_code, 200)
+        self.assertFalse(first_after.json()["is_host"])
+        self.assertEqual(first_after.json()["host_device_id"], "device:dev_bindhost0002")
+
+    def test_shared_user_binding_shares_events_but_keeps_local_profile_priority(self):
+        device_a = "device:dev_sharedmem0001"
+        device_b = "device:dev_sharedmem0002"
+        self.app.upsert_user_memory_binding(device_a, "shared-user-1", share_chat_history=False, is_host=True)
+        self.app.upsert_user_memory_binding(device_b, "shared-user-1", share_chat_history=False, is_host=False)
+
+        session_a = self.app.create_session(device_a, "agent-local-a")
+        session_b = self.app.create_session(device_b, "agent-local-b")
+        user_a = self.app.add_message(session_a, "user", "以后叫我小猫")
+        assistant_a = self.app.add_message(session_a, "assistant", "好，我记住。")
+        user_b = self.app.add_message(session_b, "user", "以后叫我小狗")
+        assistant_b = self.app.add_message(session_b, "assistant", "好，我记住。")
+        event_user = self.app.add_message(session_b, "user", "明天上午10点有组会")
+        event_assistant = self.app.add_message(session_b, "assistant", "我会提醒你。")
+
+        self.app.save_curated_memory(session_a, user_a, assistant_a, "以后叫我小猫", "identity")
+        self.app.save_curated_memory(session_b, user_b, assistant_b, "以后叫我小狗", "identity")
+        self.app.save_curated_memory(session_b, user_b, assistant_b, "助手回答要像小狗一样热情", "preference")
+        self.app.save_curated_memory(
+            session_b,
+            event_user,
+            event_assistant,
+            "明天上午10点有组会",
+            "event",
+            timeline_at=(datetime.now() + timedelta(days=1)).isoformat(timespec="minutes"),
+        )
+
+        profile_memories = self.app.retrieve_profile_context_memories(device_a, limit=8)
+        future_events = self.app.retrieve_future_event_memories(device_a, now=datetime.now(), limit=8)
+        with self.app.connect_db() as conn:
+            event_owner = conn.execute(
+                "SELECT visitor_ip FROM curated_memories WHERE content = ? ORDER BY id DESC LIMIT 1",
+                ("明天上午10点有组会",),
+            ).fetchone()["visitor_ip"]
+            remote_identity_owner = conn.execute(
+                "SELECT visitor_ip FROM curated_memories WHERE content = ? ORDER BY id DESC LIMIT 1",
+                ("以后叫我小狗",),
+            ).fetchone()["visitor_ip"]
+
+        profile_texts = [item["content"] for item in profile_memories]
+        event_texts = [item["content"] for item in future_events]
+        text_recall = self.app.retrieve_curated_memories_by_text("小狗 热情", current_visitor_ip=device_a)
+        text_recall_contents = [item["content"] for item in text_recall]
+
+        self.assertIn("以后叫我小猫", profile_texts)
+        self.assertNotIn("以后叫我小狗", profile_texts)
+        self.assertNotIn("以后叫我小狗", text_recall_contents)
+        self.assertNotIn("助手回答要像小狗一样热情", text_recall_contents)
+        self.assertIn("明天上午10点有组会", event_texts)
+        self.assertEqual(event_owner, device_a)
+        self.assertEqual(remote_identity_owner, device_b)
+
+    def test_shared_chat_history_can_load_previous_session_from_other_bound_device(self):
+        client = TestClient(self.app.app)
+        device_a = "dev_histbind0001"
+        device_b = "dev_histbind0002"
+
+        client.put(
+            "/api/user-memory-binding",
+            headers={"X-Qwen-Device-Id": device_a},
+            json={"shared_user_id": "family-history", "share_chat_history": True, "is_host": False},
+        )
+        client.put(
+            "/api/user-memory-binding",
+            headers={"X-Qwen-Device-Id": device_b},
+            json={"shared_user_id": "family-history", "share_chat_history": False, "is_host": False},
+        )
+
+        source = self.app.create_session("device:dev_histbind0002", "agent-source")
+        self.app.add_message(source, "user", "另一台设备的旧消息")
+        self.app.add_message(source, "assistant", "这是旧回答")
+
+        current = client.post("/api/sessions", headers={"X-Qwen-Device-Id": device_a}).json()["session_id"]
+        loaded = client.post(
+            f"/api/sessions/{current}/load-previous",
+            headers={"X-Qwen-Device-Id": device_a},
+        )
+
+        self.assertEqual(loaded.status_code, 200)
+        self.assertFalse(loaded.json()["loaded"])
+
+        client.put(
+            "/api/user-memory-binding",
+            headers={"X-Qwen-Device-Id": device_b},
+            json={"shared_user_id": "family-history", "share_chat_history": True, "is_host": False},
+        )
+        loaded = client.post(
+            f"/api/sessions/{current}/load-previous",
+            headers={"X-Qwen-Device-Id": device_a},
+        )
+
+        self.assertEqual(loaded.status_code, 200)
+        self.assertTrue(loaded.json()["loaded"])
+        self.assertEqual(loaded.json()["session"]["id"], source)
+        self.assertEqual([item["content"] for item in loaded.json()["messages"]], ["另一台设备的旧消息", "这是旧回答"])
+
     def test_build_web_search_query_removes_command_words(self):
         query = self.app.build_web_search_query("联网搜索 OpenAI news，用一句话回答。")
 
@@ -304,7 +428,7 @@ class AppBehaviorTests(unittest.TestCase):
     def test_memory_planners_use_recent_session_context_for_followup(self):
         session_id = self.app.create_session("device:memory-context", "agent-memory-context")
         self.app.add_message(session_id, "user", "我刚才说过我的英雄身份吗？")
-        self.app.add_message(session_id, "assistant", "你说自己是绿手侠。")
+        self.app.add_message(session_id, "assistant", "你说自己是示例伙伴。")
         self.app.add_message(session_id, "user", "那我最喜欢的技能是什么？")
 
         context_messages = self.app.load_recent_planner_context_messages(session_id)
@@ -318,11 +442,11 @@ class AppBehaviorTests(unittest.TestCase):
         )
 
         self.assertIn("最近会话上下文", query_prompt)
-        self.assertIn("绿手侠", query_prompt)
+        self.assertIn("示例伙伴", query_prompt)
         self.assertIn("那我最喜欢的技能是什么？", query_prompt)
         self.assertIn("必须结合最近会话上下文补全", query_prompt)
         self.assertIn("最近会话上下文", gate_prompt)
-        self.assertIn("绿手侠", gate_prompt)
+        self.assertIn("示例伙伴", gate_prompt)
         self.assertIn("承接上文", gate_prompt)
 
     def test_perform_web_search_reuses_existing_plan(self):
@@ -2202,14 +2326,14 @@ class AppBehaviorTests(unittest.TestCase):
             run_id=run_id,
             title="第一篇故事",
             artifact_type="novel",
-            content="Shinning Hero 在雨夜城市里追查一束断裂的光。",
+            content="Canonical Hero Name 在雨夜城市里追查一束断裂的光。",
             summary="雨夜追查。",
         )
         second = self.app.save_idle_agent_artifact(
             run_id=run_id,
             title="第二篇故事",
             artifact_type="novel",
-            content="绿手侠在实验室门口停下。",
+            content="示例伙伴在实验室门口停下。",
             summary="实验室门口。",
         )
         original_reply = self.app.call_artifact_comment_model
@@ -2267,7 +2391,7 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertFalse(self.app.delete_artifact_comment(follow_up["id"])["ok"])
 
     def test_idle_artifact_save_assigns_unique_mainline_episode_numbers(self):
-        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Shinning Hero 连载")
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Canonical Hero Name 连载")
         original_embed = self.app.embedding_client.embed_text
         self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
         try:
@@ -2275,8 +2399,8 @@ class AppBehaviorTests(unittest.TestCase):
                 run_id=run_id,
                 title="错误自报第42集",
                 artifact_type="novel",
-                content="Shinning Hero 在雨夜发现城市主线的第一个线索。",
-                series_title="Shinning Hero 城市档案",
+                content="Canonical Hero Name 在雨夜发现城市主线的第一个线索。",
+                series_title="Canonical Hero Name 城市档案",
                 episode_index=42,
                 summary="主线开端。",
             )
@@ -2284,17 +2408,17 @@ class AppBehaviorTests(unittest.TestCase):
                 run_id=run_id,
                 title="又一次错误自报第42集",
                 artifact_type="novel",
-                content="绿手侠追查同一条线索，BenMan 的过去露出裂缝。",
-                series_title="Shinning Hero 城市档案",
+                content="示例伙伴追查同一条线索，示例对手 的过去露出裂缝。",
+                series_title="Canonical Hero Name 城市档案",
                 episode_index=42,
                 summary="主线继续。",
             )
             prequel = self.app.save_idle_agent_artifact(
                 run_id=run_id,
-                title="BenMan 前传：巨龙克隆体",
+                title="示例对手 前传：巨龙克隆体",
                 artifact_type="novel",
-                content="BenMan 在未来宇宙第一次接触巨龙之力。",
-                series_title="Shinning Hero 城市档案",
+                content="示例对手 在未来宇宙第一次接触巨龙之力。",
+                series_title="Canonical Hero Name 城市档案",
                 episode_index=42,
                 summary="前传起源。",
             )
@@ -2302,7 +2426,7 @@ class AppBehaviorTests(unittest.TestCase):
             self.app.embedding_client.embed_text = original_embed
 
         payload = self.app.list_idle_agent_artifacts(
-            series_title="Shinning Hero 城市档案",
+            series_title="Canonical Hero Name 城市档案",
             sort="created",
             order="asc",
             limit=10,
@@ -2314,27 +2438,27 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIsNone(by_id[prequel]["episode_index"])
 
     def test_idle_agent_prompt_includes_series_context_and_next_episode_rule(self):
-        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Shinning Hero 连载")
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Canonical Hero Name 连载")
         original_embed = self.app.embedding_client.embed_text
         self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
         try:
             self.app.save_idle_agent_artifact(
                 run_id=run_id,
-                title="Shinning Hero 城市档案：开端",
+                title="Canonical Hero Name 城市档案：开端",
                 artifact_type="novel",
-                content="Shinning Hero 使用动感光波守住第一条街。",
-                series_title="Shinning Hero 城市档案",
+                content="Canonical Hero Name 使用招牌技能守住第一条街。",
+                series_title="Canonical Hero Name 城市档案",
                 episode_index=1,
-                summary="Shinning Hero 发现城市阴影里的主线线索。",
+                summary="Canonical Hero Name 发现城市阴影里的主线线索。",
             )
             self.app.save_idle_agent_artifact(
                 run_id=run_id,
-                title="Shinning Hero 城市档案：绿手",
+                title="Canonical Hero Name 城市档案：绿手",
                 artifact_type="novel",
-                content="绿手侠的辐射右手暴露出敌人的新据点。",
-                series_title="Shinning Hero 城市档案",
+                content="示例伙伴的辐射右手暴露出敌人的新据点。",
+                series_title="Canonical Hero Name 城市档案",
                 episode_index=2,
-                summary="绿手侠加入调查，主线指向地下实验室。",
+                summary="示例伙伴加入调查，主线指向地下实验室。",
             )
         finally:
             self.app.embedding_client.embed_text = original_embed
@@ -2342,14 +2466,14 @@ class AppBehaviorTests(unittest.TestCase):
         prompt, summary = self.app.build_idle_agent_prompt()
 
         self.assertIn("已有连续系列资料", prompt)
-        self.assertIn("Shinning Hero 城市档案", prompt)
+        self.assertIn("Canonical Hero Name 城市档案", prompt)
         self.assertIn("下一集必须填写 3", prompt)
-        self.assertIn("Shinning Hero 发现城市阴影里的主线线索", prompt)
-        self.assertIn("绿手侠加入调查", prompt)
+        self.assertIn("Canonical Hero Name 发现城市阴影里的主线线索", prompt)
+        self.assertIn("示例伙伴加入调查", prompt)
         self.assertIn("series_context=1", summary)
 
     def test_renumber_idle_series_mainline_episodes_repairs_duplicates(self):
-        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Shinning Hero 连载")
+        run_id = self.app.create_idle_agent_run("novel", "测试任务", "基于 Canonical Hero Name 连载")
         original_embed = self.app.embedding_client.embed_text
         self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
         try:
@@ -2358,7 +2482,7 @@ class AppBehaviorTests(unittest.TestCase):
                 title="旧第42集之一",
                 artifact_type="novel",
                 content="第一段主线。",
-                series_title="Shinning Hero 城市档案",
+                series_title="Canonical Hero Name 城市档案",
                 episode_index=1,
             )
             second = self.app.save_idle_agent_artifact(
@@ -2366,7 +2490,7 @@ class AppBehaviorTests(unittest.TestCase):
                 title="旧第42集之二",
                 artifact_type="novel",
                 content="第二段主线。",
-                series_title="Shinning Hero 城市档案",
+                series_title="Canonical Hero Name 城市档案",
                 episode_index=2,
             )
             with self.app.connect_db() as conn:
@@ -2375,12 +2499,12 @@ class AppBehaviorTests(unittest.TestCase):
                     (first, second),
                 )
 
-            result = self.app.renumber_idle_series_mainline_episodes("Shinning Hero 城市档案")
+            result = self.app.renumber_idle_series_mainline_episodes("Canonical Hero Name 城市档案")
         finally:
             self.app.embedding_client.embed_text = original_embed
 
         payload = self.app.list_idle_agent_artifacts(
-            series_title="Shinning Hero 城市档案",
+            series_title="Canonical Hero Name 城市档案",
             sort="created",
             order="asc",
             limit=10,
@@ -2544,22 +2668,22 @@ class AppBehaviorTests(unittest.TestCase):
     def test_idle_agent_response_loads_term_replacements_file(self):
         replacements_path = Path(self.tmpdir.name) / "idle_artifact_term_replacements.json"
         replacements_path.write_text(
-            json.dumps({"Flash Superman": "Shinning Hero"}, ensure_ascii=False),
+            json.dumps({"Legacy Hero Name": "Canonical Hero Name"}, ensure_ascii=False),
             encoding="utf-8",
         )
         self.app.IDLE_ARTIFACT_TERM_REPLACEMENTS = ""
         self.app.IDLE_ARTIFACT_TERM_REPLACEMENTS_FILE = str(replacements_path)
 
         payload = self.app.parse_idle_agent_response(
-            '{"task_type":"novel","title":"Flash Superman 登场",'
-            '"content":"Flash Superman 使用动感光波。",'
-            '"series_title":"Flash Superman 城市档案",'
-            '"episode_index":1,"summary":"Flash Superman 继续行动。"}'
+            '{"task_type":"novel","title":"Legacy Hero Name 登场",'
+            '"content":"Legacy Hero Name 使用招牌技能。",'
+            '"series_title":"Legacy Hero Name 城市档案",'
+            '"episode_index":1,"summary":"Legacy Hero Name 继续行动。"}'
         )
 
         text = json.dumps(payload, ensure_ascii=False)
-        self.assertIn("Shinning Hero", text)
-        self.assertNotIn("Flash Superman", text)
+        self.assertIn("Canonical Hero Name", text)
+        self.assertNotIn("Legacy Hero Name", text)
 
     def test_idle_agent_response_falls_back_to_raw_content_for_malformed_json(self):
         payload = self.app.parse_idle_agent_response(
@@ -3011,22 +3135,22 @@ class AppBehaviorTests(unittest.TestCase):
     def test_deleting_last_opening_memory_clears_cached_opening_prompt(self):
         identity = "device:dev_clearopen0123"
         old_session = self.app.create_session(identity, "agent-clear-opening")
-        first = self.app.add_message(old_session, "user", "我是绿手侠")
+        first = self.app.add_message(old_session, "user", "我是示例伙伴")
         memory_id = self.app.save_curated_memory(
             old_session,
             first,
             first,
-            "用户自称是绿手侠。",
+            "用户自称是示例伙伴。",
             importance_label="identity",
             confidence=0.95,
         )
         cached = self.app.refresh_cached_opening_prompt(identity)
-        self.assertIn("绿手侠", cached)
+        self.assertIn("示例伙伴", cached)
 
         deleted = self.app.delete_admin_memory(memory_id)
 
         self.assertTrue(deleted)
-        self.assertNotIn("绿手侠", self.app.get_cached_opening_prompt(identity))
+        self.assertNotIn("示例伙伴", self.app.get_cached_opening_prompt(identity))
 
     def test_regular_chat_completion_refreshes_cached_opening_prompt(self):
         client = TestClient(self.app.app)
@@ -3571,10 +3695,10 @@ class AppBehaviorTests(unittest.TestCase):
         allowed = client.get("/analysis")
 
         self.assertEqual(blocked.status_code, 200)
-        self.assertIn("Analysis Mode", blocked.text)
+        self.assertIn("分析模式", blocked.text)
         self.assertIn("密码", blocked.text)
         self.assertEqual(memory_admin_login.status_code, 200)
-        self.assertIn("Analysis Mode", still_blocked.text)
+        self.assertIn("分析模式", still_blocked.text)
         self.assertEqual(trace_still_blocked.status_code, 401)
         self.assertEqual(analysis_login.status_code, 200)
         self.assertEqual(allowed.status_code, 200)
@@ -3706,7 +3830,7 @@ class AppBehaviorTests(unittest.TestCase):
         identity = "device:memory-chain"
         session_id = self.app.create_session(identity, "agent-memory-chain")
         self.app.add_message(session_id, "user", "我刚才说过我的英雄身份吗？")
-        self.app.add_message(session_id, "assistant", "你说自己是绿手侠。")
+        self.app.add_message(session_id, "assistant", "你说自己是示例伙伴。")
         self.app.add_message(session_id, "user", "那我最喜欢的技能是什么？")
         captured = {}
 
@@ -3722,7 +3846,7 @@ class AppBehaviorTests(unittest.TestCase):
 
         def fake_planner(*_args, **kwargs):
             captured["query_context"] = kwargs.get("context_messages")
-            return "用户 英雄身份 绿手侠 技能 偏好"
+            return "用户 英雄身份 示例伙伴 技能 偏好"
 
         self.app.should_use_memory_recall = fake_gate
         self.app.build_memory_retrieval_query = fake_planner
@@ -3741,8 +3865,8 @@ class AppBehaviorTests(unittest.TestCase):
         gate_text = json.dumps(captured["gate_context"], ensure_ascii=False)
         query_text = json.dumps(captured["query_context"], ensure_ascii=False)
         self.assertIn("当前真实日期", prompt)
-        self.assertIn("绿手侠", gate_text)
-        self.assertIn("绿手侠", query_text)
+        self.assertIn("示例伙伴", gate_text)
+        self.assertIn("示例伙伴", query_text)
         self.assertIn("那我最喜欢的技能是什么？", query_text)
 
     def test_analysis_background_endpoint_requires_login_and_lists_idle_work(self):

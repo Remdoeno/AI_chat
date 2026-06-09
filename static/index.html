@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>旺财1.2 Ai助手聊天</title>
+    <title>旺财1.3 Ai助手聊天</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260609_dialog_analysis_send_align" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260610_wangcai_1_3" />
   </head>
   <body>
     <main class="app-shell">
@@ -71,14 +71,20 @@
           <span aria-hidden="true">✦</span>
           <span>成果</span>
         </a>
-        <a class="sidebar-link" href="/analysis" aria-label="进入 Analysis Mode">
+        <a class="sidebar-link" href="/analysis" aria-label="进入分析模式">
           <span aria-hidden="true">⌁</span>
-          <span>Analysis</span>
+          <span>分析模式</span>
         </a>
-        <button id="memoryAdminButton" class="sidebar-link sidebar-button" type="button" aria-label="进入记忆后台">
+        <button id="memoryAdminButton" class="sidebar-link sidebar-button" type="button" aria-label="进入记忆库">
           <span aria-hidden="true">▣</span>
-          <span>记忆</span>
+          <span>记忆库</span>
         </button>
+        <button id="userMemoryBindingButton" class="sidebar-link sidebar-button" type="button" aria-label="用户记忆绑定">
+          <span aria-hidden="true">◎</span>
+          <span id="userMemoryBindingLabel">记忆绑定</span>
+          <span id="userMemoryBindingCrown" class="binding-crown" hidden>👑</span>
+        </button>
+        <p id="userMemoryBindingSummary" class="sidebar-binding-summary">未绑定共享用户</p>
       </aside>
 
       <section class="chat-area" aria-label="聊天窗口">
@@ -124,6 +130,35 @@
         </div>
       </form>
     </dialog>
-    <script src="/static/app.js?v=20260609_composer_analysis_sync"></script>
+    <dialog id="userMemoryBindingDialog" class="admin-login-dialog binding-dialog" aria-labelledby="userMemoryBindingDialogTitle">
+      <form id="userMemoryBindingForm" class="admin-login-form binding-form" method="dialog">
+        <div class="binding-dialog-header">
+          <h2 id="userMemoryBindingDialogTitle">用户记忆绑定</h2>
+          <button id="userMemoryBindingInfoButton" class="binding-info-button" type="button" aria-label="查看功能说明" aria-expanded="false">ⓘ</button>
+        </div>
+        <p id="userMemoryBindingInfo" class="binding-info-text" role="tooltip" hidden>
+          同用户 ID 的多个设备会共享长期记忆、event 和 preference。开启“共享聊天记录”后，本设备上刷历史时可按时间加载同用户 ID 下也开启共享的设备会话。设为主机后，同用户 ID 中最新设为主机的设备会显示皇冠；除各设备自己的助手人设、称呼、开场偏好外，普通记忆和事件会优先归到主机设备。
+        </p>
+        <label class="field" for="userMemoryBindingInput">
+          <span>用户 ID</span>
+          <input id="userMemoryBindingInput" type="text" maxlength="120" autocomplete="off" spellcheck="false" placeholder="输入共享用户 ID" />
+        </label>
+        <label class="binding-check-field" for="shareChatHistoryCheckbox">
+          <input id="shareChatHistoryCheckbox" type="checkbox" />
+          <span>共享聊天记录</span>
+        </label>
+        <label class="binding-check-field" for="hostDeviceCheckbox">
+          <input id="hostDeviceCheckbox" type="checkbox" />
+          <span>设为主机</span>
+          <span class="binding-inline-crown" aria-hidden="true">👑</span>
+        </label>
+        <p id="userMemoryBindingStatus" class="dialog-status"></p>
+        <div class="dialog-actions">
+          <button id="userMemoryBindingCancelButton" class="secondary-button compact-button" type="button">取消</button>
+          <button id="userMemoryBindingSaveButton" class="primary-button compact-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+    <script src="/static/app.js?v=20260610_wangcai_1_3"></script>
   </body>
 </html>

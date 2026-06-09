@@ -30,6 +30,12 @@ class MemoryAdminPayload(BaseModel):
     visitor_ip: Optional[str] = None
 
 
+class UserMemoryBindingPayload(BaseModel):
+    shared_user_id: str = Field(default="", max_length=120)
+    share_chat_history: bool = False
+    is_host: bool = False
+
+
 class AdminLoginPayload(BaseModel):
     password: str = Field(min_length=1)
 

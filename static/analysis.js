@@ -11,6 +11,18 @@ const refreshTraceButton = document.getElementById("refreshTraceButton");
 const temperatureInput = document.getElementById("temperatureInput");
 const topPInput = document.getElementById("topPInput");
 const proxyInput = document.getElementById("proxyInput");
+const analysisUserMemoryBindingButton = document.getElementById("analysisUserMemoryBindingButton");
+const analysisUserMemoryBindingCrown = document.getElementById("analysisUserMemoryBindingCrown");
+const analysisUserMemoryBindingSummary = document.getElementById("analysisUserMemoryBindingSummary");
+const analysisUserMemoryBindingDialog = document.getElementById("analysisUserMemoryBindingDialog");
+const analysisUserMemoryBindingForm = document.getElementById("analysisUserMemoryBindingForm");
+const analysisUserMemoryBindingInput = document.getElementById("analysisUserMemoryBindingInput");
+const analysisShareChatHistoryCheckbox = document.getElementById("analysisShareChatHistoryCheckbox");
+const analysisHostDeviceCheckbox = document.getElementById("analysisHostDeviceCheckbox");
+const analysisUserMemoryBindingStatus = document.getElementById("analysisUserMemoryBindingStatus");
+const analysisUserMemoryBindingCancelButton = document.getElementById("analysisUserMemoryBindingCancelButton");
+const analysisUserMemoryBindingInfoButton = document.getElementById("analysisUserMemoryBindingInfoButton");
+const analysisUserMemoryBindingInfo = document.getElementById("analysisUserMemoryBindingInfo");
 const webSearchInput = document.getElementById("webSearchInput");
 const analysisAttachImageButton = document.getElementById("analysisAttachImageButton");
 const analysisWebSearchButton = document.getElementById("analysisWebSearchButton");
@@ -34,9 +46,11 @@ const closedBackgroundKeys = new Set();
 const tracePayloadScrollPositions = new Map();
 const backgroundPayloadScrollPositions = new Map();
 const DEVICE_STORAGE_KEY = "qwen_device_id";
+const USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
 const CHAT_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
 const ANALYSIS_SAMPLING_STORAGE_KEY = "qwen_analysis_sampling_settings";
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
+let userMemoryBindingState = null;
 
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -78,6 +92,100 @@ const TRACE_EVENT_LABELS = {
 
 function setStatus(text) {
   statusText.textContent = text;
+}
+
+function bindingSummaryText(binding) {
+  if (!binding || !binding.shared_user_id) {
+    return "未绑定共享用户";
+  }
+  const userId = String(binding.shared_user_id || "").trim();
+  const maskedUserId = userId ? `${userId.slice(0, 1)}***` : "";
+  const parts = [maskedUserId ? `共享用户：${maskedUserId}` : "已绑定共享用户"];
+  parts.push(binding.share_chat_history ? "共享聊天记录" : "仅共享长期记忆");
+  if (binding.is_host) {
+    parts.push("本设备为主机");
+  }
+  return parts.join(" · ");
+}
+
+function publishUserMemoryBindingState() {
+  try {
+    localStorage.setItem(USER_MEMORY_BINDING_STORAGE_KEY, JSON.stringify({
+      device_id: ensureDeviceId(),
+      binding: userMemoryBindingState || {},
+      cached_at: Date.now(),
+    }));
+  } catch (_) {
+    // localStorage may be unavailable in strict private contexts.
+  }
+}
+
+function readCachedUserMemoryBindingState() {
+  try {
+    const raw = localStorage.getItem(USER_MEMORY_BINDING_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const payload = JSON.parse(raw);
+    if (!payload || payload.device_id !== ensureDeviceId()) {
+      return null;
+    }
+    return payload.binding && typeof payload.binding === "object" ? payload.binding : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function applyCachedUserMemoryBindingState() {
+  const cached = readCachedUserMemoryBindingState();
+  if (!cached) {
+    return false;
+  }
+  applyUserMemoryBindingState(cached, { publish: false });
+  return true;
+}
+
+function applyUserMemoryBindingState(binding, options = {}) {
+  const shouldPublish = options.publish !== false;
+  const payload = binding && typeof binding === "object" ? binding : {};
+  userMemoryBindingState = {
+    shared_user_id: String(payload.shared_user_id || "").trim(),
+    share_chat_history: Boolean(payload.share_chat_history),
+    is_host: Boolean(payload.is_host),
+    host_device_id: String(payload.host_device_id || ""),
+  };
+  if (analysisUserMemoryBindingButton) {
+    analysisUserMemoryBindingButton.classList.toggle("is-host", userMemoryBindingState.is_host);
+  }
+  if (analysisUserMemoryBindingSummary) {
+    analysisUserMemoryBindingSummary.textContent = bindingSummaryText(userMemoryBindingState);
+  }
+  if (analysisUserMemoryBindingCrown) {
+    analysisUserMemoryBindingCrown.hidden = !userMemoryBindingState.is_host;
+  }
+  if (shouldPublish) {
+    publishUserMemoryBindingState();
+  }
+}
+
+function syncUserMemoryBindingForm() {
+  const binding = userMemoryBindingState || {};
+  if (!analysisUserMemoryBindingInput) {
+    return;
+  }
+  analysisUserMemoryBindingInput.value = String(binding.shared_user_id || "");
+  analysisShareChatHistoryCheckbox.checked = Boolean(binding.share_chat_history);
+  analysisHostDeviceCheckbox.checked = Boolean(binding.is_host);
+}
+
+function setAnalysisBindingInfoVisible(visible) {
+  if (!analysisUserMemoryBindingInfo) {
+    return;
+  }
+  analysisUserMemoryBindingInfo.hidden = !visible;
+  if (analysisUserMemoryBindingInfoButton) {
+    analysisUserMemoryBindingInfoButton.setAttribute("aria-expanded", visible ? "true" : "false");
+  }
 }
 
 function hasLargeAttachment(attachments) {
@@ -723,6 +831,78 @@ async function loadPreviousAnalysisSessionContext() {
   }
 }
 
+async function loadUserMemoryBinding() {
+  applyCachedUserMemoryBindingState();
+  try {
+    const response = await fetch("/api/user-memory-binding", {
+      headers: deviceIdentityHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const payload = await response.json();
+    applyUserMemoryBindingState(payload);
+  } catch (error) {
+    if (analysisUserMemoryBindingSummary) {
+      analysisUserMemoryBindingSummary.textContent = `绑定读取失败：${error.message}`;
+    }
+  }
+}
+
+function openUserMemoryBindingDialog() {
+  if (!analysisUserMemoryBindingDialog) {
+    return;
+  }
+  analysisUserMemoryBindingStatus.textContent = "";
+  syncUserMemoryBindingForm();
+  setAnalysisBindingInfoVisible(false);
+  if (typeof analysisUserMemoryBindingDialog.showModal === "function") {
+    analysisUserMemoryBindingDialog.showModal();
+  } else {
+    analysisUserMemoryBindingDialog.setAttribute("open", "");
+  }
+  analysisUserMemoryBindingInput.focus();
+  analysisUserMemoryBindingInput.select();
+}
+
+function closeUserMemoryBindingDialog() {
+  if (!analysisUserMemoryBindingDialog) {
+    return;
+  }
+  analysisUserMemoryBindingDialog.close();
+}
+
+async function saveUserMemoryBinding(event) {
+  event.preventDefault();
+  const sharedUserId = String(analysisUserMemoryBindingInput.value || "").trim();
+  const payload = {
+    shared_user_id: sharedUserId,
+    share_chat_history: sharedUserId ? Boolean(analysisShareChatHistoryCheckbox.checked) : false,
+    is_host: sharedUserId ? Boolean(analysisHostDeviceCheckbox.checked) : false,
+  };
+  analysisUserMemoryBindingStatus.textContent = "保存中";
+  try {
+    const response = await fetch("/api/user-memory-binding", {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const result = await response.json();
+    applyUserMemoryBindingState(result);
+    analysisUserMemoryBindingStatus.textContent = result.shared_user_id ? "已保存共享绑定" : "已关闭共享绑定";
+    setStatus(result.shared_user_id ? "共享记忆配置已更新" : "已关闭共享记忆");
+    if (result.left_previous_shared_user) {
+      window.alert("已退出当前记忆共享。");
+    }
+    window.setTimeout(() => closeUserMemoryBindingDialog(), 180);
+  } catch (error) {
+    analysisUserMemoryBindingStatus.textContent = `保存失败：${error.message}`;
+  }
+}
+
 async function createSession() {
   const response = await fetch("/api/sessions", {
     method: "POST",
@@ -733,6 +913,9 @@ async function createSession() {
   }
   const data = await response.json();
   sessionId = data.session_id;
+  if (data.memory_binding) {
+    applyUserMemoryBindingState(data.memory_binding);
+  }
   resetPreviousAnalysisSessionLoadState();
   ensureAnalysisHistoryLoadIndicator();
   syncPreviousAnalysisSessionButton();
@@ -770,6 +953,9 @@ async function resetSession() {
   }
   const data = await response.json();
   sessionId = data.session_id;
+  if (data.memory_binding) {
+    applyUserMemoryBindingState(data.memory_binding);
+  }
   resetPreviousAnalysisSessionLoadState();
   messagesEl.replaceChildren();
   ensureAnalysisHistoryLoadIndicator();
@@ -1238,6 +1424,44 @@ analysisWebSearchButton.addEventListener("click", () => {
 analysisImageInput.addEventListener("change", () => handleImageFiles(analysisImageInput.files));
 loadPreviousButton.addEventListener("click", () => loadPreviousAnalysisSessionContext());
 messagesEl.addEventListener("wheel", handleDesktopPreviousAnalysisSessionWheel, { passive: false });
+analysisUserMemoryBindingButton.addEventListener("click", openUserMemoryBindingDialog);
+analysisUserMemoryBindingForm.addEventListener("submit", saveUserMemoryBinding);
+analysisUserMemoryBindingCancelButton.addEventListener("click", closeUserMemoryBindingDialog);
+analysisUserMemoryBindingInput.addEventListener("input", () => {
+  const hasValue = Boolean(String(analysisUserMemoryBindingInput.value || "").trim());
+  if (!hasValue) {
+    analysisShareChatHistoryCheckbox.checked = false;
+    analysisHostDeviceCheckbox.checked = false;
+  }
+});
+analysisUserMemoryBindingInfoButton.addEventListener("click", () => {
+  setAnalysisBindingInfoVisible(Boolean(analysisUserMemoryBindingInfo.hidden));
+});
+document.addEventListener("click", (event) => {
+  if (!analysisUserMemoryBindingInfo || analysisUserMemoryBindingInfo.hidden) {
+    return;
+  }
+  const target = event.target;
+  if (analysisUserMemoryBindingInfoButton.contains(target) || analysisUserMemoryBindingInfo.contains(target)) {
+    return;
+  }
+  setAnalysisBindingInfoVisible(false);
+});
+window.addEventListener("storage", (event) => {
+  if (event.key === USER_MEMORY_BINDING_STORAGE_KEY) {
+    if (!applyCachedUserMemoryBindingState()) {
+      loadUserMemoryBinding().catch(() => {});
+    }
+  }
+});
+window.addEventListener("focus", () => {
+  loadUserMemoryBinding().catch(() => {});
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    loadUserMemoryBinding().catch(() => {});
+  }
+});
 
 window.addEventListener("beforeunload", () => {
   if (sessionId) {
@@ -1254,6 +1478,7 @@ window.addEventListener("beforeunload", () => {
 
 loadAnalysisSamplingSettings();
 setAnalysisWebSearchEnabled(false);
+loadUserMemoryBinding().catch(() => {});
 
 createSession()
   .then(() => {

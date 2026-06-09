@@ -9,12 +9,25 @@ const attachmentPreview = document.getElementById("attachmentPreview");
 const resetButton = document.getElementById("resetButton");
 const statusText = document.getElementById("statusText");
 const bunnyLogoButton = document.getElementById("bunnyLogoButton");
+const userMemoryBindingButton = document.getElementById("userMemoryBindingButton");
+const userMemoryBindingLabel = document.getElementById("userMemoryBindingLabel");
+const userMemoryBindingCrown = document.getElementById("userMemoryBindingCrown");
+const userMemoryBindingSummary = document.getElementById("userMemoryBindingSummary");
 const memoryAdminButton = document.getElementById("memoryAdminButton");
 const memoryAdminDialog = document.getElementById("memoryAdminDialog");
 const memoryAdminLoginForm = document.getElementById("memoryAdminLoginForm");
 const memoryAdminPassword = document.getElementById("memoryAdminPassword");
 const memoryAdminLoginStatus = document.getElementById("memoryAdminLoginStatus");
 const memoryAdminCancelButton = document.getElementById("memoryAdminCancelButton");
+const userMemoryBindingDialog = document.getElementById("userMemoryBindingDialog");
+const userMemoryBindingForm = document.getElementById("userMemoryBindingForm");
+const userMemoryBindingInput = document.getElementById("userMemoryBindingInput");
+const shareChatHistoryCheckbox = document.getElementById("shareChatHistoryCheckbox");
+const hostDeviceCheckbox = document.getElementById("hostDeviceCheckbox");
+const userMemoryBindingStatus = document.getElementById("userMemoryBindingStatus");
+const userMemoryBindingCancelButton = document.getElementById("userMemoryBindingCancelButton");
+const userMemoryBindingInfoButton = document.getElementById("userMemoryBindingInfoButton");
+const userMemoryBindingInfo = document.getElementById("userMemoryBindingInfo");
 const advancedOptions = document.getElementById("advancedOptions");
 const temperatureRange = document.getElementById("temperatureRange");
 const temperatureValue = document.getElementById("temperatureValue");
@@ -30,6 +43,7 @@ const BUNNY_CLICK_WINDOW_MS = 1000;
 const BUNNY_CLICK_TARGET = 4;
 const SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
 const DEVICE_STORAGE_KEY = "qwen_device_id";
+const USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
 const DEFAULT_SAMPLING_SETTINGS = {
   temperature: 1,
   top_p: 0.95,
@@ -85,6 +99,7 @@ let touchHistoryGestureFired = false;
 let wasTouchScrollingTowardTop = false;
 let touchHistoryArmOnTop = false;
 let touchHistoryClearTimer = 0;
+let userMemoryBindingState = null;
 
 function isUsableDeviceId(value) {
   return /^[A-Za-z0-9_-]{12,96}$/.test(String(value || "").trim());
@@ -92,6 +107,103 @@ function isUsableDeviceId(value) {
 
 function setStatus(text) {
   statusText.textContent = text;
+}
+
+function bindingSummaryText(binding) {
+  if (!binding || !binding.shared_user_id) {
+    return "未绑定共享用户";
+  }
+  const userId = String(binding.shared_user_id || "").trim();
+  const maskedUserId = userId ? `${userId.slice(0, 1)}***` : "";
+  const parts = [maskedUserId ? `共享用户：${maskedUserId}` : "已绑定共享用户"];
+  parts.push(binding.share_chat_history ? "共享聊天记录" : "仅共享长期记忆");
+  if (binding.is_host) {
+    parts.push("本设备为主机");
+  }
+  return parts.join(" · ");
+}
+
+function publishUserMemoryBindingState() {
+  try {
+    localStorage.setItem(USER_MEMORY_BINDING_STORAGE_KEY, JSON.stringify({
+      device_id: ensureDeviceId(),
+      binding: userMemoryBindingState || {},
+      cached_at: Date.now(),
+    }));
+  } catch (_) {
+    // localStorage may be unavailable in strict private contexts.
+  }
+}
+
+function readCachedUserMemoryBindingState() {
+  try {
+    const raw = localStorage.getItem(USER_MEMORY_BINDING_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const payload = JSON.parse(raw);
+    if (!payload || payload.device_id !== ensureDeviceId()) {
+      return null;
+    }
+    return payload.binding && typeof payload.binding === "object" ? payload.binding : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function applyCachedUserMemoryBindingState() {
+  const cached = readCachedUserMemoryBindingState();
+  if (!cached) {
+    return false;
+  }
+  applyUserMemoryBindingState(cached, { publish: false });
+  return true;
+}
+
+function applyUserMemoryBindingState(binding, options = {}) {
+  const shouldPublish = options.publish !== false;
+  const payload = binding && typeof binding === "object" ? binding : {};
+  userMemoryBindingState = {
+    shared_user_id: String(payload.shared_user_id || "").trim(),
+    share_chat_history: Boolean(payload.share_chat_history),
+    is_host: Boolean(payload.is_host),
+    host_device_id: String(payload.host_device_id || ""),
+  };
+  if (userMemoryBindingLabel) {
+    userMemoryBindingLabel.textContent = userMemoryBindingState.shared_user_id ? "已绑定" : "记忆绑定";
+  }
+  if (userMemoryBindingSummary) {
+    userMemoryBindingSummary.textContent = bindingSummaryText(userMemoryBindingState);
+  }
+  if (userMemoryBindingCrown) {
+    userMemoryBindingCrown.hidden = !userMemoryBindingState.is_host;
+  }
+  if (userMemoryBindingButton) {
+    userMemoryBindingButton.classList.toggle("is-host", userMemoryBindingState.is_host);
+  }
+  if (shouldPublish) {
+    publishUserMemoryBindingState();
+  }
+}
+
+function syncUserMemoryBindingForm() {
+  if (!userMemoryBindingInput) {
+    return;
+  }
+  const binding = userMemoryBindingState || {};
+  userMemoryBindingInput.value = String(binding.shared_user_id || "");
+  shareChatHistoryCheckbox.checked = Boolean(binding.share_chat_history);
+  hostDeviceCheckbox.checked = Boolean(binding.is_host);
+}
+
+function setUserMemoryBindingInfoVisible(visible) {
+  if (!userMemoryBindingInfo) {
+    return;
+  }
+  userMemoryBindingInfo.hidden = !visible;
+  if (userMemoryBindingInfoButton) {
+    userMemoryBindingInfoButton.setAttribute("aria-expanded", visible ? "true" : "false");
+  }
 }
 
 function hasLargeAttachment(attachments) {
@@ -984,6 +1096,9 @@ async function createSession(options = {}) {
   }
   const payload = await response.json();
   sessionId = payload.session_id;
+  if (payload.memory_binding) {
+    applyUserMemoryBindingState(payload.memory_binding);
+  }
   resetPreviousSessionLoadState();
   clearMessages();
   clearPendingAttachments();
@@ -1063,6 +1178,9 @@ async function resetChat() {
     }
     const payload = await response.json();
     sessionId = payload.session_id;
+    if (payload.memory_binding) {
+      applyUserMemoryBindingState(payload.memory_binding);
+    }
     resetPreviousSessionLoadState();
     clearMessages();
     clearPendingAttachments();
@@ -1297,8 +1415,84 @@ function openMemoryAdminDialog() {
   memoryAdminPassword.focus();
 }
 
+function openMemoryAdminPage() {
+  window.location.href = "/memory-admin";
+}
+
 function closeMemoryAdminDialog() {
   memoryAdminDialog.close();
+}
+
+async function loadUserMemoryBinding() {
+  applyCachedUserMemoryBindingState();
+  try {
+    const response = await fetch("/api/user-memory-binding", {
+      headers: deviceIdentityHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const payload = await response.json();
+    applyUserMemoryBindingState(payload);
+  } catch (error) {
+    if (userMemoryBindingSummary) {
+      userMemoryBindingSummary.textContent = `绑定读取失败：${error.message}`;
+    }
+  }
+}
+
+function openUserMemoryBindingDialog() {
+  if (!userMemoryBindingDialog) {
+    return;
+  }
+  userMemoryBindingStatus.textContent = "";
+  syncUserMemoryBindingForm();
+  setUserMemoryBindingInfoVisible(false);
+  if (typeof userMemoryBindingDialog.showModal === "function") {
+    userMemoryBindingDialog.showModal();
+  } else {
+    userMemoryBindingDialog.setAttribute("open", "");
+  }
+  userMemoryBindingInput.focus();
+  userMemoryBindingInput.select();
+}
+
+function closeUserMemoryBindingDialog() {
+  if (!userMemoryBindingDialog) {
+    return;
+  }
+  userMemoryBindingDialog.close();
+}
+
+async function saveUserMemoryBinding(event) {
+  event.preventDefault();
+  const sharedUserId = String(userMemoryBindingInput.value || "").trim();
+  const payload = {
+    shared_user_id: sharedUserId,
+    share_chat_history: sharedUserId ? Boolean(shareChatHistoryCheckbox.checked) : false,
+    is_host: sharedUserId ? Boolean(hostDeviceCheckbox.checked) : false,
+  };
+  userMemoryBindingStatus.textContent = "保存中";
+  try {
+    const response = await fetch("/api/user-memory-binding", {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const result = await response.json();
+    applyUserMemoryBindingState(result);
+    userMemoryBindingStatus.textContent = result.shared_user_id ? "已保存共享绑定" : "已关闭共享绑定";
+    setStatus(result.shared_user_id ? "共享记忆配置已更新" : "已关闭共享记忆");
+    if (result.left_previous_shared_user) {
+      window.alert("已退出当前记忆共享。");
+    }
+    window.setTimeout(() => closeUserMemoryBindingDialog(), 180);
+  } catch (error) {
+    userMemoryBindingStatus.textContent = `保存失败：${error.message}`;
+  }
 }
 
 async function loginMemoryAdmin(event) {
@@ -1395,7 +1589,45 @@ imageInput.addEventListener("change", async () => {
     imageInput.value = "";
   }
 });
-memoryAdminButton.addEventListener("click", openMemoryAdminDialog);
+userMemoryBindingButton.addEventListener("click", openUserMemoryBindingDialog);
+userMemoryBindingForm.addEventListener("submit", saveUserMemoryBinding);
+userMemoryBindingCancelButton.addEventListener("click", closeUserMemoryBindingDialog);
+userMemoryBindingInput.addEventListener("input", () => {
+  const hasValue = Boolean(String(userMemoryBindingInput.value || "").trim());
+  if (!hasValue) {
+    shareChatHistoryCheckbox.checked = false;
+    hostDeviceCheckbox.checked = false;
+  }
+});
+userMemoryBindingInfoButton.addEventListener("click", () => {
+  setUserMemoryBindingInfoVisible(Boolean(userMemoryBindingInfo.hidden));
+});
+document.addEventListener("click", (event) => {
+  if (!userMemoryBindingInfo || userMemoryBindingInfo.hidden) {
+    return;
+  }
+  const target = event.target;
+  if (userMemoryBindingInfoButton.contains(target) || userMemoryBindingInfo.contains(target)) {
+    return;
+  }
+  setUserMemoryBindingInfoVisible(false);
+});
+window.addEventListener("storage", (event) => {
+  if (event.key === USER_MEMORY_BINDING_STORAGE_KEY) {
+    if (!applyCachedUserMemoryBindingState()) {
+      loadUserMemoryBinding().catch(() => {});
+    }
+  }
+});
+window.addEventListener("focus", () => {
+  loadUserMemoryBinding().catch(() => {});
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    loadUserMemoryBinding().catch(() => {});
+  }
+});
+memoryAdminButton.addEventListener("click", openMemoryAdminPage);
 memoryAdminLoginForm.addEventListener("submit", loginMemoryAdmin);
 memoryAdminCancelButton.addEventListener("click", closeMemoryAdminDialog);
 window.addEventListener("pagehide", closeCurrentSession);
@@ -1413,6 +1645,7 @@ confirmSamplingButton.addEventListener("click", () => {
 });
 syncSamplingControlsFromSettings();
 
+loadUserMemoryBinding().catch(() => {});
 createSession().catch((error) => {
   setStatus("连接失败");
   createBubble("assistant", `连接失败：${error.message}`);

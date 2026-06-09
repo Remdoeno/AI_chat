@@ -46,6 +46,7 @@ from schemas import (
     IdlePromptPayload,
     IdleStatusPayload,
     MemoryAdminPayload,
+    UserMemoryBindingPayload,
 )
 from streaming_utils import ThinkStripper, format_sse, split_think_text
 
@@ -161,6 +162,8 @@ ADMIN_PASSWORD_ENV = os.environ.get("QWEN_MEMORY_ADMIN_PASSWORD", "").strip()
 ADMIN_COOKIE_NAME = "qwen_memory_admin"
 ANALYSIS_COOKIE_NAME = "qwen_analysis_admin"
 AUTH_PBKDF2_ITERATIONS = int(os.environ.get("QWEN_AUTH_PBKDF2_ITERATIONS", "210000"))
+SHARED_USER_ID_MAX_CHARS = 120
+PROMPT_PRIORITY_LABELS = {"identity", "persona", "preference", "rule"}
 
 AUTHORITY_DOMAINS = (
     "bjeea.cn",
@@ -1715,6 +1718,16 @@ def init_db() -> None:
                 FOREIGN KEY(profile_id) REFERENCES visitor_profiles(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS shared_user_bindings (
+                device_id TEXT PRIMARY KEY,
+                shared_user_id TEXT NOT NULL DEFAULT '',
+                share_chat_history INTEGER NOT NULL DEFAULT 0,
+                is_host INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                host_updated_at TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS curated_memory_vectors (
                 memory_id INTEGER PRIMARY KEY,
                 dim INTEGER NOT NULL,
@@ -1805,6 +1818,10 @@ def init_db() -> None:
                 ON curated_memories(source_session_id, start_message_id, end_message_id);
             CREATE INDEX IF NOT EXISTS idx_visitor_ip_links_profile
                 ON visitor_ip_links(profile_id);
+            CREATE INDEX IF NOT EXISTS idx_shared_user_bindings_user
+                ON shared_user_bindings(shared_user_id, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_shared_user_bindings_host
+                ON shared_user_bindings(shared_user_id, is_host, host_updated_at, updated_at);
             CREATE INDEX IF NOT EXISTS idx_memory_agent_jobs_status
                 ON memory_agent_jobs(status, id);
             CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_created
@@ -1831,6 +1848,12 @@ def init_db() -> None:
         ensure_column(conn, "idle_agent_artifacts", "episode_index", "INTEGER")
         ensure_column(conn, "idle_agent_artifacts", "summary", "TEXT")
         ensure_column(conn, "idle_agent_artifacts", "likes", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "shared_user_bindings", "shared_user_id", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "shared_user_bindings", "share_chat_history", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "shared_user_bindings", "is_host", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "shared_user_bindings", "created_at", "TEXT")
+        ensure_column(conn, "shared_user_bindings", "updated_at", "TEXT")
+        ensure_column(conn, "shared_user_bindings", "host_updated_at", "TEXT")
         conn.execute(
             """
             UPDATE idle_agent_artifacts
@@ -2035,6 +2058,325 @@ def is_placeholder_visitor_ip(value: str) -> bool:
     except ValueError:
         return False
     return parsed.is_loopback or parsed.is_unspecified
+
+
+def clean_shared_user_id(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return clean_search_text(text, SHARED_USER_ID_MAX_CHARS)
+
+
+DEVICE_LOCAL_MEMORY_LABELS = {"identity", "persona", "preference", "rule"}
+
+
+def is_device_local_memory_label(label: str) -> bool:
+    return (label or "other").strip() in DEVICE_LOCAL_MEMORY_LABELS
+
+
+def prompt_priority_memory_bucket(content: str, label: str) -> str:
+    normalized_label = (label or "other").strip()
+    if is_opening_context_memory(content, normalized_label):
+        return f"opening:{normalized_label}"
+    if is_profile_context_memory(content, normalized_label):
+        return f"profile:{normalized_label}"
+    return ""
+
+
+def device_local_prompt_priority_buckets(
+    conn: sqlite3.Connection,
+    device_id: str,
+) -> set:
+    current_ip = normalize_visitor_ip(device_id)
+    if not current_ip or not is_device_identity(current_ip):
+        return set()
+    rows = conn.execute(
+        """
+        SELECT content, importance_label
+        FROM curated_memories
+        WHERE visitor_ip = ?
+          AND importance_label IN ('identity', 'persona', 'preference', 'rule')
+        ORDER BY id DESC
+        LIMIT 200
+        """,
+        (current_ip,),
+    ).fetchall()
+    buckets = set()
+    for row in rows:
+        bucket = prompt_priority_memory_bucket(str(row["content"] or ""), str(row["importance_label"] or ""))
+        if bucket:
+            buckets.add(bucket)
+    return buckets
+
+
+def binding_row_to_dict(row: Optional[sqlite3.Row], host_device_id: str = "") -> Dict[str, object]:
+    if row is None:
+        return {
+            "shared_user_id": "",
+            "share_chat_history": False,
+            "is_host": False,
+            "host_device_id": host_device_id or "",
+            "updated_at": "",
+        }
+    shared_user_id = clean_shared_user_id(str(row["shared_user_id"] or ""))
+    current_is_host = bool(row["is_host"]) if host_device_id == str(row["device_id"] or "") else False
+    if not host_device_id and bool(row["is_host"]):
+        host_device_id = str(row["device_id"] or "")
+        current_is_host = True
+    return {
+        "shared_user_id": shared_user_id,
+        "share_chat_history": bool(row["share_chat_history"]),
+        "is_host": current_is_host,
+        "host_device_id": host_device_id or "",
+        "updated_at": str(row["updated_at"] or ""),
+    }
+
+
+def effective_host_device_id(conn: sqlite3.Connection, shared_user_id: str) -> str:
+    normalized_user = clean_shared_user_id(shared_user_id)
+    if not normalized_user:
+        return ""
+    row = conn.execute(
+        """
+        SELECT device_id
+        FROM shared_user_bindings
+        WHERE shared_user_id = ?
+          AND is_host = 1
+        ORDER BY COALESCE(host_updated_at, updated_at) DESC, updated_at DESC, device_id DESC
+        LIMIT 1
+        """,
+        (normalized_user,),
+    ).fetchone()
+    return str(row["device_id"]) if row else ""
+
+
+def binding_scope_for_device(
+    conn: sqlite3.Connection,
+    current_visitor_ip: str,
+) -> Dict[str, object]:
+    current_ip = normalize_visitor_ip(current_visitor_ip) if current_visitor_ip else ""
+    default_scope = {
+        "current_device_id": current_ip,
+        "shared_user_id": "",
+        "share_chat_history": False,
+        "device_ids": [current_ip] if current_ip and is_device_identity(current_ip) else [],
+        "host_device_id": "",
+        "is_host": False,
+    }
+    if not current_ip or not is_device_identity(current_ip):
+        return default_scope
+    row = conn.execute(
+        """
+        SELECT device_id, shared_user_id, share_chat_history, is_host, updated_at
+        FROM shared_user_bindings
+        WHERE device_id = ?
+        """,
+        (current_ip,),
+    ).fetchone()
+    shared_user_id = clean_shared_user_id(str(row["shared_user_id"] or "")) if row else ""
+    if not shared_user_id:
+        return default_scope
+    device_rows = conn.execute(
+        """
+        SELECT device_id
+        FROM shared_user_bindings
+        WHERE shared_user_id = ?
+        ORDER BY updated_at DESC, device_id ASC
+        """,
+        (shared_user_id,),
+    ).fetchall()
+    device_ids = []
+    seen = set()
+    for item in device_rows:
+        device_id = normalize_visitor_ip(str(item["device_id"] or ""))
+        if not device_id or not is_device_identity(device_id) or device_id in seen:
+            continue
+        seen.add(device_id)
+        device_ids.append(device_id)
+    if current_ip not in seen:
+        device_ids.insert(0, current_ip)
+    host_device_id = effective_host_device_id(conn, shared_user_id)
+    return {
+        "current_device_id": current_ip,
+        "shared_user_id": shared_user_id,
+        "share_chat_history": bool(row["share_chat_history"]) if row else False,
+        "device_ids": device_ids,
+        "host_device_id": host_device_id,
+        "is_host": host_device_id == current_ip and bool(host_device_id),
+    }
+
+
+def binding_related_device_ids(current_visitor_ip: str) -> List[str]:
+    current_ip = normalize_visitor_ip(current_visitor_ip) if current_visitor_ip else ""
+    if not current_ip or not is_device_identity(current_ip):
+        return []
+    with connect_db() as conn:
+        scope = binding_scope_for_device(conn, current_ip)
+    return list(scope.get("device_ids") or [current_ip])
+
+
+def shared_memory_owner_device_id(
+    conn: sqlite3.Connection,
+    source_device_id: str,
+    content: str,
+    importance_label: str,
+) -> str:
+    source_ip = normalize_visitor_ip(source_device_id)
+    if not source_ip or not is_device_identity(source_ip):
+        return source_ip
+    scope = binding_scope_for_device(conn, source_ip)
+    host_device_id = str(scope.get("host_device_id") or "")
+    if not host_device_id or host_device_id == source_ip:
+        return source_ip
+    if is_device_local_memory_label(importance_label):
+        return source_ip
+    return host_device_id
+
+
+def refresh_binding_scoped_opening_prompts(current_visitor_ip: str) -> None:
+    device_ids = binding_related_device_ids(current_visitor_ip)
+    if not device_ids:
+        return
+    for device_id in device_ids:
+        try:
+            refresh_cached_opening_prompt(device_id)
+        except Exception:
+            continue
+
+
+def delete_opening_prompt_caches_for_devices(device_ids: List[str]) -> None:
+    seen = set()
+    for device_id in device_ids:
+        normalized = normalize_visitor_ip(device_id)
+        if not normalized or not is_device_identity(normalized) or normalized in seen:
+            continue
+        seen.add(normalized)
+        delete_app_setting(opening_prompt_cache_key(normalized))
+
+
+def sql_in_clause_params(items: List[object]) -> Tuple[str, List[object]]:
+    values = list(items)
+    if not values:
+        return "(NULL)", []
+    return f"({','.join('?' for _ in values)})", values
+
+
+def get_user_memory_binding(current_visitor_ip: str) -> Dict[str, object]:
+    current_ip = normalize_visitor_ip(current_visitor_ip)
+    if not current_ip or not is_device_identity(current_ip):
+        return {
+            "device_id": current_ip,
+            "shared_user_id": "",
+            "share_chat_history": False,
+            "is_host": False,
+            "host_device_id": "",
+            "host_label": "",
+            "updated_at": "",
+        }
+    with connect_db() as conn:
+        row = conn.execute(
+            """
+            SELECT device_id, shared_user_id, share_chat_history, is_host, updated_at
+            FROM shared_user_bindings
+            WHERE device_id = ?
+            """,
+            (current_ip,),
+        ).fetchone()
+        host_device_id = effective_host_device_id(conn, str(row["shared_user_id"] or "")) if row else ""
+    payload = binding_row_to_dict(row, host_device_id=host_device_id)
+    payload["device_id"] = current_ip
+    payload["host_label"] = "主机" if payload.get("is_host") else ""
+    return payload
+
+
+def upsert_user_memory_binding(
+    current_visitor_ip: str,
+    shared_user_id: str,
+    share_chat_history: bool = False,
+    is_host: bool = False,
+) -> Dict[str, object]:
+    current_ip = normalize_visitor_ip(current_visitor_ip)
+    if not current_ip or not is_device_identity(current_ip):
+        raise HTTPException(status_code=400, detail="device identity required")
+    normalized_user = clean_shared_user_id(shared_user_id)
+    now = utc_now()
+    cache_devices_to_clear: List[str] = []
+    with connect_db() as conn:
+        old_scope = binding_scope_for_device(conn, current_ip)
+        old_user = str(old_scope.get("shared_user_id") or "")
+        old_devices = list(old_scope.get("device_ids") or [current_ip])
+        existing = conn.execute(
+            """
+            SELECT device_id, shared_user_id, share_chat_history, is_host, created_at
+            FROM shared_user_bindings
+            WHERE device_id = ?
+            """,
+            (current_ip,),
+        ).fetchone()
+        if not normalized_user:
+            conn.execute("DELETE FROM shared_user_bindings WHERE device_id = ?", (current_ip,))
+            cache_devices_to_clear = old_devices
+            result = {
+                "device_id": current_ip,
+                "shared_user_id": "",
+                "share_chat_history": False,
+                "is_host": False,
+                "host_device_id": "",
+                "host_label": "",
+                "updated_at": now,
+                "left_previous_shared_user": bool(old_user),
+            }
+        else:
+            if is_host:
+                conn.execute(
+                    """
+                    UPDATE shared_user_bindings
+                    SET is_host = 0,
+                        updated_at = ?
+                    WHERE shared_user_id = ?
+                    """,
+                    (now, normalized_user),
+                )
+            created_at = str(existing["created_at"] or now) if existing else now
+            conn.execute(
+                """
+                INSERT INTO shared_user_bindings (
+                    device_id, shared_user_id, share_chat_history, is_host,
+                    created_at, updated_at, host_updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    shared_user_id = excluded.shared_user_id,
+                    share_chat_history = excluded.share_chat_history,
+                    is_host = excluded.is_host,
+                    updated_at = excluded.updated_at,
+                    host_updated_at = excluded.host_updated_at
+                """,
+                (
+                    current_ip,
+                    normalized_user,
+                    1 if share_chat_history else 0,
+                    1 if is_host else 0,
+                    created_at,
+                    now,
+                    now if is_host else None,
+                ),
+            )
+            new_scope = binding_scope_for_device(conn, current_ip)
+            host_device_id = str(new_scope.get("host_device_id") or "")
+            cache_devices_to_clear = list(set(old_devices) | set(new_scope.get("device_ids") or [current_ip]))
+            result = {
+                "device_id": current_ip,
+                "shared_user_id": normalized_user,
+                "share_chat_history": bool(share_chat_history),
+                "is_host": host_device_id == current_ip and bool(host_device_id),
+                "host_device_id": host_device_id,
+                "host_label": "主机" if host_device_id == current_ip and bool(host_device_id) else "",
+                "updated_at": now,
+                "left_previous_shared_user": bool(old_user and old_user != normalized_user),
+            }
+    delete_opening_prompt_caches_for_devices(cache_devices_to_clear)
+    return result
 
 
 def refresh_session_visitor_ip(session_id: str, visitor_ip: str, user_agent: str = "") -> bool:
@@ -2273,25 +2615,13 @@ def is_known_device_identity(visitor_ip: str) -> bool:
         ).fetchone()
         if link and int(link["seen_count"] or 0) > 0:
             return True
-        profile_id = int(link["profile_id"]) if link and link["profile_id"] is not None else None
-        if profile_id is not None:
-            memory_count = conn.execute(
-                """
-                SELECT COUNT(*) AS c
-                FROM curated_memories
-                WHERE visitor_ip = ? OR profile_id = ?
-                """,
-                (ip, profile_id),
-            ).fetchone()["c"]
-        else:
-            memory_count = conn.execute(
-                """
-                SELECT COUNT(*) AS c
-                FROM curated_memories
-                WHERE visitor_ip = ?
-                """,
-                (ip,),
-            ).fetchone()["c"]
+        scope = binding_scope_for_device(conn, ip)
+        device_ids = list(scope.get("device_ids") or [ip])
+        in_clause, params = sql_in_clause_params(device_ids)
+        memory_count = conn.execute(
+            f"SELECT COUNT(*) AS c FROM curated_memories WHERE visitor_ip IN {in_clause}",
+            params,
+        ).fetchone()["c"]
     return int(memory_count or 0) > 0
 
 
@@ -2344,38 +2674,24 @@ def retrieve_future_event_memories(
     max_rows = min(max(int(limit), 1), 30)
 
     with connect_db() as conn:
-        row = conn.execute(
-            "SELECT profile_id FROM visitor_ip_links WHERE visitor_ip = ?",
-            (current_ip,),
-        ).fetchone()
-        current_profile_id = int(row["profile_id"]) if row else None
-        if current_profile_id is not None:
-            rows = conn.execute(
-                """
-                SELECT id, content, importance_label, visitor_ip, profile_id,
-                       timeline_at, confidence, updated_at
-                FROM curated_memories
-                WHERE importance_label = 'event'
-                  AND visitor_ip LIKE 'device:%'
-                  AND (visitor_ip = ? OR profile_id = ?)
-                ORDER BY COALESCE(timeline_at, updated_at) ASC, id ASC
-                LIMIT 200
-                """,
-                (current_ip, current_profile_id),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT id, content, importance_label, visitor_ip, profile_id,
-                       timeline_at, confidence, updated_at
-                FROM curated_memories
-                WHERE importance_label = 'event'
-                  AND visitor_ip = ?
-                ORDER BY COALESCE(timeline_at, updated_at) ASC, id ASC
-                LIMIT 200
-                """,
-                (current_ip,),
-            ).fetchall()
+        scope = binding_scope_for_device(conn, current_ip)
+        device_ids = list(scope.get("device_ids") or [current_ip])
+        in_clause, params = sql_in_clause_params(device_ids)
+        rows = conn.execute(
+            f"""
+            SELECT id, content, importance_label, visitor_ip, profile_id,
+                   timeline_at, confidence, updated_at
+            FROM curated_memories
+            WHERE importance_label = 'event'
+              AND visitor_ip IN {in_clause}
+            ORDER BY
+              CASE WHEN visitor_ip = ? THEN 0 ELSE 1 END,
+              COALESCE(timeline_at, updated_at) ASC,
+              id ASC
+            LIMIT 240
+            """,
+            (*params, current_ip),
+        ).fetchall()
 
     events: List[Dict[str, object]] = []
     seen = set()
@@ -2627,25 +2943,13 @@ def count_device_curated_memories(visitor_ip: str) -> int:
     if not is_device_identity(ip):
         return 0
     with connect_db() as conn:
-        row = conn.execute(
-            "SELECT profile_id FROM visitor_ip_links WHERE visitor_ip = ?",
-            (ip,),
-        ).fetchone()
-        profile_id = int(row["profile_id"]) if row and row["profile_id"] is not None else None
-        if profile_id is not None:
-            count = conn.execute(
-                """
-                SELECT COUNT(*) AS c
-                FROM curated_memories
-                WHERE visitor_ip = ? OR profile_id = ?
-                """,
-                (ip, profile_id),
-            ).fetchone()["c"]
-        else:
-            count = conn.execute(
-                "SELECT COUNT(*) AS c FROM curated_memories WHERE visitor_ip = ?",
-                (ip,),
-            ).fetchone()["c"]
+        scope = binding_scope_for_device(conn, ip)
+        device_ids = list(scope.get("device_ids") or [ip])
+        in_clause, params = sql_in_clause_params(device_ids)
+        count = conn.execute(
+            f"SELECT COUNT(*) AS c FROM curated_memories WHERE visitor_ip IN {in_clause}",
+            params,
+        ).fetchone()["c"]
     return int(count or 0)
 
 
@@ -3013,6 +3317,30 @@ def previous_context_candidate(
     visitor = str(current["visitor_ip"] or "")
     if not visitor or is_anonymous_identity(visitor):
         return None
+    scope = binding_scope_for_device(conn, visitor)
+    allowed_devices = [visitor]
+    if bool(scope.get("share_chat_history")) and str(scope.get("shared_user_id") or ""):
+        shared_user_id = str(scope.get("shared_user_id") or "")
+        shared_rows = conn.execute(
+            """
+            SELECT device_id
+            FROM shared_user_bindings
+            WHERE shared_user_id = ?
+              AND share_chat_history = 1
+            ORDER BY updated_at DESC, device_id ASC
+            """,
+            (shared_user_id,),
+        ).fetchall()
+        allowed_devices = []
+        seen_devices = set()
+        for item in shared_rows:
+            device_id = normalize_visitor_ip(str(item["device_id"] or ""))
+            if not device_id or not is_device_identity(device_id) or device_id in seen_devices:
+                continue
+            seen_devices.add(device_id)
+            allowed_devices.append(device_id)
+        if visitor not in seen_devices:
+            allowed_devices.insert(0, visitor)
 
     linked_rows = conn.execute(
         "SELECT source_session_id FROM session_context_links WHERE current_session_id = ?",
@@ -3026,15 +3354,16 @@ def previous_context_candidate(
 
     excluded = [current_session_id] + linked_ids
     placeholders = ",".join("?" for _ in excluded)
+    visitor_clause, visitor_params = sql_in_clause_params(allowed_devices)
     rows = conn.execute(
         f"""
         SELECT s.id, s.visitor_ip, s.user_agent, s.started_at, s.ended_at, s.end_reason,
                e.id AS start_event_id
         FROM sessions s
         JOIN events e
-          ON e.session_id = s.id
+         ON e.session_id = s.id
          AND e.event_type = 'session_start'
-        WHERE s.visitor_ip = ?
+        WHERE s.visitor_ip IN {visitor_clause}
           AND s.id NOT IN ({placeholders})
           AND e.id < ?
           AND EXISTS (
@@ -3051,7 +3380,7 @@ def previous_context_candidate(
         ORDER BY e.id DESC
         LIMIT 30
         """,
-        [visitor, *excluded, boundary_event_id],
+        [*visitor_params, *excluded, boundary_event_id],
     ).fetchall()
     for row in rows:
         if previous_session_has_loadable_messages(conn, str(row["id"])):
@@ -3443,7 +3772,8 @@ def save_curated_memory(
             (source_session_id,),
         ).fetchone()
         if session_row and is_device_identity(str(session_row["visitor_ip"])):
-            visitor_ip = normalize_visitor_ip(str(session_row["visitor_ip"]))
+            source_device_ip = normalize_visitor_ip(str(session_row["visitor_ip"]))
+            visitor_ip = shared_memory_owner_device_id(conn, source_device_ip, text, importance_label or "other")
             profile_id = observe_visitor_identity(
                 conn,
                 visitor_ip,
@@ -3490,7 +3820,7 @@ def save_curated_memory(
     memory_id = int(row["id"])
     if visitor_ip:
         try:
-            refresh_cached_opening_prompt(visitor_ip)
+            refresh_binding_scoped_opening_prompts(visitor_ip)
         except Exception:
             pass
     return memory_id
@@ -3578,6 +3908,7 @@ def create_admin_memory(content: str, importance_label: str = "other", visitor_i
     profile_id = None
     with connect_db() as conn:
         if ip:
+            ip = shared_memory_owner_device_id(conn, ip, text, label)
             profile_id = observe_visitor_identity(conn, ip, "admin")
         cur = conn.execute(
             """
@@ -3604,7 +3935,7 @@ def create_admin_memory(content: str, importance_label: str = "other", visitor_i
     upsert_curated_memory_vector(memory_id, vector, embedding_client.EMBEDDING_MODEL)
     if ip:
         try:
-            refresh_cached_opening_prompt(ip)
+            refresh_binding_scoped_opening_prompts(ip)
         except Exception:
             pass
     return memory_id
@@ -3636,7 +3967,7 @@ def update_admin_memory(memory_id: int, content: str, importance_label: str = "o
         upsert_curated_memory_vector(int(memory_id), vector, embedding_client.EMBEDDING_MODEL)
         if memory_ip:
             try:
-                refresh_cached_opening_prompt(memory_ip)
+                refresh_binding_scoped_opening_prompts(memory_ip)
             except Exception:
                 pass
     return updated
@@ -3652,7 +3983,7 @@ def delete_admin_memory(memory_id: int) -> bool:
         cur = conn.execute("DELETE FROM curated_memories WHERE id = ?", (int(memory_id),))
     if cur.rowcount > 0 and memory_ip:
         try:
-            refresh_cached_opening_prompt(memory_ip)
+            refresh_binding_scoped_opening_prompts(memory_ip)
         except Exception:
             pass
     return cur.rowcount > 0
@@ -3783,61 +4114,77 @@ def retrieve_curated_memories(
     query = vector_memory.normalize_vector(query_vector)
     current_ip = normalize_visitor_ip(current_visitor_ip) if current_visitor_ip else ""
     with connect_db() as conn:
-        current_profile_id = None
-        if current_ip:
-            row = conn.execute(
-                "SELECT profile_id FROM visitor_ip_links WHERE visitor_ip = ?",
-                (current_ip,),
-            ).fetchone()
-            current_profile_id = int(row["profile_id"]) if row else None
+        scope = binding_scope_for_device(conn, current_ip) if current_ip else {}
+        scoped_devices = list(scope.get("device_ids") or ([current_ip] if current_ip else []))
+        local_priority_buckets = (
+            device_local_prompt_priority_buckets(conn, current_ip)
+            if current_ip and str(scope.get("shared_user_id") or "")
+            else set()
+        )
+        in_clause, params = sql_in_clause_params(scoped_devices)
         rows = conn.execute(
-            """
+            f"""
             SELECT m.id, m.source_session_id, m.content, m.importance_label,
                    m.visitor_ip, m.profile_id, m.timeline_at, m.supersedes_id, m.confidence,
                    v.dim, v.vector, v.model_name
             FROM curated_memories m
             JOIN curated_memory_vectors v ON v.memory_id = m.id
-            WHERE m.visitor_ip LIKE 'device:%'
+            WHERE m.visitor_ip IN {in_clause}
             ORDER BY m.id ASC
-            """
+            """,
+            params,
         ).fetchall()
 
     scored: List[Dict[str, object]] = []
     for row in rows:
         if current_session_id and str(row["source_session_id"]) == str(current_session_id):
             continue
+        content = str(row["content"] or "")
+        label = str(row["importance_label"] or "other")
         memory_ip = str(row["visitor_ip"] or "")
-        memory_profile_id = int(row["profile_id"]) if row["profile_id"] is not None else None
-        if memory_ip and current_ip and memory_ip != current_ip and memory_profile_id != current_profile_id:
+        if memory_ip and current_ip and memory_ip not in scoped_devices:
             continue
         if memory_ip and not current_ip:
             continue
+        if memory_ip != current_ip and is_device_local_memory_label(label):
+            continue
+        if memory_ip != current_ip:
+            bucket = prompt_priority_memory_bucket(content, label)
+            if bucket and bucket in local_priority_buckets:
+                continue
         vector = vector_memory.blob_to_vector(row["vector"], int(row["dim"]))
         if vector.shape != query.shape:
             continue
         score = float(vector.dot(query))
         if score < CURATED_MEMORY_MIN_SCORE:
             continue
-        if query_text and memory_topic_conflicts(query_text, str(row["content"])):
+        if query_text and memory_topic_conflicts(query_text, content):
             continue
-        text_relevance = memory_text_relevance(query_text, str(row["content"])) if query_text else 1.0
+        text_relevance = memory_text_relevance(query_text, content) if query_text else 1.0
         if text_relevance < MEMORY_TEXT_MIN_RELEVANCE and score < MEMORY_TEXT_GATE_MIN_VECTOR_SCORE:
             continue
         scored.append(
             {
                 "id": int(row["id"]),
-                "content": str(row["content"]),
-                "importance_label": str(row["importance_label"]),
+                "content": content,
+                "importance_label": label,
                 "visitor_ip": memory_ip or None,
-                "profile_id": memory_profile_id,
+                "profile_id": int(row["profile_id"]) if row["profile_id"] is not None else None,
                 "timeline_at": str(row["timeline_at"] or ""),
                 "supersedes_id": int(row["supersedes_id"]) if row["supersedes_id"] is not None else None,
                 "confidence": float(row["confidence"]) if row["confidence"] is not None else 0.7,
                 "score": score,
                 "text_relevance": text_relevance,
+                "device_priority": 0 if memory_ip == current_ip else 1,
             }
         )
-    scored.sort(key=lambda item: (-float(item["score"]) * float(item.get("text_relevance", 1.0)), int(item["id"])))
+    scored.sort(
+        key=lambda item: (
+            int(item.get("device_priority", 1)),
+            -(float(item["score"]) * float(item.get("text_relevance", 1.0))),
+            int(item["id"]),
+        )
+    )
     return scored[:CURATED_MEMORY_TOP_K]
 
 
@@ -3851,58 +4198,75 @@ def retrieve_curated_memory_recall_pool(
     query = vector_memory.normalize_vector(query_vector)
     current_ip = normalize_visitor_ip(current_visitor_ip) if current_visitor_ip else ""
     with connect_db() as conn:
-        current_profile_id = None
-        if current_ip:
-            row = conn.execute(
-                "SELECT profile_id FROM visitor_ip_links WHERE visitor_ip = ?",
-                (current_ip,),
-            ).fetchone()
-            current_profile_id = int(row["profile_id"]) if row else None
+        scope = binding_scope_for_device(conn, current_ip) if current_ip else {}
+        scoped_devices = list(scope.get("device_ids") or ([current_ip] if current_ip else []))
+        local_priority_buckets = (
+            device_local_prompt_priority_buckets(conn, current_ip)
+            if current_ip and str(scope.get("shared_user_id") or "")
+            else set()
+        )
+        in_clause, params = sql_in_clause_params(scoped_devices)
         rows = conn.execute(
-            """
+            f"""
             SELECT m.id, m.source_session_id, m.content, m.importance_label,
                    m.visitor_ip, m.profile_id, m.timeline_at, m.supersedes_id, m.confidence,
                    v.dim, v.vector, v.model_name
             FROM curated_memories m
             JOIN curated_memory_vectors v ON v.memory_id = m.id
-            WHERE m.visitor_ip LIKE 'device:%'
+            WHERE m.visitor_ip IN {in_clause}
             ORDER BY m.id ASC
-            """
+            """,
+            params,
         ).fetchall()
 
     candidates: List[Dict[str, object]] = []
     for row in rows:
         if current_session_id and str(row["source_session_id"]) == str(current_session_id):
             continue
+        content = str(row["content"] or "")
+        label = str(row["importance_label"] or "other")
         memory_ip = str(row["visitor_ip"] or "")
-        memory_profile_id = int(row["profile_id"]) if row["profile_id"] is not None else None
-        if memory_ip and current_ip and memory_ip != current_ip and memory_profile_id != current_profile_id:
+        if memory_ip and current_ip and memory_ip not in scoped_devices:
             continue
         if memory_ip and not current_ip:
             continue
+        if memory_ip != current_ip and is_device_local_memory_label(label):
+            continue
+        if memory_ip != current_ip:
+            bucket = prompt_priority_memory_bucket(content, label)
+            if bucket and bucket in local_priority_buckets:
+                continue
         vector = vector_memory.blob_to_vector(row["vector"], int(row["dim"]))
         if vector.shape != query.shape:
             continue
         score = float(vector.dot(query))
         if score < CURATED_MEMORY_MIN_SCORE:
             continue
-        text_relevance = memory_text_relevance(query_text, str(row["content"])) if query_text else 1.0
+        text_relevance = memory_text_relevance(query_text, content) if query_text else 1.0
         candidates.append(
             {
                 "id": int(row["id"]),
-                "content": str(row["content"]),
-                "importance_label": str(row["importance_label"]),
+                "content": content,
+                "importance_label": label,
                 "visitor_ip": memory_ip or None,
-                "profile_id": memory_profile_id,
+                "profile_id": int(row["profile_id"]) if row["profile_id"] is not None else None,
                 "timeline_at": str(row["timeline_at"] or ""),
                 "supersedes_id": int(row["supersedes_id"]) if row["supersedes_id"] is not None else None,
                 "confidence": float(row["confidence"]) if row["confidence"] is not None else 0.7,
                 "score": score,
                 "text_relevance": text_relevance,
                 "filter_reason": "candidate",
+                "device_priority": 0 if memory_ip == current_ip else 1,
             }
         )
-    candidates.sort(key=lambda item: (-float(item.get("score", 0.0)), -float(item.get("text_relevance", 0.0)), int(item["id"])))
+    candidates.sort(
+        key=lambda item: (
+            int(item.get("device_priority", 1)),
+            -float(item.get("score", 0.0)),
+            -float(item.get("text_relevance", 0.0)),
+            int(item["id"]),
+        )
+    )
     return candidates[: max(1, int(limit))]
 
 
@@ -4105,7 +4469,10 @@ def explain_curated_memory_candidates(
         if current_session_id and str(row["source_session_id"]) == str(current_session_id):
             reason = "filtered_current_session"
         memory_ip = str(row["visitor_ip"] or "")
+        label = str(row["importance_label"] or "other")
         memory_profile_id = int(row["profile_id"]) if row["profile_id"] is not None else None
+        if reason == "selected" and memory_ip and current_ip and memory_ip != current_ip and is_device_local_memory_label(label):
+            reason = "filtered_device_local_memory"
         if reason == "selected" and memory_ip and current_ip and memory_ip != current_ip and memory_profile_id != current_profile_id:
             reason = "filtered_different_ip_or_profile"
         if reason == "selected" and memory_ip and not current_ip:
@@ -4128,7 +4495,7 @@ def explain_curated_memory_candidates(
             {
                 "id": int(row["id"]),
                 "content": str(row["content"]),
-                "importance_label": str(row["importance_label"]),
+                "importance_label": label,
                 "visitor_ip": memory_ip or None,
                 "profile_id": memory_profile_id,
                 "timeline_at": str(row["timeline_at"] or ""),
@@ -4149,22 +4516,24 @@ def retrieve_curated_memories_by_text(
 ) -> List[Dict[str, object]]:
     current_ip = normalize_visitor_ip(current_visitor_ip) if current_visitor_ip else ""
     with connect_db() as conn:
-        current_profile_id = None
-        if current_ip:
-            row = conn.execute(
-                "SELECT profile_id FROM visitor_ip_links WHERE visitor_ip = ?",
-                (current_ip,),
-            ).fetchone()
-            current_profile_id = int(row["profile_id"]) if row else None
+        scope = binding_scope_for_device(conn, current_ip) if current_ip else {}
+        scoped_devices = list(scope.get("device_ids") or ([current_ip] if current_ip else []))
+        local_priority_buckets = (
+            device_local_prompt_priority_buckets(conn, current_ip)
+            if current_ip and str(scope.get("shared_user_id") or "")
+            else set()
+        )
+        in_clause, params = sql_in_clause_params(scoped_devices)
         rows = conn.execute(
-            """
+            f"""
             SELECT id, source_session_id, content, importance_label,
                    visitor_ip, profile_id, timeline_at, supersedes_id, confidence
             FROM curated_memories
-            WHERE visitor_ip LIKE 'device:%'
+            WHERE visitor_ip IN {in_clause}
             ORDER BY id DESC
             LIMIT 1000
-            """
+            """,
+            params,
         ).fetchall()
 
     scored: List[Dict[str, object]] = []
@@ -4172,12 +4541,18 @@ def retrieve_curated_memories_by_text(
         if current_session_id and str(row["source_session_id"]) == str(current_session_id):
             continue
         memory_ip = str(row["visitor_ip"] or "")
-        memory_profile_id = int(row["profile_id"]) if row["profile_id"] is not None else None
-        if memory_ip and current_ip and memory_ip != current_ip and memory_profile_id != current_profile_id:
+        if memory_ip and current_ip and memory_ip not in scoped_devices:
             continue
         if memory_ip and not current_ip:
             continue
         content = str(row["content"])
+        label = str(row["importance_label"] or "other")
+        if memory_ip != current_ip and is_device_local_memory_label(label):
+            continue
+        if memory_ip != current_ip:
+            bucket = prompt_priority_memory_bucket(content, label)
+            if bucket and bucket in local_priority_buckets:
+                continue
         if query_text and memory_topic_conflicts(query_text, content):
             continue
         text_relevance = memory_text_relevance(query_text, content) if query_text else 1.0
@@ -4188,17 +4563,25 @@ def retrieve_curated_memories_by_text(
             {
                 "id": int(row["id"]),
                 "content": content,
-                "importance_label": str(row["importance_label"]),
+                "importance_label": label,
                 "visitor_ip": memory_ip or None,
-                "profile_id": memory_profile_id,
+                "profile_id": int(row["profile_id"]) if row["profile_id"] is not None else None,
                 "timeline_at": str(row["timeline_at"] or ""),
                 "supersedes_id": int(row["supersedes_id"]) if row["supersedes_id"] is not None else None,
                 "confidence": confidence,
                 "score": text_relevance,
                 "text_relevance": text_relevance,
+                "device_priority": 0 if memory_ip == current_ip else 1,
             }
         )
-    scored.sort(key=lambda item: (-float(item.get("text_relevance", 0.0)), -float(item.get("confidence", 0.0)), -int(item["id"])))
+    scored.sort(
+        key=lambda item: (
+            int(item.get("device_priority", 1)),
+            -float(item.get("text_relevance", 0.0)),
+            -float(item.get("confidence", 0.0)),
+            -int(item["id"]),
+        )
+    )
     return scored[:CURATED_MEMORY_TOP_K]
 
 
@@ -4299,58 +4682,28 @@ def retrieve_profile_context_memories(
         return []
     max_rows = min(max(int(limit), 1), 30)
     with connect_db() as conn:
-        row = conn.execute(
-            "SELECT profile_id FROM visitor_ip_links WHERE visitor_ip = ?",
+        rows = conn.execute(
+            """
+            SELECT id, content, importance_label, visitor_ip, profile_id,
+                   timeline_at, supersedes_id, confidence, updated_at
+            FROM curated_memories
+            WHERE visitor_ip = ?
+              AND importance_label IN ('identity', 'persona', 'preference', 'rule')
+            ORDER BY
+              CASE importance_label
+                WHEN 'rule' THEN 0
+                WHEN 'identity' THEN 1
+                WHEN 'persona' THEN 2
+                WHEN 'preference' THEN 3
+                ELSE 3
+              END,
+              COALESCE(timeline_at, updated_at) DESC,
+              confidence DESC,
+              id DESC
+            LIMIT 140
+            """,
             (current_ip,),
-        ).fetchone()
-        current_profile_id = int(row["profile_id"]) if row else None
-        if current_profile_id is not None:
-            rows = conn.execute(
-                """
-                SELECT id, content, importance_label, visitor_ip, profile_id,
-                       timeline_at, supersedes_id, confidence, updated_at
-                FROM curated_memories
-                WHERE visitor_ip LIKE 'device:%'
-                  AND importance_label IN ('identity', 'persona', 'preference', 'rule')
-                  AND (visitor_ip = ? OR profile_id = ?)
-                ORDER BY
-                  CASE importance_label
-                    WHEN 'rule' THEN 0
-                    WHEN 'identity' THEN 1
-                    WHEN 'persona' THEN 2
-                    WHEN 'preference' THEN 3
-                    ELSE 3
-                  END,
-                  COALESCE(timeline_at, updated_at) DESC,
-                  confidence DESC,
-                  id DESC
-                LIMIT 100
-                """,
-                (current_ip, current_profile_id),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT id, content, importance_label, visitor_ip, profile_id,
-                       timeline_at, supersedes_id, confidence, updated_at
-                FROM curated_memories
-                WHERE visitor_ip = ?
-                  AND importance_label IN ('identity', 'persona', 'preference', 'rule')
-                ORDER BY
-                  CASE importance_label
-                    WHEN 'rule' THEN 0
-                    WHEN 'identity' THEN 1
-                    WHEN 'persona' THEN 2
-                    WHEN 'preference' THEN 3
-                    ELSE 3
-                  END,
-                  COALESCE(timeline_at, updated_at) DESC,
-                  confidence DESC,
-                  id DESC
-                LIMIT 100
-                """,
-                (current_ip,),
-            ).fetchall()
+        ).fetchall()
 
     profile_memories: List[Dict[str, object]] = []
     seen_contents = set()
@@ -4389,38 +4742,21 @@ def retrieve_opening_context_memories(
         return []
     max_rows = min(max(int(limit), 1), 20)
     with connect_db() as conn:
-        row = conn.execute(
-            "SELECT profile_id FROM visitor_ip_links WHERE visitor_ip = ?",
+        rows = conn.execute(
+            """
+            SELECT id, content, importance_label, visitor_ip, profile_id,
+                   timeline_at, supersedes_id, confidence, updated_at
+            FROM curated_memories
+            WHERE visitor_ip = ?
+              AND importance_label IN ('preference', 'rule')
+            ORDER BY
+              COALESCE(timeline_at, updated_at) DESC,
+              confidence DESC,
+              id DESC
+            LIMIT 120
+            """,
             (current_ip,),
-        ).fetchone()
-        current_profile_id = int(row["profile_id"]) if row else None
-        if current_profile_id is not None:
-            rows = conn.execute(
-                """
-                SELECT id, content, importance_label, visitor_ip, profile_id,
-                       timeline_at, supersedes_id, confidence, updated_at
-                FROM curated_memories
-                WHERE visitor_ip LIKE 'device:%'
-                  AND importance_label IN ('preference', 'rule')
-                  AND (visitor_ip = ? OR profile_id = ?)
-                ORDER BY COALESCE(timeline_at, updated_at) DESC, confidence DESC, id DESC
-                LIMIT 100
-                """,
-                (current_ip, current_profile_id),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT id, content, importance_label, visitor_ip, profile_id,
-                       timeline_at, supersedes_id, confidence, updated_at
-                FROM curated_memories
-                WHERE visitor_ip = ?
-                  AND importance_label IN ('preference', 'rule')
-                ORDER BY COALESCE(timeline_at, updated_at) DESC, confidence DESC, id DESC
-                LIMIT 100
-                """,
-                (current_ip,),
-            ).fetchall()
+        ).fetchall()
 
     memories: List[Dict[str, object]] = []
     seen_contents = set()
@@ -5394,6 +5730,7 @@ def recent_curated_memory_summaries(limit: int = 12) -> List[Dict[str, object]]:
             SELECT id, content, importance_label, updated_at
             FROM curated_memories
             WHERE visitor_ip LIKE 'device:%'
+              AND importance_label NOT IN ('identity', 'persona', 'preference', 'rule')
             ORDER BY id DESC
             LIMIT ?
             """,
@@ -5424,18 +5761,17 @@ def build_active_recall_context(
 ) -> str:
     ip = normalize_visitor_ip(visitor_ip) if visitor_ip else ""
     max_rows = min(max(int(limit), 1), 30)
-    params: List[object] = []
-    where = "WHERE 1 = 0"
-    if ip and is_device_identity(ip):
-        where = "WHERE visitor_ip = ?"
-        params.append(ip)
     with connect_db() as conn:
+        scope = binding_scope_for_device(conn, ip) if ip and is_device_identity(ip) else {}
+        scoped_devices = list(scope.get("device_ids") or ([ip] if ip and is_device_identity(ip) else []))
+        in_clause, params = sql_in_clause_params(scoped_devices)
         memory_rows = conn.execute(
             f"""
-            SELECT id, content, importance_label, timeline_at, supersedes_id, confidence, updated_at
+            SELECT id, content, importance_label, visitor_ip, timeline_at, supersedes_id, confidence, updated_at
             FROM curated_memories
-            {where}
+            WHERE visitor_ip IN {in_clause}
             ORDER BY
+              CASE WHEN visitor_ip = ? THEN 0 ELSE 1 END,
               CASE importance_label
                 WHEN 'identity' THEN 0
                 WHEN 'preference' THEN 1
@@ -5447,7 +5783,7 @@ def build_active_recall_context(
               id DESC
             LIMIT ?
             """,
-            (*params, max_rows),
+            (*params, ip, max_rows),
         ).fetchall()
         artifact_rows = conn.execute(
             """
@@ -5470,9 +5806,13 @@ def build_active_recall_context(
     if memory_rows:
         lines.append("可用长期记忆：")
         for row in memory_rows:
+            memory_ip = str(row["visitor_ip"] or "")
+            label = str(row["importance_label"] or "other")
+            if memory_ip != ip and is_device_local_memory_label(label):
+                continue
             supersedes = f" supersedes=#{row['supersedes_id']}" if row["supersedes_id"] is not None else ""
             lines.append(
-                f"- #{row['id']} [{row['importance_label']}] "
+                f"- #{row['id']} [{label}] "
                 f"timeline={row['timeline_at'] or row['updated_at']} "
                 f"confidence={float(row['confidence'] or 0.7):.2f}{supersedes}: "
                 f"{str(row['content']).strip()}"
@@ -7788,6 +8128,40 @@ def analysis_background_endpoint(request: Request) -> Dict[str, object]:
     }
 
 
+@app.get("/api/user-memory-binding")
+def get_user_memory_binding_endpoint(request: Request) -> Dict[str, object]:
+    init_db()
+    current_visitor = visitor_ip(request)
+    return get_user_memory_binding(current_visitor)
+
+
+@app.put("/api/user-memory-binding")
+def update_user_memory_binding_endpoint(
+    payload: UserMemoryBindingPayload,
+    request: Request,
+) -> Dict[str, object]:
+    init_db()
+    current_visitor = visitor_ip(request)
+    result = upsert_user_memory_binding(
+        current_visitor,
+        payload.shared_user_id,
+        share_chat_history=payload.share_chat_history,
+        is_host=payload.is_host,
+    )
+    record_event(
+        None,
+        "shared_user_binding_updated",
+        current_visitor,
+        {
+            "shared_user_id": result.get("shared_user_id", ""),
+            "share_chat_history": bool(result.get("share_chat_history")),
+            "is_host": bool(result.get("is_host")),
+            "left_previous_shared_user": bool(result.get("left_previous_shared_user")),
+        },
+    )
+    return result
+
+
 @app.post("/api/sessions")
 def create_session_endpoint(request: Request) -> Dict[str, object]:
     init_db()
@@ -7795,7 +8169,12 @@ def create_session_endpoint(request: Request) -> Dict[str, object]:
     known_before_session = is_known_device_identity(current_visitor)
     session_id = create_session(current_visitor, user_agent(request))
     opening = prepared_opening_prompt(current_visitor, known_before_session)
-    return {"session_id": session_id, "messages": [], **opening}
+    return {
+        "session_id": session_id,
+        "messages": [],
+        "memory_binding": get_user_memory_binding(current_visitor),
+        **opening,
+    }
 
 
 @app.get("/api/sessions/{session_id}/previous-context")
@@ -7851,7 +8230,12 @@ def reset_session_endpoint(session_id: str, request: Request) -> Dict[str, objec
     known_before_session = is_known_device_identity(current_visitor)
     new_session_id = reset_session(session_id, current_visitor, user_agent(request))
     opening = prepared_opening_prompt(current_visitor, known_before_session)
-    return {"session_id": new_session_id, "messages": [], **opening}
+    return {
+        "session_id": new_session_id,
+        "messages": [],
+        "memory_binding": get_user_memory_binding(current_visitor),
+        **opening,
+    }
 
 
 @app.post("/api/sessions/{session_id}/close")
@@ -8369,7 +8753,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                     yield format_sse("done", {"message_id": assistant_id, "content": answer})
                     return
                 try:
-                    refresh_cached_opening_prompt(ip)
+                    refresh_binding_scoped_opening_prompts(ip)
                 except Exception as exc:
                     record_event(session_id, "opening_cache_refresh_error", ip, {"error": str(exc)})
                 job_id = enqueue_memory_agent_job(
