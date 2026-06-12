@@ -250,8 +250,14 @@ textarea:focus {
 
 .artifact-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+@media (max-width: 1180px) and (min-width: 761px) {
+  .artifact-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .run-list {
@@ -270,12 +276,12 @@ textarea:focus {
 .artifact-card {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 10px;
   min-height: 220px;
   aspect-ratio: 1 / 1;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 16px;
+  padding: 14px;
   background: var(--panel);
   box-shadow: var(--shadow);
   cursor: pointer;
@@ -306,13 +312,13 @@ textarea:focus {
 
 .artifact-title {
   margin: 0;
-  font-size: 18px;
-  line-height: 1.35;
+  font-size: 17px;
+  line-height: 1.32;
 }
 
 .artifact-card .artifact-title {
   display: -webkit-box;
-  min-height: 48px;
+  min-height: 44px;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -330,21 +336,24 @@ textarea:focus {
   overflow: hidden;
   margin: 0;
   color: var(--ink);
-  line-height: 1.62;
+  font-size: 14px;
+  line-height: 1.5;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  -webkit-line-clamp: 5;
 }
 
 .artifact-card-footer {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   align-items: end;
   margin-top: auto;
 }
 
 .artifact-card-meta {
-  min-height: 32px;
+  min-height: 28px;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .artifact-card-actions {
@@ -566,6 +575,33 @@ textarea:focus {
   margin: 0 0 0.6em;
 }
 
+.comment-body,
+.comment-body p {
+  text-align: justify;
+  text-align-last: start;
+  text-justify: inter-ideograph;
+}
+
+.comment-body h1,
+.comment-body h2,
+.comment-body h3,
+.comment-body h4,
+.comment-body h5,
+.comment-body h6,
+.comment-body ul,
+.comment-body ol,
+.comment-body li,
+.comment-body pre,
+.comment-body code,
+.comment-body table,
+.comment-body th,
+.comment-body td,
+.comment-body .markdown-table-wrap,
+.comment-body .math-block {
+  text-align: left;
+  text-align-last: auto;
+}
+
 .comment-body p:last-child {
   margin-bottom: 0;
 }
@@ -761,4 +797,64 @@ textarea:focus {
   .type-pill {
     width: fit-content;
   }
+}
+
+
+.idle-progress {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #ffffff, #f8fbfa);
+  box-shadow: var(--shadow);
+}
+
+.idle-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.idle-progress-head span {
+  color: var(--accent);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.idle-progress-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7ecef;
+}
+
+.idle-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #6fb7a4);
+  transition: width 220ms ease;
+}
+
+.idle-progress.is-interrupted .idle-progress-fill,
+.idle-progress.is-failed .idle-progress-fill {
+  background: linear-gradient(90deg, #b94a48, #d58b82);
+}
+
+.idle-progress.is-completed .idle-progress-fill {
+  background: linear-gradient(90deg, #178267, #9ccf9f);
+}
+
+.idle-progress-detail {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.run-activity {
+  border-style: dashed;
 }

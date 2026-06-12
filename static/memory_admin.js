@@ -10,7 +10,7 @@ const newIp = document.getElementById("newIp");
 const newContent = document.getElementById("newContent");
 const createButton = document.getElementById("createButton");
 
-const LABELS = ["preference", "identity", "rule", "persona", "artifact", "risk", "event", "fact", "other"];
+const LABELS = ["preference", "identity", "rule", "persona", "artifact", "risk", "diary", "event", "fact", "other"];
 let refreshTimer = null;
 
 function setStatus(text) {

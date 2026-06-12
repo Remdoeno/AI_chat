@@ -685,6 +685,50 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("星期五", context)
         self.assertIn("Asia/Shanghai", context)
         self.assertIn("训练数据", context)
+        self.assertIn("凌晨 3 点前", context)
+
+    def test_late_night_tomorrow_clarification_triggers_before_3am(self):
+        answer = self.app.late_night_tomorrow_clarification(
+            "明天上午提醒我开会",
+            datetime(2026, 6, 12, 2, 15),
+        )
+
+        self.assertIn("已经过 0 点", answer)
+        self.assertIn("今天", answer)
+        self.assertIn("日历上的明天", answer)
+
+    def test_late_night_tomorrow_clarification_skips_daytime(self):
+        answer = self.app.late_night_tomorrow_clarification(
+            "明天上午提醒我开会",
+            datetime(2026, 6, 12, 9, 15),
+        )
+
+        self.assertEqual(answer, "")
+
+    def test_late_night_tomorrow_clarification_skips_user_correction(self):
+        answer = self.app.late_night_tomorrow_clarification(
+            "PPT已经提交给老师，明天下午三点的事情其实是今天下午的事情，按这个来",
+            datetime(2026, 6, 12, 0, 25),
+        )
+
+        self.assertEqual(answer, "")
+
+    def test_late_night_tomorrow_clarification_only_prompts_once_per_session(self):
+        session_id = self.app.create_session("device:test_late_tomorrow_once", "agent")
+        self.app.record_event(
+            session_id,
+            "late_night_tomorrow_clarification",
+            "device:test_late_tomorrow_once",
+            {},
+        )
+
+        self.assertTrue(self.app.session_has_late_night_tomorrow_clarification(session_id))
+        answer = self.app.late_night_tomorrow_clarification(
+            "明天下午三点提醒我",
+            datetime(2026, 6, 12, 0, 25),
+            already_prompted=self.app.session_has_late_night_tomorrow_clarification(session_id),
+        )
+        self.assertEqual(answer, "")
 
     def test_system_prompt_can_include_web_search_context(self):
         session_id = self.app.create_session("7.7.7.7", "agent-search")
@@ -1702,6 +1746,270 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("像姐姐一样", memory_row["content"])
         self.assertEqual(vector_count, 1)
 
+    def test_memory_agent_filter_rejects_underspecified_leave_memory(self):
+        source = (
+            "[user] 周五晚上有北大 Chinese football 演出，需要和唱歌课请假。\n"
+            "[assistant_context_only] 好，我会记得你需要为周五晚上的北大 Chinese football 演出请假。"
+        )
+
+        self.assertEqual(
+            self.app.memory_agent_item_skip_reason(
+                {"memory": "用户已请假", "label": "diary"},
+                source,
+            ),
+            "underspecified_memory",
+        )
+        self.assertEqual(
+            self.app.memory_agent_item_skip_reason(
+                {
+                    "memory": "用户已为周五晚上的北大 Chinese football 演出向唱歌课请假。",
+                    "label": "diary",
+                },
+                source,
+            ),
+            "",
+        )
+
+    def test_memory_agent_filter_rejects_assistant_context_only_details(self):
+        source = (
+            "[user] 我想吃烤鱼！！什么时候能吃到烤鱼！！\n"
+            "[assistant_context_only] 等你彻底痊愈后，可以去点一份特辣双倍芝士烤鱼。"
+        )
+
+        self.assertEqual(
+            self.app.memory_agent_item_skip_reason(
+                {
+                    "memory": "用户喜欢吃烤鱼，特别是特辣双倍芝士口味。",
+                    "label": "preference",
+                },
+                source,
+            ),
+            "assistant_context_leak",
+        )
+        self.assertEqual(
+            self.app.memory_agent_item_skip_reason(
+                {
+                    "memory": "用户感冒时想吃烤鱼。",
+                    "label": "diary",
+                },
+                source,
+            ),
+            "",
+        )
+
+    def test_memory_dedupe_agent_merges_duplicate_diary_memories(self):
+        session_id = self.app.create_session("device:dev_dedupe_agent", "agent-dedupe")
+        user_id = self.app.add_message(session_id, "user", "我感冒了，喉咙不舒服，还想吃烤鱼。")
+        first_id = self.app.save_curated_memory(
+            session_id,
+            user_id,
+            user_id,
+            "用户感冒了，喉咙不舒服。",
+            importance_label="diary",
+            timeline_at="2026-06-10T19:00:00+08:00",
+            confidence=0.9,
+        )
+        second_id = self.app.save_curated_memory(
+            session_id,
+            user_id,
+            user_id,
+            "用户感冒了，喉咙不舒服，并想吃烤鱼。",
+            importance_label="diary",
+            timeline_at="2026-06-10T19:12:00+08:00",
+            confidence=0.92,
+        )
+        self.app.upsert_curated_memory_vector(first_id, [1.0, 0.0, 0.0], "test-embedding")
+        self.app.upsert_curated_memory_vector(second_id, [0.96, 0.04, 0.0], "test-embedding")
+
+        original_call = self.app.call_memory_dedupe_agent_model
+        original_embed = self.app.embedding_client.embed_text
+        self.app.call_memory_dedupe_agent_model = lambda _candidates: {
+            "actions": [
+                {
+                    "action": "merge",
+                    "keep_id": second_id,
+                    "remove_ids": [first_id],
+                    "label": "diary",
+                    "content": "用户感冒了，喉咙不舒服，并想吃烤鱼。",
+                    "timeline_at": "2026-06-10T19:12:00+08:00",
+                    "rationale": "两条 diary 描述同一轮感冒状态，后一条包含更多用户原话细节。",
+                }
+            ]
+        }
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            result = self.app.run_memory_dedupe_agent_once(force=True)
+        finally:
+            self.app.call_memory_dedupe_agent_model = original_call
+            self.app.embedding_client.embed_text = original_embed
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["applied"], 1)
+        with self.app.connect_db() as conn:
+            rows = conn.execute(
+                "SELECT id, content, importance_label FROM curated_memories ORDER BY id"
+            ).fetchall()
+
+        self.assertEqual([int(row["id"]) for row in rows], [second_id])
+        self.assertEqual(rows[0]["importance_label"], "diary")
+        self.assertIn("想吃烤鱼", rows[0]["content"])
+
+    def test_memory_dedupe_agent_includes_duplicate_event_memories(self):
+        session_id = self.app.create_session("device:dev_event_dedupe", "agent-event-dedupe")
+        user_id = self.app.add_message(session_id, "user", "今晚十点和灿鸡面打三角洲。")
+        first_id = self.app.save_curated_memory(
+            session_id,
+            user_id,
+            user_id,
+            "用户今晚10点要和灿鸡面一起打三角洲游戏",
+            importance_label="event",
+            timeline_at="2026-06-10T22:00:00+08:00",
+            confidence=1.0,
+        )
+        second_id = self.app.save_curated_memory(
+            session_id,
+            user_id,
+            user_id,
+            "用户今晚22:00与灿鸡面一起玩《三角洲行动》游戏",
+            importance_label="event",
+            timeline_at="2026-06-10T22:00:00+08:00",
+            confidence=1.0,
+        )
+        self.app.upsert_curated_memory_vector(first_id, [1.0, 0.0, 0.0], "test-embedding")
+        self.app.upsert_curated_memory_vector(second_id, [0.95, 0.05, 0.0], "test-embedding")
+
+        pairs = self.app.load_memory_dedupe_candidate_pairs(threshold=0.90, max_pairs=20)
+
+        pair_ids = {
+            frozenset([int(pair["left"]["id"]), int(pair["right"]["id"])])
+            for pair in pairs
+        }
+        self.assertIn(frozenset([first_id, second_id]), pair_ids)
+
+    def test_memory_dedupe_agent_merges_duplicate_event_memories(self):
+        session_id = self.app.create_session("device:dev_event_dedupe_merge", "agent-event-dedupe-merge")
+        user_id = self.app.add_message(session_id, "user", "今晚十点和灿鸡面打三角洲。")
+        first_id = self.app.save_curated_memory(
+            session_id,
+            user_id,
+            user_id,
+            "用户今晚10点要和灿鸡面一起打三角洲游戏",
+            importance_label="event",
+            timeline_at="2026-06-10T22:00:00+08:00",
+            confidence=1.0,
+        )
+        second_id = self.app.save_curated_memory(
+            session_id,
+            user_id,
+            user_id,
+            "用户今晚22:00与灿鸡面一起玩《三角洲行动》游戏",
+            importance_label="event",
+            timeline_at="2026-06-10T22:00:00+08:00",
+            confidence=1.0,
+        )
+        self.app.upsert_curated_memory_vector(first_id, [1.0, 0.0, 0.0], "test-embedding")
+        self.app.upsert_curated_memory_vector(second_id, [0.95, 0.05, 0.0], "test-embedding")
+
+        original_call = self.app.call_memory_dedupe_agent_model
+        original_embed = self.app.embedding_client.embed_text
+        self.app.call_memory_dedupe_agent_model = lambda _candidates: {
+            "actions": [
+                {
+                    "action": "merge",
+                    "keep_id": second_id,
+                    "remove_ids": [first_id],
+                    "label": "event",
+                    "content": "用户今晚22:00与灿鸡面一起玩《三角洲行动》游戏。",
+                    "timeline_at": "2026-06-10T22:00:00+08:00",
+                    "rationale": "两条 event 指向同一时间、同一对象、同一游戏安排。",
+                }
+            ]
+        }
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            result = self.app.run_memory_dedupe_agent_once(force=True)
+        finally:
+            self.app.call_memory_dedupe_agent_model = original_call
+            self.app.embedding_client.embed_text = original_embed
+
+        self.assertEqual(result["status"], "completed")
+        with self.app.connect_db() as conn:
+            rows = conn.execute("SELECT id, content, importance_label FROM curated_memories ORDER BY id").fetchall()
+        self.assertEqual([int(row["id"]) for row in rows], [second_id])
+        self.assertEqual(rows[0]["importance_label"], "event")
+        self.assertIn("22:00", rows[0]["content"])
+
+    def test_memory_dedupe_rewrite_action_deletes_remove_ids(self):
+        session_id = self.app.create_session("device:dev_rewrite_delete", "agent-rewrite-delete")
+        user_id = self.app.add_message(session_id, "user", "我希望助手叫我灿鸡面。")
+        old_id = self.app.save_curated_memory(
+            session_id, user_id, user_id, "用户希望被称呼为灿鸡面。", importance_label="identity"
+        )
+        keep_id = self.app.save_curated_memory(
+            session_id, user_id, user_id, "用户希望被称呼为灿鸡面大人。", importance_label="identity"
+        )
+        original_embed = self.app.embedding_client.embed_text
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        try:
+            result = self.app.apply_memory_dedupe_action(
+                {
+                    "action": "rewrite",
+                    "keep_id": keep_id,
+                    "remove_ids": [old_id],
+                    "label": "identity",
+                    "content": "用户希望被称呼为灿鸡面大人。",
+                    "timeline_at": "",
+                }
+            )
+        finally:
+            self.app.embedding_client.embed_text = original_embed
+
+        self.assertTrue(result["applied"])
+        self.assertEqual(result["deleted"], 1)
+        with self.app.connect_db() as conn:
+            rows = conn.execute("SELECT id FROM curated_memories ORDER BY id").fetchall()
+        self.assertEqual([int(row["id"]) for row in rows], [keep_id])
+
+    def test_memory_agent_skips_similar_diary_with_lower_duplicate_threshold(self):
+        session_id = self.app.create_session("device:dev_diary_dedupe", "agent-diary-dedupe")
+        user_id = self.app.add_message(session_id, "user", "我感冒了，今天还是不舒服，还想吃烤鱼。")
+        assistant_id = self.app.add_message(session_id, "assistant", "先休息。")
+        job_id = self.app.enqueue_memory_agent_job(session_id, user_id, assistant_id, "turn_complete")
+
+        original_call = self.app.call_memory_agent_model
+        original_embed = self.app.embedding_client.embed_text
+        original_find = self.app.find_similar_curated_memory
+        self.app.call_memory_agent_model = lambda _source: {
+            "important": True,
+            "rationale": "用户继续描述感冒状态和想吃烤鱼，应作为同一近期状态 diary 去重。",
+            "items": [
+                {
+                    "memory": "用户感冒了，仍然不舒服，并想吃烤鱼。",
+                    "label": "diary",
+                    "timeline_at": "2026-06-10T19:12:00+08:00",
+                    "confidence": 0.9,
+                }
+            ],
+        }
+        self.app.embedding_client.embed_text = lambda _text: [1.0, 0.0, 0.0]
+        self.app.find_similar_curated_memory = lambda _vector, label: (
+            {"id": 548, "score": 0.80} if label == "diary" else None
+        )
+        try:
+            result = self.app.process_memory_agent_job(job_id)
+        finally:
+            self.app.call_memory_agent_model = original_call
+            self.app.embedding_client.embed_text = original_embed
+            self.app.find_similar_curated_memory = original_find
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "duplicate_memory")
+        self.assertEqual(result["memory_ids"], [548])
+        self.assertLess(
+            self.app.MEMORY_WRITE_DIARY_DEDUPE_THRESHOLD,
+            self.app.MEMORY_WRITE_DEDUPE_THRESHOLD,
+        )
+
     def test_memory_agent_filter_still_rejects_generic_assistant_status_preference(self):
         self.assertEqual(
             self.app.memory_agent_item_skip_reason(
@@ -1884,6 +2192,56 @@ class AppBehaviorTests(unittest.TestCase):
         )
 
         self.assertEqual(source, "")
+
+    def test_model_messages_include_visible_opening_assistant_context(self):
+        session_id = self.app.create_session("device:test_opening_context", "agent")
+        self.app.add_message(
+            session_id,
+            "user",
+            "隐藏开场输入：请询问日程",
+            hidden=True,
+            extra_metadata={"opening_turn": True},
+        )
+        self.app.add_message(
+            session_id,
+            "assistant",
+            "提醒一下，明天下午3点有会议。",
+            extra_metadata={"opening_turn": True},
+        )
+        self.app.add_message(session_id, "user", "不是明天，是今天下午3点")
+
+        messages = self.app.load_model_messages_with_context(session_id)
+        joined = json.dumps(messages, ensure_ascii=False)
+
+        self.assertIn("提醒一下，明天下午3点有会议。", joined)
+        self.assertIn("不是明天，是今天下午3点", joined)
+        self.assertNotIn("隐藏开场输入", joined)
+
+    def test_memory_agent_source_prepends_opening_assistant_context(self):
+        session_id = self.app.create_session("device:test_memory_opening_context", "agent")
+        self.app.add_message(
+            session_id,
+            "user",
+            "隐藏开场输入：请询问日程",
+            hidden=True,
+            extra_metadata={"opening_turn": True},
+        )
+        self.app.add_message(
+            session_id,
+            "assistant",
+            "提醒一下，明天下午3点有会议。",
+            extra_metadata={"opening_turn": True},
+        )
+        user_id = self.app.add_message(session_id, "user", "不是明天，是今天下午3点")
+        assistant_id = self.app.add_message(session_id, "assistant", "收到，改成今天下午3点。")
+
+        rows = self.app.load_memory_agent_source_messages(session_id, user_id, assistant_id, context_turns=3)
+        source = self.app.format_messages_for_memory_agent(rows)
+
+        self.assertIn("[assistant_context_only] 提醒一下，明天下午3点有会议。", source)
+        self.assertIn("[user] 不是明天，是今天下午3点", source)
+        self.assertIn("[assistant_context_only] 收到，改成今天下午3点。", source)
+        self.assertNotIn("隐藏开场输入", source)
 
     def test_memory_agent_job_expands_source_to_recent_context_turns(self):
         session_id = self.app.create_session("7.7.7.7", "agent-context-memory")
@@ -2694,6 +3052,96 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["title"], "未闭合草稿")
         self.assertIn("第一行", payload["content"])
 
+    def test_chat_stream_rate_limits_same_device_with_warning_event(self):
+        client = TestClient(self.app.app)
+        identity = "device:dev_ratelimit01"
+        session_id = self.app.create_session(identity, "agent-rate-limit")
+        self.app.check_chat_device_rate_limit(identity)
+
+        response = client.post(
+            "/api/chat/stream",
+            json={
+                "session_id": session_id,
+                "message": "第二条太快",
+                "max_tokens": 16,
+                "temperature": 0.75,
+                "top_p": 0.95,
+            },
+            headers={"X-Qwen-Device-Id": "dev_ratelimit01"},
+        )
+
+        self.assertEqual(response.status_code, 429)
+        payload = response.json()["detail"]
+        self.assertEqual(payload["code"], "rate_limited")
+        self.assertGreater(payload["retry_after"], 0)
+        self.assertIn("发送太快", payload["message"])
+
+        with self.app.connect_db() as conn:
+            rows = conn.execute(
+                "SELECT event_type, visitor_ip, metadata_json FROM events WHERE event_type = ?",
+                ("warning_rate_limit",),
+            ).fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["visitor_ip"], identity)
+        metadata = json.loads(rows[0]["metadata_json"])
+        self.assertEqual(metadata["session_id"], session_id)
+        self.assertEqual(metadata["message_preview"], "第二条太快")
+
+    def test_hidden_cached_opening_prompt_does_not_consume_rate_limit(self):
+        client = TestClient(self.app.app)
+        identity = "device:dev_opening_rate01"
+        session_id = self.app.create_session(identity, "agent-opening-rate")
+        self.app.check_chat_device_rate_limit(identity)
+        original_model = self.app.iter_model_deltas
+        original_memory_worker = self.app.start_memory_agent_worker
+        original_refresh = self.app.refresh_cached_opening_prompt
+        self.app.iter_model_deltas = lambda *_args, **_kwargs: iter(["开场。"])
+        self.app.start_memory_agent_worker = lambda: None
+        self.app.refresh_cached_opening_prompt = lambda visitor_ip: "cached"
+        try:
+            with client.stream(
+                "POST",
+                "/api/chat/stream",
+                json={
+                    "session_id": session_id,
+                    "message": "隐藏开场输入",
+                    "hidden_user": True,
+                    "cached_opening": True,
+                    "max_tokens": 16,
+                    "temperature": 0.75,
+                    "top_p": 0.95,
+                },
+                headers={"X-Qwen-Device-Id": "dev_opening_rate01"},
+            ) as opening_response:
+                body = "".join(opening_response.iter_text())
+        finally:
+            self.app.iter_model_deltas = original_model
+            self.app.start_memory_agent_worker = original_memory_worker
+            self.app.refresh_cached_opening_prompt = original_refresh
+            self.app.release_generation(session_id)
+
+        self.assertEqual(opening_response.status_code, 200)
+        self.assertIn("开场", body)
+
+    def test_warn_logs_endpoint_lists_access_and_warning_events_for_admin(self):
+        password = self._configure_admin_password()
+        client = TestClient(self.app.app)
+        login_response = client.post("/api/admin/login", json={"password": password})
+        self.assertEqual(login_response.status_code, 200)
+        session_id = self.app.create_session("device:dev_warn01", "agent-warn")
+        self.app.record_event(session_id, "access_chat_start", "device:dev_warn01", {"message_preview": "你好"})
+        self.app.record_event(session_id, "warning_rate_limit", "device:dev_warn01", {"retry_after": 4.2})
+
+        response = client.get("/api/warn/logs")
+
+        self.assertEqual(response.status_code, 200)
+        events = response.json()["events"]
+        event_types = [item["event_type"] for item in events]
+        self.assertIn("access_chat_start", event_types)
+        self.assertIn("warning_rate_limit", event_types)
+        warning = next(item for item in events if item["event_type"] == "warning_rate_limit")
+        self.assertEqual(warning["level"], "warning")
+
     def test_chat_stream_returns_before_expensive_prompt_build(self):
         session_id = self.app.create_session("1.1.1.1", "stream-test")
         original_build_system_prompt = self.app.build_system_prompt
@@ -3132,6 +3580,40 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn(payload["opening_source"], {"prepared_memory", "cached_memory"})
         self.assertIn("要开心呐", payload["opening_prompt"])
 
+    def test_opening_prompt_injects_recent_week_diary_memories(self):
+        identity = "device:dev_open_diary01"
+        old_session = self.app.create_session(identity, "agent-opening-diary")
+        first = self.app.add_message(old_session, "user", "我感冒了，想吃烤鱼。")
+        now = datetime.now(self.app.local_timezone())
+        recent_at = (now - timedelta(days=2)).isoformat(timespec="minutes")
+        old_at = (now - timedelta(days=9)).isoformat(timespec="minutes")
+        self.app.save_curated_memory(
+            old_session,
+            first,
+            first,
+            "用户感冒了，想吃烤鱼。",
+            importance_label="diary",
+            timeline_at=recent_at,
+            confidence=0.95,
+        )
+        self.app.save_curated_memory(
+            old_session,
+            first,
+            first,
+            "用户很久以前提到过临时疲惫。",
+            importance_label="diary",
+            timeline_at=old_at,
+            confidence=0.95,
+        )
+
+        cached = self.app.refresh_cached_opening_prompt(identity)
+        rendered = self.app.render_cached_opening_prompt(cached, identity)
+
+        self.assertIn("最近一周的状态/日记", rendered)
+        self.assertIn("用户感冒了，想吃烤鱼", rendered)
+        self.assertNotIn("很久以前", rendered)
+        self.assertIn("体贴", rendered)
+
     def test_deleting_last_opening_memory_clears_cached_opening_prompt(self):
         identity = "device:dev_clearopen0123"
         old_session = self.app.create_session(identity, "agent-clear-opening")
@@ -3293,6 +3775,18 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("用户对助手的说话风格", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
         self.assertIn("即使没有写出“用户”二字", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
         self.assertIn("preference 或 rule", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+
+    def test_memory_agent_prompt_saves_user_state_and_life_diary(self):
+        self.assertIn("身体状态", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("情绪状态", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("已经发生的生活事件", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("diary", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
+        self.assertIn("diary", self.app.ALLOWED_MEMORY_LABELS)
+        self.assertEqual(
+            self.app.normalize_memory_label("diary"),
+            "diary",
+        )
+        self.assertFalse(self.app.is_device_local_memory_label("diary"))
 
     def test_memory_agent_prompt_requires_rationale(self):
         self.assertIn("每次判断都必须写 rationale", self.app.MEMORY_AGENT_SYSTEM_PROMPT)
@@ -3869,20 +4363,33 @@ class AppBehaviorTests(unittest.TestCase):
         self.assertIn("示例伙伴", query_text)
         self.assertIn("那我最喜欢的技能是什么？", query_text)
 
+    def test_artifacts_runs_endpoint_exposes_idle_progress(self):
+        client = TestClient(self.app.app)
+        response = client.get("/api/artifacts/runs?limit=3")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("items", payload)
+        self.assertIn("progress", payload)
+        self.assertNotIn("activities", payload)
+        self.assertIn(payload["progress"]["stage"], {"waiting", "interrupted", "writing", "polishing", "completed", "disabled", "paused", "failed"})
+        self.assertLessEqual(len(payload["items"]), 3)
+
+
     def test_analysis_background_endpoint_requires_login_and_lists_idle_work(self):
         client = TestClient(self.app.app)
         password = self._configure_admin_password()
 
         blocked = client.get("/api/analysis/background")
         login = client.post("/api/analysis/login", json={"password": password})
-        allowed = client.get("/api/analysis/background")
+        allowed = client.get("/api/analysis/background?limit=20")
 
         self.assertEqual(blocked.status_code, 401)
         self.assertEqual(login.status_code, 200)
         self.assertEqual(allowed.status_code, 200)
         payload = allowed.json()
-        self.assertIn("runs", payload)
-        self.assertIn("artifacts", payload)
+        self.assertIn("progress", payload)
+        self.assertIn("activities", payload)
+        self.assertLessEqual(len(payload["activities"]), 20)
 
 
 if __name__ == "__main__":

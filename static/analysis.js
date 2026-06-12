@@ -2,6 +2,7 @@ const statusText = document.getElementById("statusText");
 const messagesEl = document.getElementById("messages");
 const tracePanel = document.getElementById("tracePanel");
 const backgroundPanel = document.getElementById("backgroundPanel");
+const backgroundMoreButton = document.getElementById("backgroundMoreButton");
 const chatForm = document.getElementById("chatForm");
 const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
@@ -33,6 +34,7 @@ let sessionId = null;
 let activeController = null;
 let traceTimer = null;
 let pendingAttachments = [];
+let backgroundActivityLimit = 20;
 let userStoppedGeneration = false;
 let isMessageComposing = false;
 let isLoadingPreviousSession = false;
@@ -92,6 +94,26 @@ const TRACE_EVENT_LABELS = {
 
 function setStatus(text) {
   statusText.textContent = text;
+}
+
+async function parseRateLimitPayload(response) {
+  try {
+    const payload = await response.json();
+    const detail = payload && payload.detail ? payload.detail : payload;
+    if (detail && detail.code === "rate_limited") {
+      return detail;
+    }
+  } catch (_error) {
+    return null;
+  }
+  return null;
+}
+
+function removeEmptyAssistantBubble(assistantBody) {
+  const bubble = assistantBody && assistantBody.closest ? assistantBody.closest(".message") : null;
+  if (bubble) {
+    bubble.remove();
+  }
 }
 
 function bindingSummaryText(binding) {
@@ -220,6 +242,20 @@ function formatMessageTimestamp(value = new Date()) {
   return `${String(hours).padStart(2, "0")}:${minutes} ${period}, ${months[safeDate.getMonth()]} ${day}${ordinalSuffix(day)}, ${safeDate.getFullYear()}`;
 }
 
+function formatWorkerTriggerTime(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
+}
+
 function setAnalysisSendButtonGenerating(generating) {
   sendButton.classList.toggle("is-stopping", generating);
   if (generating) {
@@ -303,34 +339,114 @@ function escapeHtml(text) {
     .replace(/'/g, "&#39;");
 }
 
-function renderInlineMarkdown(text) {
-  const codeParts = [];
-  let html = escapeHtml(text).replace(/`([^`]+)`/g, (_, code) => {
-    const marker = `\u0000CODE${codeParts.length}\u0000`;
-    codeParts.push(`<code>${code}</code>`);
+function protectInlineSegments(text) {
+  const segments = [];
+  function store(html) {
+    const marker = `\u0000MDSEG${segments.length}\u0000`;
+    segments.push(html);
     return marker;
-  });
+  }
+  let source = String(text || "");
+  source = source.replace(/`([^`]+)`/g, (_, code) => store(`<code>${escapeHtml(code)}</code>`));
+  source = source.replace(/\\\((.+?)\\\)/g, (_, formula) => store(`<span class="math math-inline">\\(${escapeHtml(formula.trim())}\\)</span>`));
+  source = source.replace(/\$([^$\n]+?)\$/g, (_, formula) => store(`<span class="math math-inline">\\(${escapeHtml(formula.trim())}\\)</span>`));
+  return { source, segments };
+}
+
+function restoreInlineSegments(html, segments) {
+  return html.replace(/\u0000MDSEG(\d+)\u0000/g, (_, index) => segments[Number(index)] || "");
+}
+
+function renderInlineMarkdown(text) {
+  const { source, segments } = protectInlineSegments(text);
+  let html = escapeHtml(source);
 
   html = html
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
       const href = url.replace(/&amp;/g, "&");
       return `<a href="${href}" target="_blank" rel="noopener noreferrer">${label}</a>`;
     })
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/\*\*\s*([^*]+?)\s*\*\*/g, "<strong>$1</strong>")
+    .replace(/__\s*([^_]+?)\s*__/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
     .replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>");
 
-  return html.replace(/\u0000CODE(\d+)\u0000/g, (_, index) => codeParts[Number(index)] || "");
+  return restoreInlineSegments(html, segments);
+}
+
+function normalizeMarkdownTables(markdown) {
+  return String(markdown || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .flatMap((line) => {
+      const looksLikeSquashedTable = line.includes("| |") && /\|\s*:?-{3,}:?\s*\|/.test(line);
+      return looksLikeSquashedTable ? line.replace(/\s+\|\s+\|/g, " |\n|").split("\n") : [line];
+    })
+    .join("\n");
+}
+
+function splitTableCells(line) {
+  const trimmed = String(line || "").trim();
+  const withoutEdges = trimmed.replace(/^\|/, "").replace(/\|$/, "");
+  return withoutEdges.split("|").map((cell) => cell.trim());
+}
+
+function isTableLine(line) {
+  const trimmed = String(line || "").trim();
+  return trimmed.startsWith("|") && trimmed.endsWith("|") && splitTableCells(trimmed).length >= 2;
+}
+
+function isTableSeparatorLine(line) {
+  if (!isTableLine(line)) {
+    return false;
+  }
+  const cells = splitTableCells(line);
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function tableAlignments(separatorLine) {
+  return splitTableCells(separatorLine).map((cell) => {
+    if (cell.startsWith(":") && cell.endsWith(":")) return "center";
+    if (cell.endsWith(":")) return "right";
+    if (cell.startsWith(":")) return "left";
+    return "";
+  });
+}
+
+function renderMarkdownTable(headerLine, separatorLine, bodyLines) {
+  const headers = splitTableCells(headerLine);
+  const aligns = tableAlignments(separatorLine);
+  const rows = bodyLines.map(splitTableCells);
+  const alignAttr = (index) => aligns[index] ? ` style="text-align: ${aligns[index]}"` : "";
+  const headHtml = headers
+    .map((cell, index) => `<th${alignAttr(index)}>${renderInlineMarkdown(cell)}</th>`)
+    .join("");
+  const bodyHtml = rows
+    .map((row) => `<tr>${headers.map((_, index) => `<td${alignAttr(index)}>${renderInlineMarkdown(row[index] || "")}</td>`).join("")}</tr>`)
+    .join("");
+  return `<div class="markdown-table-wrap"><table><thead><tr>${headHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+}
+
+function renderBlockMath(lines) {
+  const formula = lines.join("\n").trim();
+  return `<div class="math math-block">\\[${escapeHtml(formula)}\\]</div>`;
+}
+
+function typesetMarkdownMath(element) {
+  if (window.MathJax && typeof window.MathJax.typesetPromise === "function") {
+    window.MathJax.typesetPromise([element]).catch(() => {});
+  }
 }
 
 function renderMarkdown(markdown) {
-  const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
+  const lines = normalizeMarkdownTables(markdown).split("\n");
   const html = [];
   let paragraph = [];
   let listStack = [];
   let inCodeBlock = false;
   let codeLines = [];
+  let inBlockMath = false;
+  let blockMathLines = [];
 
   function closeParagraph() {
     if (!paragraph.length) {
@@ -346,12 +462,17 @@ function renderMarkdown(markdown) {
     }
   }
 
-  for (const rawLine of lines) {
+  function closeAllLists() {
+    closeListsTo(-1);
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const rawLine = lines[i];
     const line = rawLine.replace(/\s+$/g, "");
     const fence = line.match(/^\s*```/);
     if (fence) {
       closeParagraph();
-      closeListsTo(-1);
+      closeAllLists();
       if (inCodeBlock) {
         html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
         codeLines = [];
@@ -367,16 +488,68 @@ function renderMarkdown(markdown) {
       continue;
     }
 
-    if (!line.trim()) {
-      closeParagraph();
+    const trimmed = line.trim();
+    if (inBlockMath) {
+      if (trimmed === "$$") {
+        html.push(renderBlockMath(blockMathLines));
+        blockMathLines = [];
+        inBlockMath = false;
+      } else {
+        blockMathLines.push(rawLine);
+      }
       continue;
     }
 
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (trimmed === "$$") {
+      closeParagraph();
+      closeAllLists();
+      inBlockMath = true;
+      blockMathLines = [];
+      continue;
+    }
+
+    const oneLineMath = trimmed.match(/^\$\$(.+)\$\$$/);
+    if (oneLineMath) {
+      closeParagraph();
+      closeAllLists();
+      html.push(renderBlockMath([oneLineMath[1].trim()]));
+      continue;
+    }
+
+    if (!trimmed) {
+      closeParagraph();
+      // blank lines inside lists should not reset ordered numbering
+      continue;
+    }
+
+    if (/^(-{3,}|_{3,}|\*{3,})$/.test(trimmed)) {
+      closeParagraph();
+      closeAllLists();
+      html.push(`<hr />`);
+      continue;
+    }
+
+    if (isTableLine(line) && i + 1 < lines.length && isTableSeparatorLine(lines[i + 1])) {
+      closeParagraph();
+      closeAllLists();
+      const headerLine = line;
+      const separatorLine = lines[i + 1];
+      const bodyLines = [];
+      i += 2;
+      while (i < lines.length && isTableLine(lines[i]) && !isTableSeparatorLine(lines[i])) {
+        bodyLines.push(lines[i]);
+        i += 1;
+      }
+      i -= 1;
+      html.push(renderMarkdownTable(headerLine, separatorLine, bodyLines));
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
     if (heading) {
       closeParagraph();
-      closeListsTo(-1);
-      const level = heading[1].length + 2;
+      closeAllLists();
+      const level = Math.min(6, heading[1].length);
       html.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
       continue;
     }
@@ -386,8 +559,13 @@ function renderMarkdown(markdown) {
       closeParagraph();
       const indent = listItem[1].length;
       const tag = listItem[3] ? "ol" : "ul";
-      while (listStack.length && listStack[listStack.length - 1].indent > indent) {
-        html.push(`</${listStack.pop().tag}>`);
+      closeListsTo(indent + 1);
+      if (
+        listStack.length &&
+        listStack[listStack.length - 1].indent === indent &&
+        listStack[listStack.length - 1].tag !== tag
+      ) {
+        closeListsTo(indent);
       }
       const current = listStack[listStack.length - 1];
       if (!current || current.indent < indent || current.tag !== tag) {
@@ -399,21 +577,25 @@ function renderMarkdown(markdown) {
       continue;
     }
 
-    closeListsTo(-1);
+    closeAllLists();
     paragraph.push(line.trim());
   }
 
   if (inCodeBlock) {
     html.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
   }
+  if (inBlockMath) {
+    html.push(renderBlockMath(blockMathLines));
+  }
   closeParagraph();
-  closeListsTo(-1);
+  closeAllLists();
   return html.join("");
 }
 
 function setRenderedMarkdown(element, markdown) {
   element.dataset.rawMarkdown = markdown || "";
   element.innerHTML = renderMarkdown(markdown || "");
+  typesetMarkdownMath(element);
 }
 
 function getRawMarkdown(element) {
@@ -1158,6 +1340,306 @@ function renderBackgroundItem(key, title, meta, content) {
   return card;
 }
 
+function renderIdleProgress(progress = {}) {
+  const stage = progress.stage || "waiting";
+  const label = progress.label || "等待开启";
+  const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+  const card = document.createElement("section");
+  card.className = `background-progress is-${stage}`;
+
+  const header = document.createElement("div");
+  header.className = "background-progress-header";
+  const title = document.createElement("strong");
+  title.textContent = "后台任务进度";
+  const value = document.createElement("span");
+  value.textContent = `${label} · ${percent}%`;
+  header.append(title, value);
+
+  const track = document.createElement("div");
+  track.className = "background-progress-bar";
+  const fill = document.createElement("div");
+  fill.className = "background-progress-bar-fill";
+  fill.style.width = `${percent}%`;
+  track.appendChild(fill);
+
+  const detail = document.createElement("div");
+  detail.className = "background-progress-detail";
+  detail.textContent = [
+    progress.title ? `任务：${progress.title}` : "",
+    progress.reason ? `原因：${progress.reason}` : "",
+    progress.updated_at ? `更新时间：${progress.updated_at}` : "",
+  ].filter(Boolean).join(" · ") || "空闲时会自动进行创作、记忆去重和开场缓存。";
+
+  card.append(header, track, detail);
+  return card;
+}
+
+function backgroundSortTime(item) {
+  const value = item.updated_at || item.created_at || item.finished_at || item.started_at || "";
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function formatBackgroundDuration(value) {
+  const ms = Number(value || 0);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 60000)}min`;
+}
+
+function readableWorkerReason(reason) {
+  const reasons = {
+    active_generation: "正在回复用户，后台任务暂缓",
+    memory_agent_busy: "记忆整理正在运行，先不启动其它任务",
+    memory_dedupe_agent_running: "记忆去重已经在运行",
+    idle_agent_running: "后台写作已经在运行",
+    idle_wait: "用户刚刚活动过，等待空闲",
+    recent_run: "刚完成过一次写作，等待下次空闲窗口",
+    recent_run_exists: "刚完成过一次任务，等待下次空闲窗口",
+    recent_prompt_cache: "开场缓存刚刷新过，本轮不用重复刷新",
+    no_devices: "没有找到需要刷新开场缓存的设备",
+    no_candidates: "没有发现足够相似的候选记忆",
+    idle_disabled: "后台写作已关闭",
+    idle_paused: "后台写作已暂停",
+    memory_dedupe_disabled: "记忆去重已关闭",
+    refreshed: "已刷新缓存",
+    error: "运行出错",
+  };
+  return reasons[reason] || reason || "无额外原因";
+}
+
+function readableWorkerTask(task) {
+  const tasks = {
+    opening_cache: "开场缓存",
+    memory_dedupe: "记忆去重",
+    idle_write: "后台写作",
+    memory_agent: "记忆整理",
+  };
+  return tasks[task] || task || "后台任务";
+}
+
+function describeDedupeResult(result) {
+  const action = result && result.action ? result.action : {};
+  const applied = result && result.result ? result.result : {};
+  const keepId = action.keep_id || action.target_id || action.memory_id || "";
+  const removeIds = Array.isArray(action.remove_ids) ? action.remove_ids : [];
+  const kind = action.kind || action.action || "处理";
+  if (removeIds.length && keepId) {
+    return `将记忆 #${removeIds.join("、#")} 合并/删除到 #${keepId}（${kind}）`;
+  }
+  if (keepId && applied.rewritten) {
+    return `重写了记忆 #${keepId}`;
+  }
+  if (keepId) {
+    return `检查了记忆 #${keepId}（${kind}）`;
+  }
+  return JSON.stringify(action);
+}
+
+function workerActivitySummary(item) {
+  const metadata = item.metadata || {};
+  const eventType = item.event_type || "";
+  if (eventType === "idle_worker_tick") {
+    return { title: "后台巡检开始", meta: "检查是否需要刷新开场、整理记忆或继续写作", details: "这是一轮后台巡检的开始记录。" };
+  }
+  if (eventType === "idle_worker_tick_done") {
+    const completed = metadata.completed_task || "none";
+    const taskText = completed === "none" ? "没有需要执行的任务" : `已执行：${readableWorkerTask(completed)}`;
+    return { title: `后台巡检完成：${taskText}`, meta: "", details: taskText };
+  }
+  if (eventType === "idle_worker_skip") {
+    const task = readableWorkerTask(metadata.task);
+    return {
+      title: `${task}：本轮暂不执行`,
+      meta: readableWorkerReason(metadata.reason),
+      details: `${task}没有启动。原因：${readableWorkerReason(metadata.reason)}。`,
+    };
+  }
+  if (eventType === "idle_worker_error") {
+    const task = readableWorkerTask(metadata.task);
+    return {
+      title: `${task}：运行故障`,
+      meta: metadata.error || readableWorkerReason(metadata.reason),
+      details: JSON.stringify(metadata, null, 2),
+    };
+  }
+  if (eventType === "opening_cache_idle_refresh") {
+    const devices = Array.isArray(metadata.refreshed_devices) ? metadata.refreshed_devices : [];
+    const count = Number(metadata.device_count || devices.length || 0);
+    const title = count > 0 ? `开场 prompt 缓存：已刷新 ${count} 个设备` : "开场 prompt 缓存：无需刷新";
+    const details = count > 0
+      ? [`刷新设备：${devices.join("、") || `${count} 个设备`}`]
+      : [readableWorkerReason(metadata.reason)];
+    return { title, meta: readableWorkerReason(metadata.reason), details: details.join("\n") };
+  }
+  if (eventType === "opening_cache_refresh_error") {
+    return { title: "开场 prompt 缓存：运行故障", meta: metadata.error || "error", details: JSON.stringify(metadata, null, 2) };
+  }
+  if (eventType === "memory_dedupe_agent_run") {
+    const applied = Number(metadata.applied || 0);
+    const candidates = Number(metadata.candidate_count || 0);
+    const lines = [`检查候选记忆：${candidates} 组`, `实际消除/合并：${applied} 条`];
+    if (Array.isArray(metadata.results) && metadata.results.length) {
+      metadata.results.slice(0, 8).forEach((result) => lines.push(`- ${describeDedupeResult(result)}`));
+    }
+    return {
+      title: applied > 0 ? `记忆去重：消除/合并 ${applied} 条` : "记忆去重：未发现需要合并的记忆",
+      meta: candidates ? `检查了 ${candidates} 组候选` : "没有候选",
+      details: lines.join("\n"),
+    };
+  }
+  if (eventType === "memory_dedupe_agent_error") {
+    return { title: "记忆去重：运行故障", meta: metadata.error || "error", details: JSON.stringify(metadata, null, 2) };
+  }
+  if (eventType === "idle_agent_artifact_created") {
+    const parts = [
+      metadata.title ? `标题：${metadata.title}` : "",
+      metadata.artifact_id ? `成果编号：#${metadata.artifact_id}` : "",
+      metadata.series_title ? `系列：${metadata.series_title}` : "",
+      metadata.episode_index ? `集数：${metadata.episode_index}` : "",
+      metadata.summary ? `简介：${metadata.summary}` : "",
+    ].filter(Boolean);
+    return {
+      title: `后台写作：完成《${metadata.title || `#${metadata.artifact_id || "未命名"}`}》`,
+      meta: metadata.artifact_type ? `类型：${metadata.artifact_type}` : "已写入成果库",
+      details: parts.join("\n") || "已写入成果库。",
+    };
+  }
+  if (eventType === "idle_agent_error") {
+    return { title: "后台写作：运行故障", meta: metadata.error || "error", details: JSON.stringify(metadata, null, 2) };
+  }
+  if (eventType === "warning_idle_worker_watchdog") {
+    return { title: "后台 watchdog 告警", meta: metadata.message || metadata.kind || "需要检查", details: JSON.stringify(metadata, null, 2) };
+  }
+  return {
+    title: readableWorkerTask(metadata.task || eventType),
+    meta: readableWorkerReason(metadata.reason || metadata.status || metadata.error || ""),
+    details: JSON.stringify(metadata, null, 2),
+  };
+}
+
+function renderWorkerActivityItem(item) {
+  const key = backgroundItemKey("activity", item);
+  const metadata = item.metadata || {};
+  const duration = formatBackgroundDuration(metadata.duration_ms);
+  const triggeredAt = formatWorkerTriggerTime(metadata.started_at || item.created_at);
+  const summary = workerActivitySummary(item);
+  const meta = [
+    triggeredAt ? `触发 ${triggeredAt}` : "",
+    summary.meta,
+    duration ? `运行 ${duration}` : "",
+  ].filter(Boolean).join(" · ");
+  return renderBackgroundItem(key, summary.title, meta, summary.details);
+}
+
+function isQuietWorkerActivity(item) {
+  const metadata = item.metadata || {};
+  const eventType = item.event_type || "";
+  if (eventType === "idle_worker_tick") {
+    return true;
+  }
+  if (eventType === "idle_worker_tick_done") {
+    return !metadata.completed_task || metadata.completed_task === "none";
+  }
+  if (eventType === "idle_worker_skip") {
+    return true;
+  }
+  if (eventType === "opening_cache_idle_refresh") {
+    const count = Number(metadata.device_count || 0);
+    return count <= 0;
+  }
+  return false;
+}
+
+function quietWorkerReasonKey(item) {
+  const metadata = item.metadata || {};
+  if (item.event_type === "idle_worker_tick") {
+    return "后台巡检";
+  }
+  if (item.event_type === "idle_worker_tick_done") {
+    return "巡检无任务";
+  }
+  if (item.event_type === "idle_worker_skip") {
+    return `${readableWorkerTask(metadata.task)}暂未执行：${readableWorkerReason(metadata.reason)}`;
+  }
+  if (item.event_type === "opening_cache_idle_refresh") {
+    return `开场缓存暂未刷新：${readableWorkerReason(metadata.reason)}`;
+  }
+  return readableWorkerReason(metadata.reason || metadata.status || item.event_type || "quiet");
+}
+
+function compactWorkerActivities(items) {
+  const compacted = [];
+  let quietGroup = [];
+  const flushQuietGroup = () => {
+    if (!quietGroup.length) {
+      return;
+    }
+    if (quietGroup.length === 1) {
+      compacted.push(quietGroup[0]);
+    } else {
+      compacted.push({
+        __quiet_group: true,
+        id: `quiet:${quietGroup[0].id || quietGroup[0].created_at}:${quietGroup[quietGroup.length - 1].id || quietGroup[quietGroup.length - 1].created_at}`,
+        items: quietGroup,
+        created_at: quietGroup[0].created_at,
+        metadata: {
+          started_at: quietGroup[quietGroup.length - 1].metadata?.started_at || quietGroup[quietGroup.length - 1].created_at,
+          newest_at: quietGroup[0].metadata?.started_at || quietGroup[0].created_at,
+          oldest_at: quietGroup[quietGroup.length - 1].metadata?.started_at || quietGroup[quietGroup.length - 1].created_at,
+        },
+      });
+    }
+    quietGroup = [];
+  };
+
+  items.forEach((item) => {
+    if (isQuietWorkerActivity(item)) {
+      quietGroup.push(item);
+      return;
+    }
+    flushQuietGroup();
+    compacted.push(item);
+  });
+  flushQuietGroup();
+  return compacted;
+}
+
+function renderQuietWorkerGroup(group) {
+  const items = group.items || [];
+  const key = backgroundItemKey("quiet-group", group);
+  const newest = formatWorkerTriggerTime(group.metadata?.newest_at || group.created_at);
+  const oldest = formatWorkerTriggerTime(group.metadata?.oldest_at || group.created_at);
+  const reasonCounts = new Map();
+  items.forEach((item) => {
+    const keyText = quietWorkerReasonKey(item);
+    reasonCounts.set(keyText, (reasonCounts.get(keyText) || 0) + 1);
+  });
+  const reasons = Array.from(reasonCounts.entries())
+    .sort((left, right) => right[1] - left[1])
+    .map(([reason, count]) => `${reason} × ${count}`);
+  const meta = [
+    newest && oldest ? `范围 ${oldest} - ${newest}` : "",
+    `${items.length} 条后台自检/未执行记录已合并`,
+  ].filter(Boolean).join(" · ");
+  const detailLines = [
+    "这些记录只是后台巡检、等待空闲、任务忙碌或暂时无事可做；没有真正写入成果或修改记忆。",
+    "",
+    "合并原因：",
+    ...reasons.map((line) => `- ${line}`),
+  ];
+  return renderBackgroundItem(key, `后台自检/暂未执行：合并 ${items.length} 条`, meta, detailLines.join("
+"));
+}
+
+function renderWorkerActivity(activity) {
+  if (activity && activity.__quiet_group) {
+    return renderQuietWorkerGroup(activity);
+  }
+  return renderWorkerActivityItem(activity);
+}
+
 function renderArtifactItem(artifact) {
   const key = backgroundItemKey("artifact", artifact);
   const card = document.createElement("details");
@@ -1211,35 +1693,30 @@ async function refreshBackground() {
   if (!backgroundPanel) {
     return;
   }
-  const response = await fetch("/api/analysis/background");
+  const response = await fetch(`/api/analysis/background?limit=${encodeURIComponent(backgroundActivityLimit)}`);
   if (response.status === 401) {
     window.location.href = "/analysis";
     return;
   }
   if (!response.ok) {
-    backgroundPanel.textContent = "后台写作读取失败";
+    backgroundPanel.textContent = "后台任务读取失败";
     return;
   }
   const data = await response.json();
-  const items = [];
-  (data.runs || []).slice(0, 8).forEach((run) => {
-    const key = backgroundItemKey("run", run);
-    items.push(
-      renderBackgroundItem(
-        key,
-        `run #${run.id} · ${run.title || run.task_type || "idle"}`,
-        [run.status, run.started_at, run.finished_at || run.updated_at].filter(Boolean).join(" · "),
-        JSON.stringify(run, null, 2),
-      ),
-    );
-  });
-  (data.artifacts || []).slice(0, 8).forEach((artifact) => {
-    items.push(renderArtifactItem(artifact));
-  });
+  const items = [renderIdleProgress(data.progress || {})];
+  const activities = (data.activities || [])
+    .slice()
+    .sort((left, right) => backgroundSortTime(right) - backgroundSortTime(left));
+  compactWorkerActivities(activities).forEach((item) => items.push(renderWorkerActivity(item)));
   collectPayloadScrollPositions(backgroundPanel, "backgroundKey", backgroundPayloadScrollPositions);
   preserveScrollDuring(() => {
     backgroundPanel.replaceChildren(...items);
   });
+  if (backgroundMoreButton) {
+    const count = Array.isArray(data.activities) ? data.activities.length : 0;
+    backgroundMoreButton.hidden = count < backgroundActivityLimit;
+    backgroundMoreButton.textContent = `显示更多（当前 ${count} 条）`;
+  }
 }
 
 async function stopActiveGeneration() {
@@ -1302,6 +1779,12 @@ async function sendMessage(text, options = {}) {
         analysis_mode: true,
       }),
     });
+    if (response.status === 429) {
+      const detail = await parseRateLimitPayload(response);
+      removeEmptyAssistantBubble(assistantBody);
+      setStatus((detail && detail.message) || "发送太快了，请稍后再试");
+      return;
+    }
     if (!response.ok || !response.body) {
       throw new Error(await response.text());
     }
@@ -1409,6 +1892,12 @@ resetButton.addEventListener("click", async () => {
 });
 
 refreshTraceButton.addEventListener("click", refreshTraces);
+if (backgroundMoreButton) {
+  backgroundMoreButton.addEventListener("click", () => {
+    backgroundActivityLimit += 20;
+    refreshBackground().catch((error) => setStatus(`后台任务读取失败: ${error.message}`));
+  });
+}
 temperatureInput.addEventListener("change", saveAnalysisSamplingSettings);
 topPInput.addEventListener("change", saveAnalysisSamplingSettings);
 proxyInput.addEventListener("change", saveAnalysisSamplingSettings);

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Qwen 分析模式</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/analysis.css?v=20260610_wangcai_1_3" />
+    <link rel="stylesheet" href="/static/analysis.css?v=20260612_idle_workers_compact" />
   </head>
   <body>
     <main id="analysisMode" class="analysis-shell">
@@ -72,11 +72,12 @@
         <div id="tracePanel" class="trace-panel"></div>
         <div class="analysis-trace-header analysis-background-header">
           <div>
-            <p class="analysis-kicker">Idle Agent</p>
-            <h2>后台写作</h2>
+            <p class="analysis-kicker">Idle Workers</p>
+            <h2>后台任务</h2>
           </div>
         </div>
         <div id="backgroundPanel" class="background-panel"></div>
+        <button id="backgroundMoreButton" class="analysis-secondary background-more-button" type="button">显示更多</button>
       </section>
     </main>
     <dialog id="analysisUserMemoryBindingDialog" class="admin-login-dialog binding-dialog" aria-labelledby="analysisUserMemoryBindingDialogTitle">
@@ -108,6 +109,19 @@
         </div>
       </form>
     </dialog>
-    <script src="/static/analysis.js?v=20260610_wangcai_1_3"></script>
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [["$", "$"], ["\\(", "\\)"]],
+          displayMath: [["$$", "$$"], ["\\[", "\\]"]],
+          processEscapes: true
+        },
+        options: {
+          skipHtmlTags: ["script", "noscript", "style", "textarea", "pre", "code"]
+        }
+      };
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+    <script src="/static/analysis.js?v=20260612_idle_workers_compact"></script>
   </body>
 </html>

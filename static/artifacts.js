@@ -14,6 +14,7 @@ const artifactCount = document.getElementById("artifactCount");
 const artifactList = document.getElementById("artifactList");
 const loadMoreButton = document.getElementById("loadMoreButton");
 const runCount = document.getElementById("runCount");
+const idleProgress = document.getElementById("idleProgress");
 const runList = document.getElementById("runList");
 const artifactDialog = document.getElementById("artifactDialog");
 const artifactDialogTitle = document.getElementById("artifactDialogTitle");
@@ -50,6 +51,66 @@ function updateIdleToggle(paused) {
   idleToggleButton.textContent = idlePaused ? "开始生成" : "暂停生成";
   idleToggleButton.classList.toggle("is-paused", idlePaused);
   idleToggleButton.setAttribute("aria-pressed", idlePaused ? "true" : "false");
+}
+
+function renderArtifactIdleProgress(progress = {}) {
+  if (!idleProgress) return;
+  const stage = progress.stage || (idlePaused ? "paused" : "waiting");
+  const label = progress.label || (idlePaused ? "已暂停" : "等待开启");
+  const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+  const watchdog = progress.watchdog || {};
+  const warnings = Array.isArray(watchdog.warnings) ? watchdog.warnings : [];
+  idleProgress.className = `idle-progress is-${stage}`;
+  const detailParts = [
+    progress.title ? `任务：${progress.title}` : "",
+    progress.reason ? `原因：${progress.reason}` : "",
+    progress.updated_at ? `更新：${formatTime(progress.updated_at)}` : "",
+    warnings[0] && warnings[0].message ? `诊断：${warnings[0].message}` : "",
+  ].filter(Boolean);
+  idleProgress.innerHTML = `
+    <div class="idle-progress-head">
+      <strong>后台进度</strong>
+      <span>${escapeHtml(label)} · ${percent}%</span>
+    </div>
+    <div class="idle-progress-bar"><div class="idle-progress-fill" style="width: ${percent}%"></div></div>
+    <div class="idle-progress-detail">${escapeHtml(detailParts.join(" · ") || "等待空闲后自动创作。")}</div>
+  `;
+}
+
+function backgroundTaskTime(item) {
+  const value = item.updated_at || item.created_at || item.finished_at || item.started_at || (item.metadata && item.metadata.started_at) || "";
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function formatDurationMs(value) {
+  const ms = Number(value || 0);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms / 60000)}min`;
+}
+
+function activityTitle(item) {
+  const metadata = item.metadata || {};
+  const task = metadata.task || item.event_type || "worker";
+  const labels = {
+    opening_cache: "缓存开场 prompt",
+    memory_dedupe: "记忆去重",
+    idle_write: "后台创作",
+    memory_agent: "记忆整理",
+    idle_worker_tick: "worker heartbeat",
+    opening_cache_idle_refresh: "缓存开场 prompt",
+    memory_dedupe_agent_run: "记忆去重",
+    idle_agent_artifact_created: "成果写入",
+    warning_idle_worker_watchdog: "worker watchdog",
+  };
+  return labels[task] || labels[item.event_type] || task;
+}
+
+function activityStatus(item) {
+  const metadata = item.metadata || {};
+  return metadata.status || metadata.reason || metadata.completed_task || item.event_type || "记录";
 }
 
 function formatTime(value) {
@@ -351,7 +412,7 @@ function renderArtifactCard(item) {
 
   const summary = document.createElement("p");
   summary.className = "artifact-card-summary";
-  summary.textContent = excerptText(item.summary || item.content || "", 128) || "没有简介。";
+  summary.textContent = excerptText(item.summary || item.content || "", 190) || "没有简介。";
 
   const meta = document.createElement("div");
   meta.className = "meta artifact-card-meta";
@@ -670,26 +731,32 @@ function openArtifactDialog(artifactId, options = {}) {
 
 function renderRuns(payload) {
   clearChildren(runList);
-  const items = payload.items || [];
-  runCount.textContent = String(items.length);
+  renderArtifactIdleProgress(payload.progress || {});
+  const runs = (payload.items || []).slice(0, 3);
+  runCount.textContent = String(runs.length);
 
-  if (!items.length) {
-    renderEmpty(runList, "暂无后台运行记录");
+  if (!runs.length) {
+    renderEmpty(runList, "暂无后台写作记录");
     return;
   }
 
-  for (const item of items) {
+  for (const item of runs) {
     const row = document.createElement("div");
     row.className = "run";
 
     const main = document.createElement("div");
     const title = document.createElement("strong");
     title.textContent = `${item.title || "idle-agent"} · ${item.task_type || "other"}`;
-
     const meta = document.createElement("div");
     meta.className = "meta";
-    const reason = item.interrupted_reason ? ` · ${item.interrupted_reason}` : "";
-    meta.textContent = `${formatTime(item.started_at)}${reason}`;
+    const duration = formatDurationMs(item.duration_ms);
+    const reason = item.interrupted_reason ? `原因：${item.interrupted_reason}` : "";
+    meta.textContent = [
+      `开始：${formatTime(item.started_at)}`,
+      item.finished_at ? `结束：${formatTime(item.finished_at)}` : "",
+      duration ? `用时：${duration}` : "",
+      reason,
+    ].filter(Boolean).join(" · ");
 
     const status = document.createElement("span");
     status.className = "run-status";
@@ -724,7 +791,7 @@ async function loadData({ append = false } = {}) {
   try {
     const [artifactsResp, runsResp, promptResp, idleStatusResp] = await Promise.all([
       fetch(`/api/artifacts?${params.toString()}`),
-      fetch("/api/artifacts/runs?limit=80"),
+      fetch("/api/artifacts/runs?limit=3"),
       fetch("/api/artifacts/prompt"),
       fetch("/api/artifacts/idle-status"),
     ]);

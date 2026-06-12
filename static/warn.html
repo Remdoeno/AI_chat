@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>访问日志与告警记录</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260611_text_justify_bubbles" />
+    <link rel="stylesheet" href="/static/warn.css?v=20260611_text_justify_bubbles" />
+  </head>
+  <body>
+    <main class="warn-shell">
+      <header class="warn-header">
+        <div>
+          <p class="eyebrow">Qwen3.6</p>
+          <h1>访问日志</h1>
+          <p class="warn-subtitle">告警记录、访问事件和管理员登录事件。</p>
+        </div>
+        <a class="secondary-button warn-back" href="/">返回聊天</a>
+      </header>
+
+      <section id="warnLoginPanel" class="warn-panel" hidden>
+        <h2>管理员验证</h2>
+        <p>查看访问日志和告警记录需要管理员密码。</p>
+        <form id="warnLoginForm" class="warn-login-form">
+          <input id="warnPasswordInput" type="password" autocomplete="current-password" placeholder="管理员密码" />
+          <button class="primary-button compact-button" type="submit">进入</button>
+        </form>
+        <p id="warnLoginStatus" class="warn-status"></p>
+      </section>
+
+      <section id="warnContentPanel" class="warn-panel" hidden>
+        <div class="warn-toolbar">
+          <div class="warn-filter-group" role="group" aria-label="日志类型">
+            <button class="warn-filter is-active" type="button" data-kind="">全部</button>
+            <button class="warn-filter" type="button" data-kind="warning">告警记录</button>
+            <button class="warn-filter" type="button" data-kind="access">访问日志</button>
+          </div>
+          <button id="warnRefreshButton" class="secondary-button compact-button" type="button">刷新</button>
+        </div>
+        <p id="warnSummary" class="warn-status">读取中</p>
+        <div id="warnList" class="warn-list"></div>
+      </section>
+    </main>
+    <script src="/static/warn.js?v=20260611_text_justify_bubbles"></script>
+  </body>
+</html>

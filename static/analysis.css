@@ -391,6 +391,33 @@ h2 {
   margin-bottom: 0;
 }
 
+.analysis-message-body,
+.analysis-message-body p {
+  text-align: justify;
+  text-align-last: start;
+  text-justify: inter-ideograph;
+}
+
+.analysis-message-body h1,
+.analysis-message-body h2,
+.analysis-message-body h3,
+.analysis-message-body h4,
+.analysis-message-body h5,
+.analysis-message-body h6,
+.analysis-message-body ul,
+.analysis-message-body ol,
+.analysis-message-body li,
+.analysis-message-body pre,
+.analysis-message-body code,
+.analysis-message-body table,
+.analysis-message-body th,
+.analysis-message-body td,
+.analysis-message-body .markdown-table-wrap,
+.analysis-message-body .math-block {
+  text-align: left;
+  text-align-last: auto;
+}
+
 .analysis-message-body h3,
 .analysis-message-body h4,
 .analysis-message-body h5,
@@ -1203,4 +1230,147 @@ h2 {
     min-height: 30px;
     padding: 0 10px;
   }
+}
+
+.analysis-message-body h1,
+.analysis-message-body h2,
+.analysis-message-body h3,
+.analysis-message-body h4,
+.analysis-message-body h5,
+.analysis-message-body h6,
+.background-markdown h1,
+.background-markdown h2,
+.background-markdown h3,
+.background-markdown h4,
+.background-markdown h5,
+.background-markdown h6 {
+  margin: 0.85em 0 0.45em;
+  line-height: 1.25;
+}
+
+.analysis-message-body h1,
+.background-markdown h1 { font-size: 1.45em; }
+.analysis-message-body h2,
+.background-markdown h2 { font-size: 1.28em; }
+.analysis-message-body h3,
+.background-markdown h3 { font-size: 1.16em; }
+.analysis-message-body h4,
+.analysis-message-body h5,
+.analysis-message-body h6,
+.background-markdown h4,
+.background-markdown h5,
+.background-markdown h6 { font-size: 1.04em; }
+
+.analysis-message-body .markdown-table-wrap,
+.background-markdown .markdown-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.analysis-message-body table,
+.background-markdown table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.analysis-message-body th,
+.analysis-message-body td,
+.background-markdown th,
+.background-markdown td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.analysis-message-body th,
+.background-markdown th {
+  background: var(--soft);
+  font-weight: 900;
+}
+
+.analysis-message-body hr,
+.background-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+.analysis-message-body .math-inline,
+.background-markdown .math-inline {
+  white-space: nowrap;
+}
+
+.analysis-message-body .math-block,
+.background-markdown .math-block {
+  display: block;
+  overflow-x: auto;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent-soft);
+  background: var(--soft);
+}
+
+
+.background-progress {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff, #f8fbfa);
+  padding: 12px;
+  box-shadow: 0 2px 12px rgba(24, 36, 50, 0.04);
+}
+
+.background-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.background-progress-header span {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.background-progress-bar {
+  height: 8px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7ecef;
+}
+
+.background-progress-bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #6fb7a4);
+  transition: width 240ms ease;
+}
+
+.background-progress.is-interrupted .background-progress-bar-fill,
+.background-progress.is-failed .background-progress-bar-fill {
+  background: linear-gradient(90deg, #b94a48, #d58b82);
+}
+
+.background-progress.is-completed .background-progress-bar-fill {
+  background: linear-gradient(90deg, #178267, #9ccf9f);
+}
+
+.background-progress-detail {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.background-more-button {
+  margin-top: 12px;
+  width: 100%;
 }
