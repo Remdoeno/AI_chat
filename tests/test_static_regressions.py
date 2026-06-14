@@ -756,8 +756,8 @@ class StaticRegressionTests(unittest.TestCase):
         html = (ROOT / "static" / "analysis.html").read_text(encoding="utf-8")
         analysis_login = (ROOT / "static" / "analysis_login.html").read_text(encoding="utf-8")
 
-        self.assertIn("/static/analysis.css?v=20260611_worker_readable", html)
-        self.assertIn("/static/analysis.css?v=20260611_worker_readable", analysis_login)
+        self.assertIn("/static/analysis.css?v=20260612_worker_reason_label", html)
+        self.assertIn("/static/analysis.css?v=20260612_worker_reason_label", analysis_login)
         self.assertIn("@media (min-width: 761px)", css)
         self.assertIn(".analysis-composer {\n    grid-template-areas:", css)
         self.assertIn('"input send"', css)

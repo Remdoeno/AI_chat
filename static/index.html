@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财1.4 Ai助手聊天</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260611_text_justify_bubbles" />
+    <script src="/static/theme.js?v=20260614_message_time_dark_fix"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260614_message_time_dark_fix" />
   </head>
   <body>
     <main class="app-shell">
@@ -66,6 +67,10 @@
         <button id="resetButton" class="secondary-button" type="button" aria-label="重置会话">
           <span aria-hidden="true">↻</span>
           <span>Reset</span>
+        </button>
+        <button class="sidebar-link sidebar-button theme-toggle-button" type="button" data-theme-toggle>
+          <span aria-hidden="true">◐</span>
+          <span data-theme-toggle-text>黑暗模式</span>
         </button>
         <a class="sidebar-link" href="/artifacts" aria-label="查看空闲成果">
           <span aria-hidden="true">✦</span>
@@ -172,6 +177,6 @@
       };
     </script>
     <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
-    <script src="/static/app.js?v=20260611_text_justify_bubbles"></script>
+    <script src="/static/app.js?v=20260614_message_time_dark_fix"></script>
   </body>
 </html>

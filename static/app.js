@@ -44,11 +44,13 @@ const BUNNY_CLICK_TARGET = 4;
 const WARN_LONG_PRESS_MS = 4000;
 let warnLongPressTimer = 0;
 let warnLongPressTriggered = false;
+let memoryAdminLongPressTimer = 0;
+let memoryAdminLongPressTriggered = false;
 const SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
 const DEVICE_STORAGE_KEY = "qwen_device_id";
 const USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
 const DEFAULT_SAMPLING_SETTINGS = {
-  temperature: 1,
+  temperature: 0.6,
   top_p: 0.95,
   web_search_proxy: "",
 };
@@ -768,9 +770,25 @@ function renderMarkdown(markdown) {
   return html.join("");
 }
 
+function stripModelMessageTimePrefixes(text) {
+  let cleaned = String(text || "");
+  for (let index = 0; index < 4; index += 1) {
+    const next = cleaned.replace(
+      /^\s*\[\s*message[\s_-]*time\s*:\s*[^\]\n]*(?:\]|\n)\s*/i,
+      "",
+    );
+    if (next === cleaned) {
+      break;
+    }
+    cleaned = next;
+  }
+  return cleaned;
+}
+
 function setRenderedMarkdown(element, markdown) {
-  element.dataset.rawMarkdown = markdown || "";
-  element.innerHTML = renderMarkdown(markdown || "");
+  const cleaned = stripModelMessageTimePrefixes(markdown || "");
+  element.dataset.rawMarkdown = cleaned;
+  element.innerHTML = renderMarkdown(cleaned);
   typesetMarkdownMath(element);
 }
 
@@ -1594,6 +1612,24 @@ function openMemoryAdminPage() {
   window.location.href = "/memory-admin";
 }
 
+function openUserMemoryPage() {
+  window.location.href = "/memory";
+}
+
+function handleMemoryAdminLongPressStart() {
+  memoryAdminLongPressTriggered = false;
+  window.clearTimeout(memoryAdminLongPressTimer);
+  memoryAdminLongPressTimer = window.setTimeout(() => {
+    memoryAdminLongPressTriggered = true;
+    window.location.href = "/memory-admin";
+  }, WARN_LONG_PRESS_MS);
+}
+
+function clearMemoryAdminLongPress() {
+  window.clearTimeout(memoryAdminLongPressTimer);
+  memoryAdminLongPressTimer = 0;
+}
+
 function handleBunnyWarnLongPressStart() {
   warnLongPressTriggered = false;
   window.clearTimeout(warnLongPressTimer);
@@ -1816,7 +1852,18 @@ document.addEventListener("visibilitychange", () => {
     loadUserMemoryBinding().catch(() => {});
   }
 });
-memoryAdminButton.addEventListener("click", openMemoryAdminPage);
+memoryAdminButton.addEventListener("pointerdown", handleMemoryAdminLongPressStart);
+memoryAdminButton.addEventListener("pointerup", clearMemoryAdminLongPress);
+memoryAdminButton.addEventListener("pointerleave", clearMemoryAdminLongPress);
+memoryAdminButton.addEventListener("pointercancel", clearMemoryAdminLongPress);
+memoryAdminButton.addEventListener("click", (event) => {
+  if (memoryAdminLongPressTriggered) {
+    event.preventDefault();
+    memoryAdminLongPressTriggered = false;
+    return;
+  }
+  openUserMemoryPage();
+});
 memoryAdminLoginForm.addEventListener("submit", loginMemoryAdmin);
 memoryAdminCancelButton.addEventListener("click", closeMemoryAdminDialog);
 window.addEventListener("pagehide", closeCurrentSession);

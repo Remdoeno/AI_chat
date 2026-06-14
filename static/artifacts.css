@@ -858,3 +858,81 @@ textarea:focus {
 .run-activity {
   border-style: dashed;
 }
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #090a0d;
+  --panel: #14161c;
+  --ink: #f4ead2;
+  --muted: #b4a77f;
+  --line: #3a3322;
+  --accent: #d8a832;
+  --accent-strong: #f0c85a;
+  --blue: #d8a832;
+  --shadow: 0 18px 54px rgba(0, 0, 0, 0.48);
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(216, 168, 50, 0.13), transparent 34%),
+    linear-gradient(135deg, #08090c 0%, #111318 54%, #08090c 100%);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .side,
+html[data-theme="dark"] .content,
+html[data-theme="dark"] .artifact-card,
+html[data-theme="dark"] .artifact-dialog-shell,
+html[data-theme="dark"] .idle-progress,
+html[data-theme="dark"] .run-item,
+html[data-theme="dark"] .prompt-panel,
+html[data-theme="dark"] .comment-row {
+  border-color: var(--line);
+  background: rgba(16, 18, 24, 0.94);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+html[data-theme="dark"] .back-link,
+html[data-theme="dark"] .button,
+html[data-theme="dark"] .secondary-action,
+html[data-theme="dark"] .like-button,
+html[data-theme="dark"] .comment-button,
+html[data-theme="dark"] .icon-button {
+  border-color: rgba(216, 168, 50, 0.38);
+  background: #171a20;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .button:not(.secondary-action),
+html[data-theme="dark"] .like-button:hover,
+html[data-theme="dark"] .comment-button:hover {
+  border-color: #f0c85a;
+  background: linear-gradient(135deg, #a97916 0%, #d8a832 54%, #f1d079 100%);
+  color: #111318;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  border-color: #3f3827;
+  background: #0d0f14;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .artifact-summary,
+html[data-theme="dark"] .meta,
+html[data-theme="dark"] .status,
+html[data-theme="dark"] .idle-progress-detail {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .brand p,
+html[data-theme="dark"] a {
+  color: var(--accent);
+}
+
+html[data-theme="dark"] .artifact-body blockquote {
+  border-color: rgba(216, 168, 50, 0.55);
+  background: rgba(216, 168, 50, 0.08);
+}

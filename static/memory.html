@@ -4,19 +4,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Qwen Memory</title>
-    <link rel="stylesheet" href="/static/memory.css?v=20260603_artifact_memory" />
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <script src="/static/theme.js?v=20260613_memory_back_left_fix"></script>
+    <link rel="stylesheet" href="/static/memory.css?v=20260613_memory_back_left_fix" />
   </head>
   <body>
     <main class="memory-shell">
       <header class="topbar">
-        <div>
+        <a class="topbar-back" href="/">返回聊天</a>
+        <div class="topbar-title">
           <p class="eyebrow">Qwen3.6</p>
           <h1>Memory Console</h1>
         </div>
-        <nav>
-          <a href="/">Chat</a>
-          <button id="refreshButton" type="button">刷新</button>
-        </nav>
+        <button id="refreshButton" type="button">刷新</button>
       </header>
 
       <section class="summary-grid" aria-label="状态汇总">
@@ -42,6 +42,28 @@
               <p>整理后的长期记忆，不含原始对话。</p>
             </div>
           </header>
+          <section class="create-memory-panel" aria-label="新增记忆">
+            <div class="create-memory-fields">
+              <select id="newMemoryLabel">
+                <option value="preference">preference</option>
+                <option value="identity">identity</option>
+                <option value="rule">rule</option>
+                <option value="persona">persona</option>
+                <option value="artifact">artifact</option>
+                <option value="risk">risk</option>
+                <option value="diary">diary</option>
+                <option value="event">event</option>
+                <option value="fact">fact</option>
+                <option value="other" selected>other</option>
+              </select>
+              <div id="newMemoryTimeline" class="timeline-picker" aria-label="timeline"></div>
+            </div>
+            <textarea id="newMemoryContent" rows="4" placeholder="新增一条属于当前用户范围的记忆"></textarea>
+            <div class="create-memory-actions">
+              <p id="memoryEditStatus" class="muted">只显示并编辑当前共享用户范围内的记忆。</p>
+              <button id="createMemoryButton" type="button">新增记忆</button>
+            </div>
+          </section>
           <div class="filters">
             <input id="memoryKeyword" type="search" placeholder="关键词" />
             <select id="memoryLabel">
@@ -102,6 +124,6 @@
         </article>
       </section>
     </main>
-    <script src="/static/memory.js?v=20260603_artifact_memory"></script>
+    <script src="/static/memory.js?v=20260613_memory_back_left_fix"></script>
   </body>
 </html>

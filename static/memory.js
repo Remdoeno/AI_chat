@@ -9,10 +9,41 @@ const retrievalMemoryId = document.getElementById("retrievalMemoryId");
 const operationKind = document.getElementById("operationKind");
 const operationStatus = document.getElementById("operationStatus");
 const operationEventType = document.getElementById("operationEventType");
+const newMemoryLabel = document.getElementById("newMemoryLabel");
+const newMemoryTimeline = document.getElementById("newMemoryTimeline");
+const newMemoryContent = document.getElementById("newMemoryContent");
+const createMemoryButton = document.getElementById("createMemoryButton");
+const memoryEditStatus = document.getElementById("memoryEditStatus");
 
 const memoryList = document.getElementById("memoryList");
 const retrievalList = document.getElementById("retrievalList");
 const operationList = document.getElementById("operationList");
+
+const LABELS = ["preference", "identity", "rule", "persona", "artifact", "risk", "diary", "event", "fact", "other"];
+
+const DEVICE_STORAGE_KEY = "qwen_device_id";
+
+function makeDeviceId() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return `dev_${window.crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+  }
+  return `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}`;
+}
+
+function ensureDeviceId() {
+  let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY);
+  if (!deviceId) {
+    deviceId = makeDeviceId();
+    localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
+  }
+  return deviceId;
+}
+
+function deviceIdentityHeaders() {
+  return {
+    "X-Qwen-Device-Id": ensureDeviceId(),
+  };
+}
 
 function formatTime(value) {
   if (!value) {
@@ -40,16 +71,123 @@ function tag(text) {
   return div("tag", text);
 }
 
+function makeLabelSelect(value) {
+  const select = document.createElement("select");
+  const normalized = LABELS.includes(value) ? value : "other";
+  for (const label of LABELS) {
+    const option = document.createElement("option");
+    option.value = label;
+    option.textContent = label;
+    option.selected = label === normalized;
+    select.appendChild(option);
+  }
+  return select;
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function parseTimelineParts(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+  const match = text.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (match) {
+    return {
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+      hour: Number(match[4] || 0),
+      minute: Number(match[5] || 0),
+      second: Number(match[6] || 0),
+    };
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+    hour: date.getHours(),
+    minute: date.getMinutes(),
+    second: date.getSeconds(),
+  };
+}
+
+function makeTimelinePicker(initialValue = "") {
+  const parsed = parseTimelineParts(initialValue);
+  const now = new Date();
+  const seed = parsed || {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+    day: now.getDate(),
+    hour: now.getHours(),
+    minute: now.getMinutes(),
+    second: now.getSeconds(),
+  };
+  const root = div("timeline-picker");
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.placeholder = "无日期";
+  dateInput.value = parsed ? `${seed.year}-${pad2(seed.month)}-${pad2(seed.day)}` : "";
+  const timeInput = document.createElement("input");
+  timeInput.type = "time";
+  timeInput.step = "1";
+  timeInput.value = `${pad2(seed.hour)}:${pad2(seed.minute)}:${pad2(seed.second)}`;
+  root.append(dateInput, timeInput);
+  return {
+    root,
+    value() {
+      if (!dateInput.value) {
+        return "";
+      }
+      const time = timeInput.value || "00:00:00";
+      const normalizedTime = time.length === 5 ? `${time}:00` : time;
+      return `${dateInput.value}T${normalizedTime}+08:00`;
+    },
+  };
+}
+
 function renderEmpty(target, text) {
   target.replaceChildren(div("empty", text));
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
+function jsonHeaders() {
+  return {
+    ...deviceIdentityHeaders(),
+    "Content-Type": "application/json",
+  };
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: deviceIdentityHeaders(),
+  });
   if (!response.ok) {
     throw new Error(await response.text());
   }
   return response.json();
+}
+
+async function sendJson(url, method, payload) {
+  const response = await fetch(url, {
+    method,
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+  return response.json();
+}
+
+function setMemoryEditStatus(text) {
+  memoryEditStatus.textContent = text;
 }
 
 function renderMemories(payload) {
@@ -61,23 +199,105 @@ function renderMemories(payload) {
 
   memoryList.replaceChildren(
     ...payload.items.map((item) => {
-      const root = div("item");
+      const root = div("item memory-edit-item");
       const top = div("item-top");
       const tags = div("tag-row");
       const memoryTags = [
         tag(`#${item.id}`),
         tag(item.importance_label),
         item.timeline_at ? tag(`timeline ${formatTime(item.timeline_at)}`) : null,
+        item.visitor_ip ? tag(`device ${item.visitor_ip}`) : null,
         item.confidence != null ? tag(`confidence ${Number(item.confidence).toFixed(2)}`) : null,
         item.supersedes_id ? tag(`supersedes #${item.supersedes_id}`) : null,
         tag(item.has_vector ? `vector ${item.vector_dim}` : "no vector"),
       ].filter(Boolean);
       tags.append(...memoryTags);
       top.append(tags, div("time", formatTime(item.updated_at)));
-      root.append(top, div("content", item.content));
+      const editGrid = div("memory-edit-grid");
+
+      const labelField = document.createElement("label");
+      labelField.className = "edit-field";
+      labelField.append(div("edit-label", "类型"), makeLabelSelect(item.importance_label));
+
+      const timelineField = document.createElement("label");
+      timelineField.className = "edit-field timeline-field";
+      const timelinePicker = makeTimelinePicker(item.timeline_at || "");
+      timelineField.append(div("edit-label", "Timeline"), timelinePicker.root);
+
+      const contentField = document.createElement("label");
+      contentField.className = "edit-field content-field";
+      const textarea = document.createElement("textarea");
+      textarea.rows = 5;
+      textarea.value = item.content || "";
+      contentField.append(div("edit-label", "内容"), textarea);
+
+      editGrid.append(labelField, timelineField, contentField);
+
+      const actions = div("memory-actions");
+      const saveButton = document.createElement("button");
+      saveButton.type = "button";
+      saveButton.textContent = "保存";
+      saveButton.addEventListener("click", async () => {
+        await updateMemory(item.id, textarea.value, labelField.querySelector("select").value, timelinePicker.value());
+      });
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "danger-button";
+      deleteButton.textContent = "删除";
+      deleteButton.addEventListener("click", async () => {
+        if (window.confirm(`删除记忆 #${item.id}？`)) {
+          await deleteMemory(item.id);
+        }
+      });
+      actions.append(saveButton, deleteButton);
+      root.append(top, editGrid, actions);
       return root;
     })
   );
+}
+
+async function createMemory() {
+  const content = newMemoryContent.value.trim();
+  if (!content) {
+    setMemoryEditStatus("内容为空");
+    return;
+  }
+  createMemoryButton.disabled = true;
+  setMemoryEditStatus("新增中，正在更新向量");
+  try {
+    await sendJson("/api/memory/memories", "POST", {
+      content,
+      importance_label: newMemoryLabel.value,
+      timeline_at: newTimelinePicker.value(),
+    });
+    newMemoryContent.value = "";
+    setMemoryEditStatus("已新增并更新向量");
+    await refreshAll();
+  } finally {
+    createMemoryButton.disabled = false;
+  }
+}
+
+async function updateMemory(id, content, label, timelineAt) {
+  if (!content.trim()) {
+    setMemoryEditStatus("内容为空");
+    return;
+  }
+  setMemoryEditStatus(`保存 #${id}，正在更新向量`);
+  await sendJson(`/api/memory/memories/${id}`, "PATCH", {
+    content,
+    importance_label: label,
+    timeline_at: timelineAt.trim(),
+  });
+  setMemoryEditStatus(`已保存 #${id} 并更新向量`);
+  await refreshAll();
+}
+
+async function deleteMemory(id) {
+  setMemoryEditStatus(`删除 #${id}`);
+  await fetchJson(`/api/memory/memories/${id}`, { method: "DELETE" });
+  setMemoryEditStatus(`已删除 #${id}`);
+  await refreshAll();
 }
 
 function renderRetrievals(payload) {
@@ -213,4 +433,9 @@ function scheduleRefresh() {
 });
 
 refreshButton.addEventListener("click", refreshAll);
+const newTimelinePicker = makeTimelinePicker("");
+newMemoryTimeline.replaceChildren(newTimelinePicker.root);
+createMemoryButton.addEventListener("click", () => {
+  createMemory().catch((error) => setMemoryEditStatus(`失败：${error.message}`));
+});
 refreshAll();

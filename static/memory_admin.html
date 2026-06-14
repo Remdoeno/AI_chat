@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Qwen 记忆后台</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/memory_admin.css?v=20260610_diary_dedupe" />
+    <script src="/static/theme.js?v=20260613_memory_guard_ui_fix"></script>
+    <link rel="stylesheet" href="/static/memory_admin.css?v=20260613_memory_guard_ui_fix" />
   </head>
   <body>
     <main class="admin-shell">
@@ -67,6 +68,10 @@
             <span>关联设备身份</span>
             <input id="newIp" type="text" autocomplete="off" placeholder="留空为全局，例如 device:..." />
           </label>
+          <label class="field" for="newTimeline">
+            <span>Timeline</span>
+            <div id="newTimeline" class="timeline-picker" aria-label="Timeline"></div>
+          </label>
           <label class="field" for="newContent">
             <span>内容</span>
             <textarea id="newContent" rows="6"></textarea>
@@ -83,6 +88,6 @@
         <div id="memoryList" class="memory-list"></div>
       </section>
     </main>
-    <script src="/static/memory_admin.js?v=20260610_diary_dedupe"></script>
+    <script src="/static/memory_admin.js?v=20260613_memory_guard_ui_fix"></script>
   </body>
 </html>

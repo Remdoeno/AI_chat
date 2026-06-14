@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Qwen 分析模式</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/analysis.css?v=20260612_idle_workers_compact" />
+    <script src="/static/theme.js?v=20260614_message_time_dark_fix"></script>
+    <link rel="stylesheet" href="/static/analysis.css?v=20260614_message_time_dark_fix" />
   </head>
   <body>
     <main id="analysisMode" class="analysis-shell">
@@ -21,7 +22,7 @@
         </div>
         <label class="analysis-field" for="temperatureInput">
           <span>Temperature</span>
-          <input id="temperatureInput" type="number" min="0" max="2" step="0.05" value="0.75" />
+          <input id="temperatureInput" type="number" min="0" max="2" step="0.05" value="0.6" />
         </label>
         <label class="analysis-field" for="topPInput">
           <span>Top-p</span>
@@ -120,8 +121,20 @@
           skipHtmlTags: ["script", "noscript", "style", "textarea", "pre", "code"]
         }
       };
+      window.addEventListener("DOMContentLoaded", () => {
+        window.setTimeout(() => {
+          const status = document.getElementById("statusText");
+          const text = status ? status.textContent.trim() : "";
+          if (status && !window.__qwenAnalysisStarted && (text === "连接中" || text === "脚本加载中")) {
+            status.textContent = "分析脚本未启动，请强制刷新";
+          }
+        }, 5000);
+      });
     </script>
-    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
-    <script src="/static/analysis.js?v=20260612_idle_workers_compact"></script>
+    <script
+      src="/static/analysis.js?v=20260614_message_time_dark_fix"
+      onerror="document.getElementById('statusText').textContent='analysis.js 加载失败'"
+    ></script>
+    <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
   </body>
 </html>

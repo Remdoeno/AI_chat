@@ -20,14 +20,15 @@ class ChatPayload(BaseModel):
     analysis_mode: bool = False
     web_search_proxy: str = Field(default="")
     max_tokens: int = Field(default=8192, ge=1, le=65536)
-    temperature: float = Field(default=1.2, ge=0.0, le=2.0)
-    top_p: float = Field(default=0.75, ge=0.0, le=1.0)
+    temperature: float = Field(default=0.6, ge=0.0, le=2.0)
+    top_p: float = Field(default=0.95, ge=0.0, le=1.0)
 
 
 class MemoryAdminPayload(BaseModel):
     content: str = Field(min_length=1)
     importance_label: str = Field(default="other", min_length=1)
     visitor_ip: Optional[str] = None
+    timeline_at: Optional[str] = None
 
 
 class UserMemoryBindingPayload(BaseModel):

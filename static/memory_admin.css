@@ -166,7 +166,7 @@ textarea:focus {
   display: grid;
   align-content: start;
   gap: 16px;
-  padding: 28px clamp(18px, 4vw, 56px);
+  padding: 28px clamp(18px, 4vw, 56px) 96px;
 }
 
 .section-head {
@@ -209,8 +209,28 @@ textarea:focus {
 
 .memory-edit-grid {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: 150px minmax(380px, 1.2fr) minmax(220px, 0.8fr);
   gap: 12px;
+}
+
+.memory-edit-grid .field:last-child {
+  grid-column: 1 / -1;
+}
+
+.timeline-picker {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.25fr) minmax(118px, 0.75fr);
+  gap: 6px;
+}
+
+.timeline-picker input {
+  min-width: 0;
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+.create-panel .timeline-picker {
+  grid-template-columns: 1fr;
 }
 
 .memory-actions {
@@ -244,4 +264,62 @@ textarea:focus {
   .memory-edit-grid {
     grid-template-columns: 1fr;
   }
+
+  .timeline-picker {
+    grid-template-columns: 1fr;
+  }
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #090a0d;
+  --panel: #14161c;
+  --ink: #f4ead2;
+  --muted: #b4a77f;
+  --line: #3a3322;
+  --accent: #d8a832;
+  --accent-strong: #f0c85a;
+  --danger: #ff7770;
+  --blue: #d8a832;
+  --shadow: 0 18px 54px rgba(0, 0, 0, 0.48);
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(216, 168, 50, 0.13), transparent 34%),
+    linear-gradient(135deg, #08090c 0%, #111318 54%, #08090c 100%);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .admin-side,
+html[data-theme="dark"] .admin-content,
+html[data-theme="dark"] .memory-item,
+html[data-theme="dark"] .create-panel,
+html[data-theme="dark"] .empty {
+  border-color: var(--line);
+  background: rgba(16, 18, 24, 0.94);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+html[data-theme="dark"] .back-link,
+html[data-theme="dark"] .ghost-button,
+html[data-theme="dark"] .danger-button {
+  border-color: rgba(216, 168, 50, 0.38);
+  background: #171a20;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .button {
+  border-color: #f0c85a;
+  background: linear-gradient(135deg, #a97916 0%, #d8a832 54%, #f1d079 100%);
+  color: #111318;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  border-color: #3f3827;
+  background: #0d0f14;
+  color: var(--ink);
 }

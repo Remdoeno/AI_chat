@@ -1374,3 +1374,201 @@ h2 {
   margin-top: 12px;
   width: 100%;
 }
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #090a0d;
+  --panel: #14161c;
+  --soft: #1d1a12;
+  --ink: #f4ead2;
+  --muted: #b4a77f;
+  --line: #3a3322;
+  --accent: #d8a832;
+  --danger: #ff7770;
+  --shadow: 0 18px 54px rgba(0, 0, 0, 0.48);
+}
+
+html[data-theme="dark"] body,
+html[data-theme="dark"] .analysis-login-page {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(216, 168, 50, 0.13), transparent 34%),
+    linear-gradient(135deg, #08090c 0%, #111318 54%, #08090c 100%);
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .analysis-sidebar,
+html[data-theme="dark"] .analysis-trace,
+html[data-theme="dark"] .analysis-chat,
+html[data-theme="dark"] .analysis-composer,
+html[data-theme="dark"] .analysis-login-card,
+html[data-theme="dark"] .trace-card,
+html[data-theme="dark"] .background-card,
+html[data-theme="dark"] .admin-login-dialog {
+  border-color: var(--line);
+  background: rgba(16, 18, 24, 0.94);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+html[data-theme="dark"] .analysis-back-button,
+html[data-theme="dark"] .analysis-secondary,
+html[data-theme="dark"] .analysis-toggle-tool-button,
+html[data-theme="dark"] .compact-button,
+html[data-theme="dark"] .binding-info-button {
+  border-color: rgba(216, 168, 50, 0.38);
+  background: #171a20;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .analysis-secondary:hover,
+html[data-theme="dark"] .analysis-toggle-tool-button[aria-pressed="true"],
+html[data-theme="dark"] #sendButton {
+  border-color: #f0c85a;
+  background: linear-gradient(135deg, #a97916 0%, #d8a832 54%, #f1d079 100%);
+  color: #111318;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  border-color: #3f3827;
+  background: #0d0f14;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .analysis-message-body {
+  border-color: #3a3322;
+  background: #151821;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .analysis-message.user .analysis-message-body {
+  border-color: rgba(216, 168, 50, 0.55);
+  background: linear-gradient(135deg, rgba(216, 168, 50, 0.16), rgba(44, 35, 16, 0.86));
+  color: #fff1c6;
+}
+
+html[data-theme="dark"] .analysis-message-meta,
+html[data-theme="dark"] .analysis-muted,
+html[data-theme="dark"] .analysis-binding-summary,
+html[data-theme="dark"] .trace-meta,
+html[data-theme="dark"] .background-meta {
+  color: var(--muted);
+}
+
+html[data-theme="dark"] .analysis-message-label {
+  color: #fff7d8;
+}
+
+html[data-theme="dark"] .analysis-message-timestamp {
+  color: #b9ad8b;
+}
+
+html[data-theme="dark"] .analysis-kicker,
+html[data-theme="dark"] a {
+  color: var(--accent);
+}
+
+html[data-theme="dark"] .analysis-message-body th,
+html[data-theme="dark"] .analysis-message-body td {
+  border-color: var(--line);
+}
+
+html[data-theme="dark"] .analysis-message-body th {
+  background: #201b10;
+  color: #f1d079;
+}
+
+html[data-theme="dark"] .analysis-chat-history-actions {
+  border-color: var(--line);
+  background: #0d0f14;
+}
+
+html[data-theme="dark"] .analysis-load-previous-button,
+html[data-theme="dark"] .analysis-load-previous-button:disabled {
+  border-color: rgba(216, 168, 50, 0.38);
+  background: #171a20;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+html[data-theme="dark"] .analysis-load-previous-button:disabled {
+  color: var(--muted);
+  opacity: 0.72;
+}
+
+html[data-theme="dark"] .analysis-history-load {
+  border-color: rgba(216, 168, 50, 0.34);
+  background: rgba(18, 20, 26, 0.92);
+  color: var(--muted);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+html[data-theme="dark"] .trace-card pre,
+html[data-theme="dark"] .background-card pre {
+  background: #0d0f14;
+  color: #f4ead2;
+}
+
+html[data-theme="dark"] .background-artifact-card summary {
+  background: #151821;
+  color: #f4ead2;
+}
+
+html[data-theme="dark"] .background-markdown {
+  border-color: var(--line);
+  background: #0d0f14;
+  color: #f4ead2;
+}
+
+html[data-theme="dark"] .background-markdown code {
+  background: #201b10;
+  color: #f1d079;
+}
+
+html[data-theme="dark"] .background-markdown pre {
+  background: #0b0d11;
+  color: #f4ead2;
+}
+
+html[data-theme="dark"] .background-artifact-summary {
+  border-left-color: rgba(216, 168, 50, 0.6);
+  background: rgba(216, 168, 50, 0.1);
+  color: #e7d8a8;
+}
+
+html[data-theme="dark"] .background-progress {
+  border-color: var(--line);
+  background: linear-gradient(180deg, #151821, #0d0f14);
+  color: var(--ink);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38);
+}
+
+html[data-theme="dark"] .background-progress-header {
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .background-progress-header span {
+  color: #f0c85a;
+}
+
+html[data-theme="dark"] .background-progress-bar {
+  background: #2b2618;
+}
+
+html[data-theme="dark"] .background-progress-bar-fill {
+  background: linear-gradient(90deg, #a97916, #d8a832, #f1d079);
+}
+
+html[data-theme="dark"] .background-progress.is-interrupted .background-progress-bar-fill,
+html[data-theme="dark"] .background-progress.is-failed .background-progress-bar-fill {
+  background: linear-gradient(90deg, #8f1d18, #ff7770);
+}
+
+html[data-theme="dark"] .background-progress.is-completed .background-progress-bar-fill {
+  background: linear-gradient(90deg, #8f6814, #f0c85a);
+}
+
+html[data-theme="dark"] .background-progress-detail {
+  color: var(--muted);
+}

@@ -7,6 +7,7 @@ const memoryCount = document.getElementById("memoryCount");
 const memoryList = document.getElementById("memoryList");
 const newLabel = document.getElementById("newLabel");
 const newIp = document.getElementById("newIp");
+const newTimeline = document.getElementById("newTimeline");
 const newContent = document.getElementById("newContent");
 const createButton = document.getElementById("createButton");
 
@@ -39,6 +40,69 @@ function makeLabelSelect(value) {
     select.appendChild(option);
   }
   return select;
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function parseTimelineParts(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const match = text.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+  if (match) {
+    return {
+      year: Number(match[1]),
+      month: Number(match[2]),
+      day: Number(match[3]),
+      hour: Number(match[4] || 0),
+      minute: Number(match[5] || 0),
+      second: Number(match[6] || 0),
+    };
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+    hour: date.getHours(),
+    minute: date.getMinutes(),
+    second: date.getSeconds(),
+  };
+}
+
+function makeTimelinePicker(initialValue = "") {
+  const parsed = parseTimelineParts(initialValue);
+  const now = new Date();
+  const seed = parsed || {
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
+    day: now.getDate(),
+    hour: now.getHours(),
+    minute: now.getMinutes(),
+    second: now.getSeconds(),
+  };
+  const root = document.createElement("div");
+  root.className = "timeline-picker";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.placeholder = "无日期";
+  dateInput.value = parsed ? `${seed.year}-${pad2(seed.month)}-${pad2(seed.day)}` : "";
+  const timeInput = document.createElement("input");
+  timeInput.type = "time";
+  timeInput.step = "1";
+  timeInput.value = `${pad2(seed.hour)}:${pad2(seed.minute)}:${pad2(seed.second)}`;
+  root.append(dateInput, timeInput);
+  return {
+    root,
+    value() {
+      if (!dateInput.value) return "";
+      const time = timeInput.value || "00:00:00";
+      const normalizedTime = time.length === 5 ? `${time}:00` : time;
+      return `${dateInput.value}T${normalizedTime}+08:00`;
+    },
+  };
 }
 
 function renderEmpty() {
@@ -84,6 +148,23 @@ function renderMemories(payload) {
     const labelSelect = makeLabelSelect(itemLabel);
     labelField.append(labelTitle, labelSelect);
 
+    const timelineField = document.createElement("label");
+    timelineField.className = "field timeline-field";
+    const timelineTitle = document.createElement("span");
+    timelineTitle.textContent = "Timeline";
+    const timelinePicker = makeTimelinePicker(item.timeline_at || "");
+    timelineField.append(timelineTitle, timelinePicker.root);
+
+    const deviceField = document.createElement("label");
+    deviceField.className = "field";
+    const deviceTitle = document.createElement("span");
+    deviceTitle.textContent = "Device";
+    const deviceInput = document.createElement("input");
+    deviceInput.type = "text";
+    deviceInput.value = item.visitor_ip || "";
+    deviceInput.placeholder = "留空为全局，例如 device:...";
+    deviceField.append(deviceTitle, deviceInput);
+
     const contentField = document.createElement("label");
     contentField.className = "field";
     const contentTitle = document.createElement("span");
@@ -93,7 +174,7 @@ function renderMemories(payload) {
     textarea.value = item.content || "";
     contentField.append(contentTitle, textarea);
 
-    editGrid.append(labelField, contentField);
+    editGrid.append(labelField, timelineField, deviceField, contentField);
 
     const actions = document.createElement("div");
     actions.className = "memory-actions";
@@ -103,7 +184,7 @@ function renderMemories(payload) {
     saveButton.type = "button";
     saveButton.textContent = "保存";
     saveButton.addEventListener("click", async () => {
-      await updateMemory(item.id, textarea.value, labelSelect.value);
+      await updateMemory(item.id, textarea.value, labelSelect.value, timelinePicker.value(), deviceInput.value);
     });
 
     const deleteButton = document.createElement("button");
@@ -162,7 +243,8 @@ async function createMemory() {
     body: JSON.stringify({
       content,
       importance_label: newLabel.value,
-      visitor_ip: newIp.value.trim() || null,
+      visitor_ip: newIp.value.trim(),
+      timeline_at: newTimelinePicker.value(),
     }),
   });
   await ensureOk(response);
@@ -171,7 +253,7 @@ async function createMemory() {
   await loadMemories();
 }
 
-async function updateMemory(id, content, label) {
+async function updateMemory(id, content, label, timelineAt, deviceId) {
   if (!content.trim()) {
     setStatus("内容为空");
     return;
@@ -180,7 +262,12 @@ async function updateMemory(id, content, label) {
   const response = await fetch(`/api/admin/memories/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, importance_label: label }),
+    body: JSON.stringify({
+      content,
+      importance_label: label,
+      timeline_at: timelineAt.trim(),
+      visitor_ip: deviceId.trim(),
+    }),
   });
   await ensureOk(response);
   setStatus(`已保存 #${id}`);
@@ -212,4 +299,6 @@ createButton.addEventListener("click", () => {
   createMemory().catch((error) => setStatus(`失败: ${error.message}`));
 });
 
+const newTimelinePicker = makeTimelinePicker("");
+newTimeline.replaceChildren(newTimelinePicker.root);
 loadMemories().catch((error) => setStatus(`失败: ${error.message}`));

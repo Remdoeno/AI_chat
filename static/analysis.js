@@ -30,6 +30,21 @@ const analysisWebSearchButton = document.getElementById("analysisWebSearchButton
 const analysisImageInput = document.getElementById("analysisImageInput");
 const analysisAttachmentPreview = document.getElementById("analysisAttachmentPreview");
 
+window.__qwenAnalysisStarted = true;
+
+window.addEventListener("error", (event) => {
+  if (statusText) {
+    statusText.textContent = `前端错误：${event.message || "脚本初始化失败"}`;
+  }
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  if (statusText) {
+    const reason = event.reason && event.reason.message ? event.reason.message : String(event.reason || "异步任务失败");
+    statusText.textContent = `前端错误：${reason}`;
+  }
+});
+
 let sessionId = null;
 let activeController = null;
 let traceTimer = null;
@@ -94,6 +109,21 @@ const TRACE_EVENT_LABELS = {
 
 function setStatus(text) {
   statusText.textContent = text;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000, timeoutMessage = "请求超时") {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      throw new Error(timeoutMessage);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 async function parseRateLimitPayload(response) {
@@ -592,9 +622,25 @@ function renderMarkdown(markdown) {
   return html.join("");
 }
 
+function stripModelMessageTimePrefixes(text) {
+  let cleaned = String(text || "");
+  for (let index = 0; index < 4; index += 1) {
+    const next = cleaned.replace(
+      /^\s*\[\s*message[\s_-]*time\s*:\s*[^\]\n]*(?:\]|\n)\s*/i,
+      "",
+    );
+    if (next === cleaned) {
+      break;
+    }
+    cleaned = next;
+  }
+  return cleaned;
+}
+
 function setRenderedMarkdown(element, markdown) {
-  element.dataset.rawMarkdown = markdown || "";
-  element.innerHTML = renderMarkdown(markdown || "");
+  const cleaned = stripModelMessageTimePrefixes(markdown || "");
+  element.dataset.rawMarkdown = cleaned;
+  element.innerHTML = renderMarkdown(cleaned);
   typesetMarkdownMath(element);
 }
 
@@ -633,7 +679,7 @@ function loadAnalysisSamplingSettings() {
     }
     const payload = JSON.parse(raw);
     if (payload && payload.temperature !== undefined) {
-      temperatureInput.value = String(clampNumber(payload.temperature, 0, 2, 0.75));
+      temperatureInput.value = String(clampNumber(payload.temperature, 0, 2, 0.6));
     }
     if (payload && payload.top_p !== undefined) {
       topPInput.value = String(clampNumber(payload.top_p, 0, 1, 0.95));
@@ -649,7 +695,7 @@ function loadAnalysisSamplingSettings() {
 
 function saveAnalysisSamplingSettings() {
   const payload = {
-    temperature: clampNumber(temperatureInput.value, 0, 2, 0.75),
+    temperature: clampNumber(temperatureInput.value, 0, 2, 0.6),
     top_p: clampNumber(topPInput.value, 0, 1, 0.95),
     web_search_proxy: proxyInput.value.trim(),
   };
@@ -1086,10 +1132,11 @@ async function saveUserMemoryBinding(event) {
 }
 
 async function createSession() {
-  const response = await fetch("/api/sessions", {
+  setStatus("创建会话中");
+  const response = await fetchWithTimeout("/api/sessions", {
     method: "POST",
     headers: deviceIdentityHeaders(),
-  });
+  }, 15000, "创建会话超时");
   if (!response.ok) {
     throw new Error("session create failed");
   }
@@ -1102,8 +1149,12 @@ async function createSession() {
   ensureAnalysisHistoryLoadIndicator();
   syncPreviousAnalysisSessionButton();
   setStatus(`session ${sessionId.slice(0, 8)}`);
-  await refreshTraces();
-  await startOpeningPrompt(data);
+  refreshTraces().catch((error) => setStatus(`trace 读取失败: ${error.message}`));
+  startOpeningPrompt(data).catch((error) => {
+    if (!userStoppedGeneration) {
+      setStatus(`开场失败: ${error.message || "生成中断"}`);
+    }
+  });
 }
 
 async function startOpeningPrompt(payload) {
@@ -1398,6 +1449,7 @@ function readableWorkerReason(reason) {
     recent_run: "刚完成过一次写作，等待下次空闲窗口",
     recent_run_exists: "刚完成过一次任务，等待下次空闲窗口",
     recent_prompt_cache: "开场缓存刚刷新过，本轮不用重复刷新",
+    recent_memory_dedupe: "记忆去重刚运行过，本轮不用重复去重",
     no_devices: "没有找到需要刷新开场缓存的设备",
     no_candidates: "没有发现足够相似的候选记忆",
     idle_disabled: "后台写作已关闭",
@@ -1629,8 +1681,7 @@ function renderQuietWorkerGroup(group) {
     "合并原因：",
     ...reasons.map((line) => `- ${line}`),
   ];
-  return renderBackgroundItem(key, `后台自检/暂未执行：合并 ${items.length} 条`, meta, detailLines.join("
-"));
+  return renderBackgroundItem(key, `后台自检/暂未执行：合并 ${items.length} 条`, meta, detailLines.join("\n"));
 }
 
 function renderWorkerActivity(activity) {
@@ -1773,7 +1824,7 @@ async function sendMessage(text, options = {}) {
         cached_opening: Boolean(options.cachedOpening),
         web_search: webSearchInput.checked,
         web_search_proxy: proxyInput.value.trim(),
-        temperature: clampNumber(temperatureInput.value, 0, 2, 0.75),
+        temperature: clampNumber(temperatureInput.value, 0, 2, 0.6),
         top_p: clampNumber(topPInput.value, 0, 1, 0.95),
         max_tokens: maxTokens,
         analysis_mode: true,
@@ -1969,6 +2020,7 @@ loadAnalysisSamplingSettings();
 setAnalysisWebSearchEnabled(false);
 loadUserMemoryBinding().catch(() => {});
 
+setStatus("创建会话中");
 createSession()
   .then(() => {
     refreshBackground();
