@@ -29,6 +29,9 @@ class MemoryAdminPayload(BaseModel):
     importance_label: str = Field(default="other", min_length=1)
     visitor_ip: Optional[str] = None
     timeline_at: Optional[str] = None
+    timeline_start_at: Optional[str] = None
+    timeline_end_at: Optional[str] = None
+    timeline_kind: Optional[str] = None
 
 
 class UserMemoryBindingPayload(BaseModel):

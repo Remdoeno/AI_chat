@@ -5,9 +5,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def read_app_source() -> str:
+    parts = [(ROOT / "app.py").read_text(encoding="utf-8")]
+    qwen_app = ROOT / "qwen_app"
+    if qwen_app.exists():
+        for source in sorted(qwen_app.rglob("*.py")):
+            parts.append(source.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
 class StaticRegressionTests(unittest.TestCase):
     def test_backend_defines_current_date_context_and_injects_it(self):
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
         self.assertIn("def current_date_context", app_py)
         self.assertIn("当前真实日期", app_py)
@@ -15,7 +24,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("prompt_parts = [SYSTEM_PROMPT, MARKDOWN_OUTPUT_GUIDELINES, date_context, visitor_context]", app_py)
 
     def test_backend_does_not_use_legacy_memory_context_in_prompt_builder(self):
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
         prompt_builder = app_py.split("def build_system_prompt(", 1)[1].split("def refresh_vector_memory", 1)[0]
         self.assertNotIn("memory.build_memory_context", prompt_builder)
@@ -23,7 +32,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn('"0.5"', app_py)
 
     def test_backend_splits_schemas_and_streaming_helpers_out_of_app(self):
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
         schemas_py = (ROOT / "schemas.py").read_text(encoding="utf-8")
         streaming_py = (ROOT / "streaming_utils.py").read_text(encoding="utf-8")
 
@@ -42,8 +51,8 @@ class StaticRegressionTests(unittest.TestCase):
 
         self.assertIn("searchActivity", html)
         self.assertIn("searchActivityList", html)
-        self.assertIn("20260611_worker_readable", html)
-        self.assertIn("/static/app.js?v=20260611_worker_readable", html)
+        self.assertIn("20260614_message_time_dark_fix", html)
+        self.assertIn("/static/app.js?v=20260614_message_time_dark_fix", html)
         self.assertIn("searchActivityList", js)
         self.assertIn("搜索：", js)
         self.assertNotIn("正在访问", js)
@@ -83,7 +92,7 @@ class StaticRegressionTests(unittest.TestCase):
     def test_large_image_upload_shows_compression_status(self):
         app_js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         analysis_js = (ROOT / "static" / "analysis.js").read_text(encoding="utf-8")
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
         self.assertIn("图片过大，狠狠压缩中...", app_js)
         self.assertIn("图片过大，狠狠压缩中...", analysis_js)
@@ -100,7 +109,7 @@ class StaticRegressionTests(unittest.TestCase):
         analysis_js = (ROOT / "static" / "analysis.js").read_text(encoding="utf-8")
         warn_html = (ROOT / "static" / "warn.html").read_text(encoding="utf-8")
         warn_js = (ROOT / "static" / "warn.js").read_text(encoding="utf-8")
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
         self.assertIn("bunnyLogoButton", index_html)
         self.assertIn("WARN_LONG_PRESS_MS", app_js)
@@ -125,15 +134,16 @@ class StaticRegressionTests(unittest.TestCase):
         analysis_js = (ROOT / "static" / "analysis.js").read_text(encoding="utf-8")
         styles_css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
         analysis_css = (ROOT / "static" / "analysis.css").read_text(encoding="utf-8")
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
         schemas_py = (ROOT / "schemas.py").read_text(encoding="utf-8")
 
         self.assertIn("userMemoryBindingButton", index_html)
         self.assertIn("memoryAdminButton", index_html)
         self.assertLess(index_html.index("memoryAdminButton"), index_html.index("userMemoryBindingButton"))
-        self.assertIn("function openMemoryAdminPage()", app_js)
-        self.assertIn('window.location.href = "/memory-admin";', app_js)
-        self.assertIn('memoryAdminButton.addEventListener("click", openMemoryAdminPage);', app_js)
+        self.assertIn("function openUserMemoryPage()", app_js)
+        self.assertIn('window.location.href = "/memory";', app_js)
+        self.assertIn('memoryAdminButton.addEventListener("click", (event) =>', app_js)
+        self.assertIn("openUserMemoryPage();", app_js)
         self.assertNotIn('memoryAdminButton.addEventListener("click", openMemoryAdminDialog);', app_js)
         self.assertIn("用户记忆绑定", index_html)
         self.assertIn("ⓘ", index_html)
@@ -187,7 +197,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("shared_user_bindings", app_py)
 
     def test_memory_admin_exposes_event_label(self):
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
         admin_html = (ROOT / "static" / "memory_admin.html").read_text(encoding="utf-8")
         admin_js = (ROOT / "static" / "memory_admin.js").read_text(encoding="utf-8")
         memory_html = (ROOT / "static" / "memory.html").read_text(encoding="utf-8")
@@ -202,14 +212,14 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn('value="event"', memory_html)
         self.assertIn('value="fact"', memory_html)
         self.assertIn("item.importance_label || item.label", admin_js)
-        self.assertIn("20260610_diary_dedupe", admin_html)
+        self.assertIn("20260615_hide_range_timeline", admin_html)
 
     def test_home_title_auth_page_and_release_docs_are_present(self):
         index_html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         auth_html = (ROOT / "static" / "auth.html").read_text(encoding="utf-8")
         auth_js = (ROOT / "static" / "auth.js").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
         embedding_py = (ROOT / "embedding_client.py").read_text(encoding="utf-8")
 
         self.assertIn("Ai助手聊天", index_html)
@@ -222,7 +232,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("MODEL_API_KEY", app_py)
         self.assertIn("QWEN_IDLE_AGENT_ENABLED", app_py)
         self.assertIn("QWEN_EMBEDDING_API_KEY", embedding_py)
-        self.assertIn("旺财1.4", readme)
+        self.assertIn("旺财1.5", readme)
         self.assertIn("家庭本地部署", readme)
         self.assertIn("QWEN_MODEL_BASE_URL", readme)
         self.assertIn("QWEN_MODEL_API_KEY", readme)
@@ -233,7 +243,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("代理默认为空", readme)
 
     def test_release_removes_private_story_seeds_and_runtime_data_from_git(self):
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
 
         self.assertIn("load_idle_story_seeds", app_py)
@@ -245,7 +255,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn(".env", gitignore)
 
     def test_backend_reads_search_result_pages_for_context(self):
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
         self.assertIn("WEB_SEARCH_MAX_CANDIDATES", app_py)
         self.assertIn("WEB_SEARCH_MAX_READ_PAGES", app_py)
@@ -269,7 +279,7 @@ class StaticRegressionTests(unittest.TestCase):
         analysis_html = (ROOT / "static" / "analysis.html").read_text(encoding="utf-8")
         styles_css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
         analysis_css = (ROOT / "static" / "analysis.css").read_text(encoding="utf-8")
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
         for js in (app_js, analysis_js):
             self.assertIn("function normalizeMarkdownTables", js)
@@ -289,7 +299,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("MARKDOWN_OUTPUT_GUIDELINES", app_py)
         self.assertIn("默认像正常聊天一样自然回答", app_py)
         self.assertIn("只有在用户明确要求结构化输出", app_py)
-        self.assertIn("表格必须使用标准 GitHub Flavored Markdown", app_py)
+        self.assertIn("表格使用标准 GitHub Flavored Markdown", app_py)
         self.assertIn("$...$", app_py)
 
     def test_markdown_renderer_keeps_ordered_lists_across_blank_lines(self):
@@ -348,7 +358,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertNotIn("payload.activities || []", js)
         self.assertIn("updateIdleToggle", js)
         self.assertIn("PUT", js)
-        self.assertIn("20260611_worker_readable", html)
+        self.assertIn("20260612_dark_gold_theme", html)
         self.assertIn("function renderMarkdown", js)
         self.assertIn("setRenderedMarkdown(artifactDialogBody, item.content || \"\")", js)
         self.assertNotIn("body.textContent = item.content || \"\"", js)
@@ -371,7 +381,7 @@ class StaticRegressionTests(unittest.TestCase):
     def test_artifacts_page_supports_pagination(self):
         html = (ROOT / "static" / "artifacts.html").read_text(encoding="utf-8")
         js = (ROOT / "static" / "artifacts.js").read_text(encoding="utf-8")
-        app = (ROOT / "app.py").read_text(encoding="utf-8")
+        app = read_app_source()
 
         self.assertIn("loadMoreButton", html)
         self.assertIn("ARTIFACT_PAGE_SIZE", js)
@@ -384,7 +394,7 @@ class StaticRegressionTests(unittest.TestCase):
         html = (ROOT / "static" / "artifacts.html").read_text(encoding="utf-8")
         js = (ROOT / "static" / "artifacts.js").read_text(encoding="utf-8")
         css = (ROOT / "static" / "artifacts.css").read_text(encoding="utf-8")
-        app = (ROOT / "app.py").read_text(encoding="utf-8")
+        app = read_app_source()
 
         self.assertIn('value="poetry"', html)
         self.assertIn("sortSelect", html)
@@ -425,7 +435,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn(">delete</button>", html)
         self.assertIn("event.detail >= 2", js)
         self.assertIn("ARTIFACT_PAGE_SIZE = 20", js)
-        self.assertIn("grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))", css)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr))", css)
         self.assertIn("grid-template-columns: 1fr", css)
         self.assertIn("delete-artifact-button", css)
         self.assertIn(".artifact-comments", css)
@@ -455,7 +465,7 @@ class StaticRegressionTests(unittest.TestCase):
         css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn("20260611_worker_readable", html)
+        self.assertIn("20260614_message_time_dark_fix", html)
         self.assertIn("进入记忆库", html)
         self.assertIn("<span>记忆库</span>", html)
         self.assertIn("进入分析模式", html)
@@ -483,7 +493,7 @@ class StaticRegressionTests(unittest.TestCase):
         css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn("/static/styles.css?v=20260611_worker_readable", html)
+        self.assertIn("/static/styles.css?v=20260614_message_time_dark_fix", html)
         self.assertIn(".admin-login-form .field {\n  margin-top: 8px;", css)
         self.assertIn(".dialog-status:empty {\n  min-height: 0;", css)
         self.assertIn(".dialog-actions {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  align-items: stretch;", css)
@@ -496,7 +506,7 @@ class StaticRegressionTests(unittest.TestCase):
         css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn("/static/styles.css?v=20260611_worker_readable", html)
+        self.assertIn("/static/styles.css?v=20260614_message_time_dark_fix", html)
         self.assertIn("@media (min-width: 761px)", css)
         self.assertIn(".composer-main {\n    grid-template-areas:", css)
         self.assertIn('"input send"', css)
@@ -508,7 +518,7 @@ class StaticRegressionTests(unittest.TestCase):
         html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
         js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
         self.assertIn("旺财1.4 Ai助手聊天", html)
         self.assertIn("PREVIOUS_SESSION_ARM_MS", js)
@@ -622,7 +632,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertNotIn("icanhazip.com", js)
         self.assertNotIn("ipinfo.io/ip", js)
         self.assertNotIn("isUsableClientIp", js)
-        self.assertIn('value="0.75"', html)
+        self.assertIn('value="0.6"', html)
         self.assertIn('value="0.95"', html)
         self.assertIn("backgroundPanel", html)
         self.assertIn("ANALYSIS_SAMPLING_STORAGE_KEY", js)
@@ -654,7 +664,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("restorePayloadScroll", js)
         self.assertIn("rememberPayloadScroll", js)
         self.assertIn("requestAnimationFrame", js)
-        self.assertIn("20260611_worker_readable", html)
+        self.assertIn("20260614_message_time_dark_fix", html)
         self.assertIn("<h1>分析模式</h1>", html)
         self.assertIn("<title>Qwen 分析模式</title>", html)
         self.assertIn("refreshTraces", js)
@@ -684,9 +694,9 @@ class StaticRegressionTests(unittest.TestCase):
         html = (ROOT / "static" / "analysis.html").read_text(encoding="utf-8")
         js = (ROOT / "static" / "analysis.js").read_text(encoding="utf-8")
         css = (ROOT / "static" / "analysis.css").read_text(encoding="utf-8")
-        app_py = (ROOT / "app.py").read_text(encoding="utf-8")
+        app_py = read_app_source()
 
-        self.assertIn("20260611_worker_readable", html)
+        self.assertIn("20260614_message_time_dark_fix", html)
         self.assertIn("analysisWebSearchButton", html)
         self.assertIn("analysis-toggle-tool-button", html)
         self.assertIn("webSearchInput", html)
@@ -756,8 +766,8 @@ class StaticRegressionTests(unittest.TestCase):
         html = (ROOT / "static" / "analysis.html").read_text(encoding="utf-8")
         analysis_login = (ROOT / "static" / "analysis_login.html").read_text(encoding="utf-8")
 
-        self.assertIn("/static/analysis.css?v=20260612_worker_reason_label", html)
-        self.assertIn("/static/analysis.css?v=20260612_worker_reason_label", analysis_login)
+        self.assertIn("/static/analysis.css?v=20260614_message_time_dark_fix", html)
+        self.assertIn("/static/analysis.css?v=20260614_message_time_dark_fix", analysis_login)
         self.assertIn("@media (min-width: 761px)", css)
         self.assertIn(".analysis-composer {\n    grid-template-areas:", css)
         self.assertIn('"input send"', css)
@@ -769,7 +779,7 @@ class StaticRegressionTests(unittest.TestCase):
         css = (ROOT / "static" / "analysis.css").read_text(encoding="utf-8")
         html = (ROOT / "static" / "analysis.html").read_text(encoding="utf-8")
 
-        self.assertIn("20260611_worker_readable", html)
+        self.assertIn("20260614_message_time_dark_fix", html)
         self.assertIn("html,\n  body {\n    height: auto;\n    min-height: 100%;\n    overflow: auto;", css)
         self.assertIn("overscroll-behavior: auto", css)
         self.assertIn(".analysis-shell {\n    display: block;\n    height: auto;\n    min-height: 100dvh;\n    overflow: visible;", css)
@@ -814,7 +824,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertNotIn("<span>IP</span>", admin_html)
         self.assertNotIn("关联 IP", admin_html)
         self.assertNotIn("显示 IP", analysis_login)
-        self.assertIn("20260611_worker_readable", analysis_login)
+        self.assertIn("20260614_message_time_dark_fix", analysis_login)
         self.assertIn("<title>分析模式登录</title>", analysis_login)
         self.assertIn("<h1>分析模式</h1>", analysis_login)
 

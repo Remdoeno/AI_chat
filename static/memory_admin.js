@@ -105,6 +105,26 @@ function makeTimelinePicker(initialValue = "") {
   };
 }
 
+function makeTimelineEditor(item = {}) {
+  const main = makeTimelinePicker(item.timeline_at || "");
+  return {
+    root: main.root,
+    value() {
+      return {
+        timeline_at: main.value(),
+        timeline_start_at: item.timeline_start_at || "",
+        timeline_end_at: item.timeline_end_at || "",
+        timeline_kind: item.timeline_kind || "",
+      };
+    },
+  };
+}
+
+function formatTimelineMain(item) {
+  const main = item.timeline_at ? formatTime(item.timeline_at) : "";
+  return main ? `timeline ${main}` : "";
+}
+
 function renderEmpty() {
   const node = document.createElement("div");
   node.className = "empty";
@@ -131,9 +151,11 @@ function renderMemories(payload) {
     meta.textContent = [
       `#${item.id}`,
       itemLabel,
-      item.timeline_at ? `timeline ${formatTime(item.timeline_at)}` : null,
+      formatTimelineMain(item) || null,
       item.confidence != null ? `confidence ${Number(item.confidence).toFixed(2)}` : null,
       item.supersedes_id ? `supersedes #${item.supersedes_id}` : null,
+      item.refine_status ? `精简 ${item.refine_status}` : null,
+      item.refined_from_id ? `from #${item.refined_from_id}` : null,
       item.visitor_ip ? `device ${item.visitor_ip}` : "global",
       `updated ${formatTime(item.updated_at)}`,
     ].filter(Boolean).join(" · ");
@@ -152,7 +174,7 @@ function renderMemories(payload) {
     timelineField.className = "field timeline-field";
     const timelineTitle = document.createElement("span");
     timelineTitle.textContent = "Timeline";
-    const timelinePicker = makeTimelinePicker(item.timeline_at || "");
+    const timelinePicker = makeTimelineEditor(item);
     timelineField.append(timelineTitle, timelinePicker.root);
 
     const deviceField = document.createElement("label");
@@ -244,7 +266,7 @@ async function createMemory() {
       content,
       importance_label: newLabel.value,
       visitor_ip: newIp.value.trim(),
-      timeline_at: newTimelinePicker.value(),
+      ...newTimelinePicker.value(),
     }),
   });
   await ensureOk(response);
@@ -253,7 +275,7 @@ async function createMemory() {
   await loadMemories();
 }
 
-async function updateMemory(id, content, label, timelineAt, deviceId) {
+async function updateMemory(id, content, label, timelinePayload, deviceId) {
   if (!content.trim()) {
     setStatus("内容为空");
     return;
@@ -265,7 +287,7 @@ async function updateMemory(id, content, label, timelineAt, deviceId) {
     body: JSON.stringify({
       content,
       importance_label: label,
-      timeline_at: timelineAt.trim(),
+      ...timelinePayload,
       visitor_ip: deviceId.trim(),
     }),
   });
@@ -299,6 +321,6 @@ createButton.addEventListener("click", () => {
   createMemory().catch((error) => setStatus(`失败: ${error.message}`));
 });
 
-const newTimelinePicker = makeTimelinePicker("");
+const newTimelinePicker = makeTimelineEditor({});
 newTimeline.replaceChildren(newTimelinePicker.root);
 loadMemories().catch((error) => setStatus(`失败: ${error.message}`));
