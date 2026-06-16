@@ -17,6 +17,7 @@ const runCount = document.getElementById("runCount");
 const idleProgress = document.getElementById("idleProgress");
 const runList = document.getElementById("runList");
 const artifactDialog = document.getElementById("artifactDialog");
+const artifactDialogShell = artifactDialog ? artifactDialog.querySelector(".artifact-dialog-shell") : null;
 const artifactDialogTitle = document.getElementById("artifactDialogTitle");
 const artifactDialogMeta = document.getElementById("artifactDialogMeta");
 const artifactDialogSummary = document.getElementById("artifactDialogSummary");
@@ -830,6 +831,8 @@ function openArtifactDialog(artifactId, options = {}) {
   if (!item) return;
   activeDialogArtifactId = Number(artifactId);
   activeArtifactComments = [];
+  artifactDialog.scrollTop = 0;
+  if (artifactDialogShell) artifactDialogShell.scrollTop = 0;
   artifactDialogTitle.textContent = item.title || "未命名成果";
   const series = item.series_title ? ` · ${item.series_title}` : "";
   const episode = item.episode_index != null ? ` · 第 ${item.episode_index} 集` : "";
@@ -851,6 +854,8 @@ function openArtifactDialog(artifactId, options = {}) {
   } else {
     artifactDialog.setAttribute("open", "open");
   }
+  artifactDialog.scrollTop = 0;
+  if (artifactDialogShell) artifactDialogShell.scrollTop = 0;
   loadArtifactComments(Number(item.id))
     .then(() => {
       if (options.focusComment) artifactCommentInput.focus();

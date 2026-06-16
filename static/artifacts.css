@@ -335,12 +335,12 @@ textarea:focus {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-rows: auto minmax(18px, 1fr) auto auto auto;
-  gap: 7px;
-  padding: 22px 28px 16px;
+  grid-template-rows: auto 8px auto auto auto;
+  gap: 6px;
+  padding: 10px 28px 13px;
   color: #fff;
   background:
-    linear-gradient(180deg, rgba(7, 12, 18, 0.22) 0%, rgba(7, 12, 18, 0.34) 34%, rgba(7, 12, 18, 0.84) 100%);
+    linear-gradient(180deg, rgba(7, 12, 18, 0.22) 0%, rgba(7, 12, 18, 0.36) 28%, rgba(7, 12, 18, 0.86) 100%);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
@@ -385,7 +385,7 @@ textarea:focus {
   font-size: 13px;
   line-height: 1.45;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
+  -webkit-line-clamp: 3;
 }
 
 .artifact-card-footer {
@@ -507,10 +507,12 @@ textarea:focus {
 
 .artifact-card-overlay .artifact-title {
   grid-row: 3;
+  align-self: end;
 }
 
 .artifact-card-overlay .artifact-card-summary {
   grid-row: 4;
+  min-height: calc(1.45em * 3);
 }
 
 .artifact-card-overlay .artifact-card-meta {
