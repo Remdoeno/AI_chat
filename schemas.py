@@ -13,6 +13,7 @@ class ChatAttachment(BaseModel):
 class ChatPayload(BaseModel):
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
+    mode: str = Field(default="chat")
     attachments: List[ChatAttachment] = Field(default_factory=list)
     hidden_user: bool = False
     cached_opening: bool = False
@@ -29,6 +30,9 @@ class MemoryAdminPayload(BaseModel):
     importance_label: str = Field(default="other", min_length=1)
     visitor_ip: Optional[str] = None
     timeline_at: Optional[str] = None
+    timeline_start_at: Optional[str] = None
+    timeline_end_at: Optional[str] = None
+    timeline_kind: Optional[str] = None
 
 
 class UserMemoryBindingPayload(BaseModel):
@@ -58,3 +62,19 @@ class ArtifactCommentPayload(BaseModel):
     content: str = Field(min_length=1)
     parent_id: Optional[int] = None
     author: str = Field(default="visitor")
+
+
+class ModelSlotPayload(BaseModel):
+    provider: str = Field(default="local")
+    display_name: str = Field(default="")
+    base_url: str = Field(default="")
+    model: str = Field(default="")
+    api_key: Optional[str] = None
+    use_proxy: bool = False
+    proxy_url: str = Field(default="")
+
+
+class ModelSettingsPayload(BaseModel):
+    chat: ModelSlotPayload
+    background: ModelSlotPayload
+    image: ModelSlotPayload = Field(default_factory=lambda: ModelSlotPayload(provider="none"))

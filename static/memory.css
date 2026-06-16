@@ -139,8 +139,8 @@ h2 {
 
 .panel.wide {
   grid-column: 1 / -1;
-  height: clamp(380px, calc(100vh - 230px), 620px);
-  height: clamp(380px, calc(100dvh - 230px), 620px);
+  height: clamp(760px, calc(200vh - 460px), 1240px);
+  height: clamp(760px, calc(200dvh - 460px), 1240px);
   min-height: 0;
 }
 
@@ -347,6 +347,10 @@ h2 {
   gap: 10px 12px;
 }
 
+.timeline-field {
+  grid-column: 2;
+}
+
 .edit-field {
   display: grid;
   gap: 6px;
@@ -483,6 +487,10 @@ h2 {
   .memory-edit-grid,
   .timeline-picker {
     grid-template-columns: 1fr;
+  }
+
+  .timeline-field {
+    grid-column: 1 / -1;
   }
 
   .list {

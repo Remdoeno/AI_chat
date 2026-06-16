@@ -3,46 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Qwen 分析模式</title>
+    <title>旺财分析模式</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260614_message_time_dark_fix"></script>
-    <link rel="stylesheet" href="/static/analysis.css?v=20260614_message_time_dark_fix" />
+    <script src="/static/theme.js?v=20260617_dark_draw_prompt"></script>
+    <link rel="stylesheet" href="/static/analysis.css?v=20260617_trace_marker_restore" />
   </head>
   <body>
     <main id="analysisMode" class="analysis-shell">
-      <aside class="analysis-sidebar">
-        <a class="analysis-back analysis-back-button" href="/" aria-label="返回聊天主页">返回聊天</a>
-        <div>
-          <p class="analysis-kicker">Qwen3.6</p>
-          <h1>分析模式</h1>
-        </div>
-        <div class="analysis-field">
-          <span>状态</span>
-          <strong id="statusText">连接中</strong>
-        </div>
-        <label class="analysis-field" for="temperatureInput">
-          <span>Temperature</span>
-          <input id="temperatureInput" type="number" min="0" max="2" step="0.05" value="0.6" />
-        </label>
-        <label class="analysis-field" for="topPInput">
-          <span>Top-p</span>
-          <input id="topPInput" type="number" min="0" max="1" step="0.01" value="0.95" />
-        </label>
-        <label class="analysis-field" for="proxyInput">
-          <span>联网代理</span>
-          <input id="proxyInput" type="url" value="" placeholder="可选，例如 http://127.0.0.1:7890" />
-        </label>
-        <div class="analysis-binding-cluster">
-          <button id="analysisUserMemoryBindingButton" class="analysis-secondary analysis-binding-button" type="button">
-            <span>记忆绑定</span>
-            <span id="analysisUserMemoryBindingCrown" class="binding-crown" hidden>👑</span>
-          </button>
-          <p id="analysisUserMemoryBindingSummary" class="analysis-binding-summary">未绑定共享用户</p>
-        </div>
-        <button id="resetButton" class="analysis-secondary" type="button">Reset</button>
-      </aside>
-
       <section class="analysis-chat" aria-label="分析模式聊天">
+        <header class="analysis-chat-header">
+          <div class="analysis-topbar">
+            <a class="analysis-back analysis-back-button" href="/" aria-label="返回聊天主页">返回聊天</a>
+            <div class="analysis-title-block">
+              <p id="analysisModelDisplayName" class="analysis-kicker analysis-model-kicker">读取中</p>
+              <h1>旺财分析模式</h1>
+            </div>
+          </div>
+          <div class="analysis-status-row">
+            <div class="analysis-field analysis-status-field">
+              <span>状态</span>
+              <strong id="statusText">连接中</strong>
+            </div>
+            <button id="resetButton" class="analysis-secondary analysis-reset-button" type="button">Reset</button>
+          </div>
+        </header>
         <div class="analysis-chat-history-actions">
           <button id="loadPreviousButton" class="analysis-secondary analysis-load-previous-button" type="button">加载上一段对话</button>
         </div>
@@ -54,6 +38,7 @@
             <div class="analysis-tools">
               <button id="analysisAttachImageButton" class="analysis-secondary" type="button">图片</button>
               <button id="analysisWebSearchButton" class="analysis-secondary analysis-toggle-tool-button" type="button" aria-pressed="false">联网</button>
+              <button id="analysisDrawButton" class="analysis-secondary analysis-toggle-tool-button" type="button" aria-pressed="false" aria-label="启用画图" title="启用画图">画图</button>
               <input id="webSearchInput" type="checkbox" hidden />
               <input id="analysisImageInput" type="file" accept="image/*,.avif,.bmp,.gif,.heic,.heif,.ico,.jfif,.jpg,.jpeg,.pjpeg,.png,.svg,.tif,.tiff,.webp" multiple hidden />
             </div>
@@ -68,7 +53,6 @@
             <p class="analysis-kicker">Trace</p>
             <h2>后台明细</h2>
           </div>
-          <button id="refreshTraceButton" class="analysis-secondary" type="button">刷新</button>
         </div>
         <div id="tracePanel" class="trace-panel"></div>
         <div class="analysis-trace-header analysis-background-header">
@@ -81,35 +65,6 @@
         <button id="backgroundMoreButton" class="analysis-secondary background-more-button" type="button">显示更多</button>
       </section>
     </main>
-    <dialog id="analysisUserMemoryBindingDialog" class="admin-login-dialog binding-dialog" aria-labelledby="analysisUserMemoryBindingDialogTitle">
-      <form id="analysisUserMemoryBindingForm" class="admin-login-form binding-form" method="dialog">
-        <div class="binding-dialog-header">
-          <h2 id="analysisUserMemoryBindingDialogTitle">用户记忆绑定</h2>
-          <button id="analysisUserMemoryBindingInfoButton" class="binding-info-button" type="button" aria-label="查看功能说明" aria-expanded="false">ⓘ</button>
-        </div>
-        <p id="analysisUserMemoryBindingInfo" class="binding-info-text" role="tooltip" hidden>
-          同用户 ID 的多个设备会共享长期记忆、event 和 preference。开启“共享聊天记录”后，本设备上刷历史时可按时间加载同用户 ID 下也开启共享的设备会话。设为主机后，同用户 ID 中最新设为主机的设备会显示皇冠；除各设备自己的助手人设、称呼、开场偏好外，普通记忆和事件会优先归到主机设备。
-        </p>
-        <label class="field" for="analysisUserMemoryBindingInput">
-          <span>用户 ID</span>
-          <input id="analysisUserMemoryBindingInput" type="text" maxlength="120" autocomplete="off" spellcheck="false" placeholder="输入共享用户 ID" />
-        </label>
-        <label class="binding-check-field" for="analysisShareChatHistoryCheckbox">
-          <input id="analysisShareChatHistoryCheckbox" type="checkbox" />
-          <span>共享聊天记录</span>
-        </label>
-        <label class="binding-check-field" for="analysisHostDeviceCheckbox">
-          <input id="analysisHostDeviceCheckbox" type="checkbox" />
-          <span>设为主机</span>
-          <span class="binding-inline-crown" aria-hidden="true">👑</span>
-        </label>
-        <p id="analysisUserMemoryBindingStatus" class="dialog-status"></p>
-        <div class="dialog-actions">
-          <button id="analysisUserMemoryBindingCancelButton" class="secondary-button compact-button" type="button">取消</button>
-          <button id="analysisUserMemoryBindingSaveButton" class="primary-button compact-button" type="submit">保存</button>
-        </div>
-      </form>
-    </dialog>
     <script>
       window.MathJax = {
         tex: {
@@ -132,7 +87,7 @@
       });
     </script>
     <script
-      src="/static/analysis.js?v=20260614_message_time_dark_fix"
+      src="/static/analysis.js?v=20260617_memory_trace_watch"
       onerror="document.getElementById('statusText').textContent='analysis.js 加载失败'"
     ></script>
     <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>

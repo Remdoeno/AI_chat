@@ -152,6 +152,26 @@ function makeTimelinePicker(initialValue = "") {
   };
 }
 
+function makeTimelineEditor(item = {}) {
+  const main = makeTimelinePicker(item.timeline_at || "");
+  return {
+    root: main.root,
+    value() {
+      return {
+        timeline_at: main.value(),
+        timeline_start_at: item.timeline_start_at || "",
+        timeline_end_at: item.timeline_end_at || "",
+        timeline_kind: item.timeline_kind || "",
+      };
+    },
+  };
+}
+
+function formatTimelineMain(item) {
+  const main = item.timeline_at ? formatTime(item.timeline_at) : "";
+  return main ? `timeline ${main}` : "";
+}
+
 function renderEmpty(target, text) {
   target.replaceChildren(div("empty", text));
 }
@@ -205,10 +225,12 @@ function renderMemories(payload) {
       const memoryTags = [
         tag(`#${item.id}`),
         tag(item.importance_label),
-        item.timeline_at ? tag(`timeline ${formatTime(item.timeline_at)}`) : null,
+        formatTimelineMain(item) ? tag(formatTimelineMain(item)) : null,
         item.visitor_ip ? tag(`device ${item.visitor_ip}`) : null,
         item.confidence != null ? tag(`confidence ${Number(item.confidence).toFixed(2)}`) : null,
         item.supersedes_id ? tag(`supersedes #${item.supersedes_id}`) : null,
+        item.refine_status ? tag(`精简 ${item.refine_status}`) : null,
+        item.refined_from_id ? tag(`from #${item.refined_from_id}`) : null,
         tag(item.has_vector ? `vector ${item.vector_dim}` : "no vector"),
       ].filter(Boolean);
       tags.append(...memoryTags);
@@ -221,7 +243,7 @@ function renderMemories(payload) {
 
       const timelineField = document.createElement("label");
       timelineField.className = "edit-field timeline-field";
-      const timelinePicker = makeTimelinePicker(item.timeline_at || "");
+      const timelinePicker = makeTimelineEditor(item);
       timelineField.append(div("edit-label", "Timeline"), timelinePicker.root);
 
       const contentField = document.createElement("label");
@@ -268,7 +290,7 @@ async function createMemory() {
     await sendJson("/api/memory/memories", "POST", {
       content,
       importance_label: newMemoryLabel.value,
-      timeline_at: newTimelinePicker.value(),
+      ...newTimelinePicker.value(),
     });
     newMemoryContent.value = "";
     setMemoryEditStatus("已新增并更新向量");
@@ -278,7 +300,7 @@ async function createMemory() {
   }
 }
 
-async function updateMemory(id, content, label, timelineAt) {
+async function updateMemory(id, content, label, timelinePayload) {
   if (!content.trim()) {
     setMemoryEditStatus("内容为空");
     return;
@@ -287,7 +309,7 @@ async function updateMemory(id, content, label, timelineAt) {
   await sendJson(`/api/memory/memories/${id}`, "PATCH", {
     content,
     importance_label: label,
-    timeline_at: timelineAt.trim(),
+    ...timelinePayload,
   });
   setMemoryEditStatus(`已保存 #${id} 并更新向量`);
   await refreshAll();
@@ -385,17 +407,17 @@ async function refreshAll() {
     const memoryQuery = buildQuery({
       keyword: memoryKeyword.value.trim(),
       label: memoryLabel.value,
-      limit: 120,
+      limit: 240,
     });
     const retrievalQuery = buildQuery({
       memory_id: retrievalMemoryId.value.trim(),
-      limit: 120,
+      limit: 240,
     });
     const operationQuery = buildQuery({
       kind: operationKind.value,
       status: operationStatus.value,
       event_type: operationEventType.value.trim(),
-      limit: 160,
+      limit: 320,
     });
 
     const [memories, retrievals, operations] = await Promise.all([
@@ -433,7 +455,7 @@ function scheduleRefresh() {
 });
 
 refreshButton.addEventListener("click", refreshAll);
-const newTimelinePicker = makeTimelinePicker("");
+const newTimelinePicker = makeTimelineEditor({});
 newMemoryTimeline.replaceChildren(newTimelinePicker.root);
 createMemoryButton.addEventListener("click", () => {
   createMemory().catch((error) => setMemoryEditStatus(`失败：${error.message}`));

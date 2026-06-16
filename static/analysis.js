@@ -1,4 +1,5 @@
 const statusText = document.getElementById("statusText");
+const analysisModelDisplayName = document.getElementById("analysisModelDisplayName");
 const messagesEl = document.getElementById("messages");
 const tracePanel = document.getElementById("tracePanel");
 const backgroundPanel = document.getElementById("backgroundPanel");
@@ -9,24 +10,10 @@ const sendButton = document.getElementById("sendButton");
 const loadPreviousButton = document.getElementById("loadPreviousButton");
 const resetButton = document.getElementById("resetButton");
 const refreshTraceButton = document.getElementById("refreshTraceButton");
-const temperatureInput = document.getElementById("temperatureInput");
-const topPInput = document.getElementById("topPInput");
-const proxyInput = document.getElementById("proxyInput");
-const analysisUserMemoryBindingButton = document.getElementById("analysisUserMemoryBindingButton");
-const analysisUserMemoryBindingCrown = document.getElementById("analysisUserMemoryBindingCrown");
-const analysisUserMemoryBindingSummary = document.getElementById("analysisUserMemoryBindingSummary");
-const analysisUserMemoryBindingDialog = document.getElementById("analysisUserMemoryBindingDialog");
-const analysisUserMemoryBindingForm = document.getElementById("analysisUserMemoryBindingForm");
-const analysisUserMemoryBindingInput = document.getElementById("analysisUserMemoryBindingInput");
-const analysisShareChatHistoryCheckbox = document.getElementById("analysisShareChatHistoryCheckbox");
-const analysisHostDeviceCheckbox = document.getElementById("analysisHostDeviceCheckbox");
-const analysisUserMemoryBindingStatus = document.getElementById("analysisUserMemoryBindingStatus");
-const analysisUserMemoryBindingCancelButton = document.getElementById("analysisUserMemoryBindingCancelButton");
-const analysisUserMemoryBindingInfoButton = document.getElementById("analysisUserMemoryBindingInfoButton");
-const analysisUserMemoryBindingInfo = document.getElementById("analysisUserMemoryBindingInfo");
 const webSearchInput = document.getElementById("webSearchInput");
 const analysisAttachImageButton = document.getElementById("analysisAttachImageButton");
 const analysisWebSearchButton = document.getElementById("analysisWebSearchButton");
+const analysisDrawButton = document.getElementById("analysisDrawButton");
 const analysisImageInput = document.getElementById("analysisImageInput");
 const analysisAttachmentPreview = document.getElementById("analysisAttachmentPreview");
 
@@ -47,27 +34,44 @@ window.addEventListener("unhandledrejection", (event) => {
 
 let sessionId = null;
 let activeController = null;
-let traceTimer = null;
 let pendingAttachments = [];
 let backgroundActivityLimit = 20;
 let userStoppedGeneration = false;
 let isMessageComposing = false;
 let isLoadingPreviousSession = false;
 let hasMorePreviousSessions = true;
+let analysisDrawEnabled = false;
+let panelRefreshTimer = 0;
+let panelRefreshPending = false;
+let backgroundRefreshPending = false;
+let panelRefreshRunning = false;
+let panelRefreshWatchTimer = 0;
+let panelRefreshWatchUntil = 0;
+
+function updateAnalysisComposerHeight() {
+  if (!chatForm || !chatForm.parentElement) {
+    return;
+  }
+  const height = Math.ceil(chatForm.getBoundingClientRect().height);
+  chatForm.parentElement.style.setProperty("--analysis-composer-height", `${height}px`);
+}
+
+if (window.ResizeObserver && chatForm) {
+  const composerResizeObserver = new ResizeObserver(updateAnalysisComposerHeight);
+  composerResizeObserver.observe(chatForm);
+} else {
+  window.addEventListener("resize", updateAnalysisComposerHeight);
+}
+updateAnalysisComposerHeight();
 let previousSessionArmedAt = 0;
 let previousSessionHideTimer = 0;
 const openTraceKeys = new Set();
 const closedTraceKeys = new Set();
 const openBackgroundKeys = new Set();
 const closedBackgroundKeys = new Set();
-const tracePayloadScrollPositions = new Map();
-const backgroundPayloadScrollPositions = new Map();
 const DEVICE_STORAGE_KEY = "qwen_device_id";
-const USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
 const CHAT_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
-const ANALYSIS_SAMPLING_STORAGE_KEY = "qwen_analysis_sampling_settings";
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
-let userMemoryBindingState = null;
 
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -111,6 +115,12 @@ function setStatus(text) {
   statusText.textContent = text;
 }
 
+function setAnalysisModelDisplayName(text) {
+  if (analysisModelDisplayName) {
+    analysisModelDisplayName.textContent = text || "未知";
+  }
+}
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000, timeoutMessage = "请求超时") {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -123,6 +133,23 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15000, timeoutMes
     throw error;
   } finally {
     window.clearTimeout(timeoutId);
+  }
+}
+
+async function loadAnalysisModelDisplayName() {
+  if (!analysisModelDisplayName) {
+    return;
+  }
+  try {
+    const response = await fetchWithTimeout("/api/health", { headers: deviceIdentityHeaders() }, 8000, "模型状态读取超时");
+    if (!response.ok) {
+      throw new Error("模型状态读取失败");
+    }
+    const payload = await response.json();
+    const modelName = String(payload.model_name || "").trim();
+    setAnalysisModelDisplayName(modelName || "未知");
+  } catch (_error) {
+    setAnalysisModelDisplayName("读取失败");
   }
 }
 
@@ -143,100 +170,6 @@ function removeEmptyAssistantBubble(assistantBody) {
   const bubble = assistantBody && assistantBody.closest ? assistantBody.closest(".message") : null;
   if (bubble) {
     bubble.remove();
-  }
-}
-
-function bindingSummaryText(binding) {
-  if (!binding || !binding.shared_user_id) {
-    return "未绑定共享用户";
-  }
-  const userId = String(binding.shared_user_id || "").trim();
-  const maskedUserId = userId ? `${userId.slice(0, 1)}***` : "";
-  const parts = [maskedUserId ? `共享用户：${maskedUserId}` : "已绑定共享用户"];
-  parts.push(binding.share_chat_history ? "共享聊天记录" : "仅共享长期记忆");
-  if (binding.is_host) {
-    parts.push("本设备为主机");
-  }
-  return parts.join(" · ");
-}
-
-function publishUserMemoryBindingState() {
-  try {
-    localStorage.setItem(USER_MEMORY_BINDING_STORAGE_KEY, JSON.stringify({
-      device_id: ensureDeviceId(),
-      binding: userMemoryBindingState || {},
-      cached_at: Date.now(),
-    }));
-  } catch (_) {
-    // localStorage may be unavailable in strict private contexts.
-  }
-}
-
-function readCachedUserMemoryBindingState() {
-  try {
-    const raw = localStorage.getItem(USER_MEMORY_BINDING_STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const payload = JSON.parse(raw);
-    if (!payload || payload.device_id !== ensureDeviceId()) {
-      return null;
-    }
-    return payload.binding && typeof payload.binding === "object" ? payload.binding : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function applyCachedUserMemoryBindingState() {
-  const cached = readCachedUserMemoryBindingState();
-  if (!cached) {
-    return false;
-  }
-  applyUserMemoryBindingState(cached, { publish: false });
-  return true;
-}
-
-function applyUserMemoryBindingState(binding, options = {}) {
-  const shouldPublish = options.publish !== false;
-  const payload = binding && typeof binding === "object" ? binding : {};
-  userMemoryBindingState = {
-    shared_user_id: String(payload.shared_user_id || "").trim(),
-    share_chat_history: Boolean(payload.share_chat_history),
-    is_host: Boolean(payload.is_host),
-    host_device_id: String(payload.host_device_id || ""),
-  };
-  if (analysisUserMemoryBindingButton) {
-    analysisUserMemoryBindingButton.classList.toggle("is-host", userMemoryBindingState.is_host);
-  }
-  if (analysisUserMemoryBindingSummary) {
-    analysisUserMemoryBindingSummary.textContent = bindingSummaryText(userMemoryBindingState);
-  }
-  if (analysisUserMemoryBindingCrown) {
-    analysisUserMemoryBindingCrown.hidden = !userMemoryBindingState.is_host;
-  }
-  if (shouldPublish) {
-    publishUserMemoryBindingState();
-  }
-}
-
-function syncUserMemoryBindingForm() {
-  const binding = userMemoryBindingState || {};
-  if (!analysisUserMemoryBindingInput) {
-    return;
-  }
-  analysisUserMemoryBindingInput.value = String(binding.shared_user_id || "");
-  analysisShareChatHistoryCheckbox.checked = Boolean(binding.share_chat_history);
-  analysisHostDeviceCheckbox.checked = Boolean(binding.is_host);
-}
-
-function setAnalysisBindingInfoVisible(visible) {
-  if (!analysisUserMemoryBindingInfo) {
-    return;
-  }
-  analysisUserMemoryBindingInfo.hidden = !visible;
-  if (analysisUserMemoryBindingInfoButton) {
-    analysisUserMemoryBindingInfoButton.setAttribute("aria-expanded", visible ? "true" : "false");
   }
 }
 
@@ -307,6 +240,9 @@ function setAnalysisBusy(busy) {
   messageInput.disabled = busy;
   analysisAttachImageButton.disabled = busy;
   analysisWebSearchButton.disabled = busy;
+  if (analysisDrawButton) {
+    analysisDrawButton.disabled = busy;
+  }
   syncPreviousAnalysisSessionButton();
 }
 
@@ -315,6 +251,29 @@ function setAnalysisWebSearchEnabled(enabled) {
   analysisWebSearchButton.classList.toggle("is-active", webSearchInput.checked);
   analysisWebSearchButton.setAttribute("aria-pressed", String(webSearchInput.checked));
   analysisWebSearchButton.title = webSearchInput.checked ? "本轮会联网搜索" : "启用联网搜索";
+  if (webSearchInput.checked) {
+    setAnalysisDrawEnabled(false);
+  }
+}
+
+function setAnalysisDrawEnabled(enabled) {
+  analysisDrawEnabled = Boolean(enabled);
+  if (!analysisDrawButton) {
+    return;
+  }
+  analysisDrawButton.classList.toggle("is-active", analysisDrawEnabled);
+  analysisDrawButton.setAttribute("aria-pressed", String(analysisDrawEnabled));
+  analysisDrawButton.title = analysisDrawEnabled ? "本轮发送会画图" : "启用画图";
+  if (analysisDrawEnabled && webSearchInput.checked) {
+    webSearchInput.checked = false;
+    analysisWebSearchButton.classList.remove("is-active");
+    analysisWebSearchButton.setAttribute("aria-pressed", "false");
+    analysisWebSearchButton.title = "启用联网搜索";
+  }
+}
+
+function clearAnalysisDrawModeSelection() {
+  setAnalysisDrawEnabled(false);
 }
 
 function syncPreviousAnalysisSessionButton() {
@@ -657,49 +616,24 @@ function scrollAnalysisChatToBottom() {
 }
 
 function readChatModeProxyDefault() {
+  return readChatSamplingSettings().web_search_proxy;
+}
+
+function readChatSamplingSettings() {
   try {
     const raw = localStorage.getItem(CHAT_SAMPLING_STORAGE_KEY);
     if (!raw) {
-      return "";
+      return { temperature: 0.6, top_p: 0.95, web_search_proxy: "" };
     }
     const payload = JSON.parse(raw);
-    return typeof payload.web_search_proxy === "string" ? payload.web_search_proxy.trim() : "";
+    return {
+      temperature: clampNumber(payload.temperature, 0, 2, 0.6),
+      top_p: clampNumber(payload.top_p, 0, 1, 0.95),
+      web_search_proxy: typeof payload.web_search_proxy === "string" ? payload.web_search_proxy.trim() : "",
+    };
   } catch {
-    return "";
+    return { temperature: 0.6, top_p: 0.95, web_search_proxy: "" };
   }
-}
-
-function loadAnalysisSamplingSettings() {
-  const chatModeProxy = readChatModeProxyDefault();
-  try {
-    const raw = localStorage.getItem(ANALYSIS_SAMPLING_STORAGE_KEY);
-    if (!raw) {
-      proxyInput.value = chatModeProxy;
-      return;
-    }
-    const payload = JSON.parse(raw);
-    if (payload && payload.temperature !== undefined) {
-      temperatureInput.value = String(clampNumber(payload.temperature, 0, 2, 0.6));
-    }
-    if (payload && payload.top_p !== undefined) {
-      topPInput.value = String(clampNumber(payload.top_p, 0, 1, 0.95));
-    }
-    proxyInput.value = typeof payload.web_search_proxy === "string" && payload.web_search_proxy.trim()
-      ? payload.web_search_proxy.trim()
-      : chatModeProxy;
-  } catch {
-    localStorage.removeItem(ANALYSIS_SAMPLING_STORAGE_KEY);
-    proxyInput.value = chatModeProxy;
-  }
-}
-
-function saveAnalysisSamplingSettings() {
-  const payload = {
-    temperature: clampNumber(temperatureInput.value, 0, 2, 0.6),
-    top_p: clampNumber(topPInput.value, 0, 1, 0.95),
-    web_search_proxy: proxyInput.value.trim(),
-  };
-  localStorage.setItem(ANALYSIS_SAMPLING_STORAGE_KEY, JSON.stringify(payload));
 }
 
 function attachmentMime(file) {
@@ -810,6 +744,65 @@ function appendMessage(role, text, attachments = [], options = {}) {
     }
   }
   return body;
+}
+
+function renderAnalysisGeneratedImageBatch(images, optimizedPrompt = "") {
+  const wrapper = document.createElement("div");
+  wrapper.className = "analysis-generated-image-batch";
+  const grid = document.createElement("div");
+  grid.className = "analysis-generated-image-grid";
+  const items = Array.isArray(images) ? images : [];
+  for (const [index, item] of items.entries()) {
+    const url = item && item.public_url ? String(item.public_url) : "";
+    if (!url) {
+      continue;
+    }
+    const cell = document.createElement("figure");
+    cell.className = "analysis-generated-image-item";
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = item.short_caption || `生成图片 ${index + 1}`;
+    const download = document.createElement("a");
+    download.className = "analysis-generated-image-download";
+    download.href = url;
+    download.download = `wangcai-analysis-draw-${index + 1}`;
+    download.textContent = "下载";
+    cell.append(image, download);
+    grid.appendChild(cell);
+  }
+  wrapper.appendChild(grid);
+  if (optimizedPrompt) {
+    const details = document.createElement("details");
+    details.className = "analysis-generated-image-prompt";
+    const summary = document.createElement("summary");
+    summary.textContent = "优化后的 prompt";
+    const pre = document.createElement("pre");
+    pre.textContent = optimizedPrompt;
+    details.append(summary, pre);
+    wrapper.appendChild(details);
+  }
+  return wrapper;
+}
+
+function analysisMessageAttachments(message) {
+  return Array.isArray(message && message.attachments)
+    ? message.attachments.filter((item) => item && typeof item === "object")
+    : [];
+}
+
+function analysisMessageDrawMetadata(message) {
+  return message && message.draw && typeof message.draw === "object" ? message.draw : {};
+}
+
+function restoreHistoricalAnalysisAssistantMedia(body, message) {
+  const draw = analysisMessageDrawMetadata(message);
+  const images = Array.isArray(draw.images) ? draw.images : [];
+  if (!images.length) {
+    return;
+  }
+  body.replaceChildren();
+  body.appendChild(renderAnalysisGeneratedImageBatch(images, draw.optimized_prompt || ""));
+  body.dataset.rawMarkdown = message.content || `已生成 ${images.length} 张图片。`;
 }
 
 function resetPreviousAnalysisSessionLoadState() {
@@ -1006,11 +999,15 @@ function prependAnalysisHistoryMessages(messages) {
   const previousTop = messagesEl.scrollTop;
   const loadedMessageItems = [];
   for (const message of [...history].reverse()) {
-    const body = appendMessage(message.role === "assistant" ? "assistant" : "user", message.content || "", [], {
+    const role = message.role === "assistant" ? "assistant" : "user";
+    const body = appendMessage(role, message.content || "", analysisMessageAttachments(message), {
       prepend: true,
       scroll: false,
       createdAt: message.created_at,
     });
+    if (role === "assistant") {
+      restoreHistoricalAnalysisAssistantMedia(body, message);
+    }
     loadedMessageItems.unshift(body.parentElement);
   }
   ensureAnalysisHistoryLoadIndicator();
@@ -1045,7 +1042,7 @@ async function loadPreviousAnalysisSessionContext() {
     }
     prependAnalysisHistoryMessages(payload.messages || []);
     setStatus(hasMorePreviousSessions ? "已加载上一段对话" : "已加载到最早对话");
-    await refreshTraces();
+    scheduleAnalysisPanelsRefresh({ delay: 0 });
   } catch (error) {
     setAnalysisHistoryLoadState("error", `加载失败：${error.message || error}`);
     setStatus("历史加载失败");
@@ -1056,78 +1053,6 @@ async function loadPreviousAnalysisSessionContext() {
     window.clearTimeout(previousSessionHideTimer);
     previousSessionHideTimer = 0;
     syncPreviousAnalysisSessionButton();
-  }
-}
-
-async function loadUserMemoryBinding() {
-  applyCachedUserMemoryBindingState();
-  try {
-    const response = await fetch("/api/user-memory-binding", {
-      headers: deviceIdentityHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-    const payload = await response.json();
-    applyUserMemoryBindingState(payload);
-  } catch (error) {
-    if (analysisUserMemoryBindingSummary) {
-      analysisUserMemoryBindingSummary.textContent = `绑定读取失败：${error.message}`;
-    }
-  }
-}
-
-function openUserMemoryBindingDialog() {
-  if (!analysisUserMemoryBindingDialog) {
-    return;
-  }
-  analysisUserMemoryBindingStatus.textContent = "";
-  syncUserMemoryBindingForm();
-  setAnalysisBindingInfoVisible(false);
-  if (typeof analysisUserMemoryBindingDialog.showModal === "function") {
-    analysisUserMemoryBindingDialog.showModal();
-  } else {
-    analysisUserMemoryBindingDialog.setAttribute("open", "");
-  }
-  analysisUserMemoryBindingInput.focus();
-  analysisUserMemoryBindingInput.select();
-}
-
-function closeUserMemoryBindingDialog() {
-  if (!analysisUserMemoryBindingDialog) {
-    return;
-  }
-  analysisUserMemoryBindingDialog.close();
-}
-
-async function saveUserMemoryBinding(event) {
-  event.preventDefault();
-  const sharedUserId = String(analysisUserMemoryBindingInput.value || "").trim();
-  const payload = {
-    shared_user_id: sharedUserId,
-    share_chat_history: sharedUserId ? Boolean(analysisShareChatHistoryCheckbox.checked) : false,
-    is_host: sharedUserId ? Boolean(analysisHostDeviceCheckbox.checked) : false,
-  };
-  analysisUserMemoryBindingStatus.textContent = "保存中";
-  try {
-    const response = await fetch("/api/user-memory-binding", {
-      method: "PUT",
-      headers: jsonHeaders(),
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-    const result = await response.json();
-    applyUserMemoryBindingState(result);
-    analysisUserMemoryBindingStatus.textContent = result.shared_user_id ? "已保存共享绑定" : "已关闭共享绑定";
-    setStatus(result.shared_user_id ? "共享记忆配置已更新" : "已关闭共享记忆");
-    if (result.left_previous_shared_user) {
-      window.alert("已退出当前记忆共享。");
-    }
-    window.setTimeout(() => closeUserMemoryBindingDialog(), 180);
-  } catch (error) {
-    analysisUserMemoryBindingStatus.textContent = `保存失败：${error.message}`;
   }
 }
 
@@ -1142,14 +1067,11 @@ async function createSession() {
   }
   const data = await response.json();
   sessionId = data.session_id;
-  if (data.memory_binding) {
-    applyUserMemoryBindingState(data.memory_binding);
-  }
   resetPreviousAnalysisSessionLoadState();
   ensureAnalysisHistoryLoadIndicator();
   syncPreviousAnalysisSessionButton();
   setStatus(`session ${sessionId.slice(0, 8)}`);
-  refreshTraces().catch((error) => setStatus(`trace 读取失败: ${error.message}`));
+  scheduleAnalysisPanelsRefresh({ delay: 0 });
   startOpeningPrompt(data).catch((error) => {
     if (!userStoppedGeneration) {
       setStatus(`开场失败: ${error.message || "生成中断"}`);
@@ -1174,6 +1096,7 @@ async function startOpeningPrompt(payload) {
 }
 
 async function resetSession() {
+  stopAnalysisPanelsRefreshWatch();
   if (!sessionId) {
     return createSession();
   }
@@ -1186,9 +1109,6 @@ async function resetSession() {
   }
   const data = await response.json();
   sessionId = data.session_id;
-  if (data.memory_binding) {
-    applyUserMemoryBindingState(data.memory_binding);
-  }
   resetPreviousAnalysisSessionLoadState();
   messagesEl.replaceChildren();
   ensureAnalysisHistoryLoadIndicator();
@@ -1216,6 +1136,44 @@ function renderPayload(payload) {
   return JSON.stringify(payload, null, 2);
 }
 
+function renderTraceScalar(value) {
+  const normalized = value === null || value === undefined ? String(value) : String(value);
+  const node = document.createElement(normalized.includes("\n") ? "pre" : "span");
+  node.className = "trace-light-scalar";
+  node.textContent = normalized;
+  return node;
+}
+
+function renderTraceLightValue(value) {
+  if (Array.isArray(value)) {
+    return renderTraceScalar(JSON.stringify(value, null, 2));
+  }
+  if (value && typeof value === "object") {
+    return renderTraceScalar(JSON.stringify(value, null, 2));
+  }
+  return renderTraceScalar(value);
+}
+
+function renderTraceLightObject(payload) {
+  const container = document.createElement("div");
+  container.className = "trace-light-payload";
+  const entries = Object.entries(payload || {});
+  if (!entries.length) {
+    container.appendChild(renderTraceScalar("{}"));
+    return container;
+  }
+  entries.forEach(([key, value]) => {
+    const row = document.createElement("div");
+    row.className = "trace-light-row";
+    const label = document.createElement("strong");
+    label.className = "trace-light-key";
+    label.textContent = key;
+    row.append(label, renderTraceLightValue(value));
+    container.appendChild(row);
+  });
+  return container;
+}
+
 function formatDuration(ms) {
   if (ms === null || ms === undefined) {
     return "";
@@ -1224,6 +1182,299 @@ function formatDuration(ms) {
     return `${(ms / 1000).toFixed(2)}s`;
   }
   return `${Number(ms).toFixed(1)}ms`;
+}
+
+function compactTraceText(value, maxLength = 36) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "";
+  }
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function readableTraceModel(model) {
+  const raw = String(model || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("deepseek")) {
+    return "DeepSeek";
+  }
+  if (lower.includes("qwen3.6") || lower.includes("qwen3-") || lower.includes("qwen")) {
+    return "Qwen3.6";
+  }
+  if (lower.includes("gpt-4.1")) {
+    return "GPT-4.1";
+  }
+  if (lower.includes("gpt-4o")) {
+    return "GPT-4o";
+  }
+  if (lower.includes("claude") || lower.includes("opus") || lower.includes("sonnet")) {
+    return "Claude";
+  }
+  return compactTraceText(raw, 22);
+}
+
+function traceAgentName(name, payload) {
+  const model = readableTraceModel(payload && payload.model);
+  return model ? `${name}（${model}）` : name;
+}
+
+function traceMessageCount(payload) {
+  return Array.isArray(payload && payload.messages) ? payload.messages.length : 0;
+}
+
+function traceResultCount(payload, key) {
+  const value = payload && payload[key];
+  return Array.isArray(value) ? value.length : Number(payload && payload[key]) || 0;
+}
+
+function validationCandidateLabel(payload) {
+  const decision = payload && payload.decision ? payload.decision : {};
+  const corrected = decision && decision.corrected_item ? decision.corrected_item : {};
+  if (corrected.label) {
+    return String(corrected.label);
+  }
+  const messages = Array.isArray(payload && payload.messages) ? payload.messages : [];
+  const userMessage = messages.find((message) => message && message.role === "user");
+  const content = String(userMessage && userMessage.content ? userMessage.content : "");
+  const match = content.match(/\blabel:\s*([a-zA-Z_]+)/);
+  return match ? match[1] : "";
+}
+
+function validationCandidateMemoryText(payload) {
+  const messages = Array.isArray(payload && payload.messages) ? payload.messages : [];
+  const userMessage = messages.find((message) => message && message.role === "user");
+  const content = String(userMessage && userMessage.content ? userMessage.content : "");
+  const match = content.match(/\nmemory:\s*([\s\S]*?)\n\n\[最近对话片段\]/);
+  return match ? match[1].trim() : "";
+}
+
+function correctedMemoryPreviewFromPayload(payload, maxLength = 42) {
+  if (payload && payload.corrected_preview) {
+    return compactTraceText(payload.corrected_preview, maxLength);
+  }
+  const decision = payload && payload.decision ? payload.decision : {};
+  const correctedItem = (payload && payload.corrected_item) || decision.corrected_item || {};
+  if (correctedItem && typeof correctedItem.memory === "string") {
+    return compactTraceText(correctedItem.memory, maxLength);
+  }
+  return "";
+}
+
+function normalizedMemoryTraceKey(text) {
+  return String(text || "").replace(/\s+/g, "").trim().toLowerCase().slice(0, 180);
+}
+
+function readableMemoryLabel(label) {
+  const labels = {
+    event: "event",
+    diary: "diary",
+    risk: "risk",
+    preference: "preference",
+    identity: "identity",
+    rule: "rule",
+    persona: "persona",
+    fact: "fact",
+    other: "other",
+  };
+  return labels[label] || label || "记忆";
+}
+
+function readableSkipReason(reason) {
+  const reasons = {
+    recent_duplicate_memory: "近期重复",
+    known_memory_duplicate: "历史召回已覆盖",
+    similar_memory_exists: "相似记忆已存在",
+    event_live_update_already_handled: "event 已实时维护",
+    underspecified_memory: "信息过短",
+    assistant_identity_not_user_identity: "助手身份误写",
+    not_user_centered: "不是用户事实",
+  };
+  const raw = String(reason || "").trim();
+  if (raw.startsWith("semantic_validation_failed")) {
+    return "核验否决";
+  }
+  return reasons[raw] || raw || "跳过";
+}
+
+function memoryDecisionItems(decision) {
+  if (!decision || typeof decision !== "object") {
+    return [];
+  }
+  if (Array.isArray(decision.items)) {
+    return decision.items;
+  }
+  return decision.memory ? [decision] : [];
+}
+
+function traceTitleParts(item) {
+  const payload = item && item.payload && typeof item.payload === "object" ? item.payload : {};
+  const step = String(item && item.step_name ? item.step_name : "");
+  const eventType = String(item && item.event_type ? item.event_type : "");
+  const duration = step === "draw_prompt_optimize" ? "" : formatDuration(item && item.duration_ms);
+  let title = "";
+
+  if (step === "analysis_chat_start" || step === "cached_opening_start") {
+    const messageChars = String(payload.message || "").length;
+    const attachments = Array.isArray(payload.attachments) ? payload.attachments.length : 0;
+    const mode = step === "cached_opening_start" ? "开场预缓存" : "收到用户输入";
+    const extras = [
+      messageChars ? `${messageChars} 字` : "",
+      attachments ? `${attachments} 张图` : "",
+      payload.web_search ? "联网" : "",
+    ].filter(Boolean).join("，");
+    title = extras ? `${mode}：${extras}` : mode;
+  } else if (step === "main_chat_prompt") {
+    const count = traceMessageCount(payload);
+    title = `${traceAgentName("聊天 Prompt", payload)}：完整输入${count ? `，${count} 条消息` : ""}`;
+  } else if (step === "main_chat_stream") {
+    const chars = Number(payload.answer_chars || payload.chars || 0);
+    const status = payload.status === "cancelled" ? "已中断" : "回复完成";
+    title = `${traceAgentName("聊天 Agent", payload)}：${status}${chars ? `，${chars} 字` : ""}`;
+  } else if (step === "draw_memory_gate") {
+    const decision = payload.decision || {};
+    title = `${traceAgentName("画图记忆路由", payload)}：${decision.needs_memory ? "读取参考记忆" : "无需参考记忆"}`;
+  } else if (step === "draw_memory_query_embedding") {
+    const candidates = traceResultCount(payload, "candidate_memories");
+    const query = compactTraceText(payload.input_preview || (payload.result && payload.result.query), 28);
+    title = `画图相似度检索（${readableTraceModel(payload.model) || "embedding"}）：找到 ${candidates} 条候选记忆${query ? `，query「${query}」` : ""}`;
+  } else if (step === "draw_memory_text_fallback") {
+    const results = traceResultCount(payload, "results");
+    title = `画图记忆检索降级：文本匹配 ${results} 条结果`;
+  } else if (step === "draw_prompt_translate") {
+    const chars = Number(payload.translated_chars || 0);
+    title = `${traceAgentName("画图英文直译", payload)}：完整输入${chars ? `，输出 ${chars} 字` : ""}`;
+  } else if (step === "draw_prompt_classify") {
+    const decision = payload.decision || {};
+    const modeNames = {
+      natural: "自然语言优化",
+      professional: "专业 prompt 直译",
+      revision: "基于上一张修改",
+    };
+    title = `${traceAgentName("画图分类", payload)}：${modeNames[decision.mode] || decision.mode || "未分类"}`;
+  } else if (step === "draw_prompt_agent_model") {
+    const decision = payload.decision || {};
+    const promptMode = payload.prompt_mode || {};
+    const modeNames = {
+      natural: "自然语言",
+      professional: "专业 prompt",
+      revision: "续改 prompt",
+    };
+    const promptChars = String(decision.optimized_prompt || "").length;
+    title = `${traceAgentName("画图优化 Agent", payload)}：${modeNames[promptMode.mode] || "生成 prompt"}${promptChars ? `，输出 ${promptChars} 字` : ""}`;
+  } else if (step === "draw_prompt_optimize") {
+    const summary = payload.decision_summary || {};
+    const imageCount = Number(summary.image_count || payload.decision && payload.decision.image_count || 0);
+    const selected = Number(payload.memory_debug && payload.memory_debug.selected_count || 0);
+    const memoryText = payload.memory_debug && payload.memory_debug.memory_gate === "run" ? `，参考 ${selected} 条记忆` : "";
+    title = `画图 Prompt 流程汇总：生成 ${imageCount || 4} 张${memoryText}`;
+  } else if (step === "draw_image_generation") {
+    const imageCount = Number(payload.image_count || (payload.batch && Array.isArray(payload.batch.images) ? payload.batch.images.length : 0));
+    title = eventType === "draw_error"
+      ? "图片生成：失败"
+      : `图片生成：完成${imageCount ? `，${imageCount} 张` : ""}`;
+  } else if (step === "memory_recall_gate") {
+    const decision = payload.decision || {};
+    const needsMemory = Boolean(decision.needs_memory);
+    const needsSelfProfile = Boolean(decision.needs_self_profile);
+    let routeSummary = "无需长期记忆";
+    if (needsMemory && needsSelfProfile) {
+      routeSummary = "读取长期记忆 + 系统资料";
+    } else if (needsMemory) {
+      routeSummary = "读取长期记忆";
+    } else if (needsSelfProfile) {
+      routeSummary = "读取系统资料";
+    }
+    title = `${traceAgentName("记忆路由", payload)}：${routeSummary}`;
+  } else if (step === "memory_query_embedding") {
+    const candidates = traceResultCount(payload, "candidate_memories");
+    const query = compactTraceText(payload.input_preview || (payload.result && payload.result.query), 28);
+    title = `相似度检索（${readableTraceModel(payload.model) || "embedding"}）：找到 ${candidates} 条候选记忆${query ? `，query「${query}」` : ""}`;
+  } else if (step === "memory_candidate_judge") {
+    const candidateCount = Number(payload.candidate_count || 0);
+    const selectedCount = Number(payload.selected_count || (payload.decision && Array.isArray(payload.decision.selected_ids) ? payload.decision.selected_ids.length : 0));
+    title = `${traceAgentName("记忆筛选", payload)}：${candidateCount} 条候选 → ${selectedCount} 条入选`;
+  } else if (step === "memory_text_fallback") {
+    const results = traceResultCount(payload, "results");
+    title = `记忆检索降级：文本匹配 ${results} 条结果`;
+  } else if (step === "memory_agent_queued") {
+    title = `记忆整理队列：创建后台任务 #${payload.job_id || "?"}`;
+  } else if (step === "memory_agent_prompt") {
+    const count = traceMessageCount(payload);
+    title = `${traceAgentName("记忆整理 Prompt", payload)}：完整输入${count ? `，${count} 条消息` : ""}`;
+  } else if (step === "memory_agent_model") {
+    const decision = payload.decision || {};
+    const items = memoryDecisionItems(decision);
+    if (!decision.important || !items.length) {
+      title = `${traceAgentName("记忆整理 Agent", { model: payload.model })}：判定无需写入`;
+    } else {
+      const labels = [...new Set(items.map((entry) => readableMemoryLabel(entry.label)))].join("、");
+      title = `${traceAgentName("记忆整理 Agent", { model: payload.model })}：提取 ${items.length} 条${labels ? ` ${labels}` : ""} 候选`;
+    }
+  } else if (step === "memory_candidate_validation") {
+    const decision = payload.decision || {};
+    const label = readableMemoryLabel(validationCandidateLabel(payload));
+    if (eventType === "model_call_error") {
+      title = `${traceAgentName("记忆核验", payload)}：调用失败`;
+    } else if (decision.valid) {
+      title = `${traceAgentName("记忆核验", payload)}：通过 ${label} 候选`;
+    } else if (decision.corrected_item) {
+      const correctedPreview = correctedMemoryPreviewFromPayload(payload);
+      title = `${traceAgentName("记忆核验", payload)}：否决 ${label} 候选，建议修正版${correctedPreview ? `「${correctedPreview}」` : ""}`;
+    } else {
+      title = `${traceAgentName("记忆核验", payload)}：否决 ${label} 候选`;
+    }
+  } else if (step === "memory_candidate_fast_validation") {
+    title = `记忆核验：本地快速通过 ${readableMemoryLabel(payload.label)} 候选`;
+  } else if (step === "memory_agent_item_corrected") {
+    title = `记忆修正：${readableMemoryLabel(payload.label)} 候选改为可写入版本`;
+  } else if (step === "memory_agent_correction_rejected") {
+    const reasonNames = {
+      same_as_original: "修正版与原文相同",
+      not_conservative: "修正版改动过大",
+      lacks_user_support: "修正版缺少用户原文支撑",
+      not_adopted: "修正版未采用",
+    };
+    const correctedPreview = correctedMemoryPreviewFromPayload(payload);
+    title = `记忆修正未采用：${reasonNames[payload.reason] || readableSkipReason(payload.reason)}${correctedPreview ? `，修正版「${correctedPreview}」` : ""}，候选已跳过`;
+  } else if (step === "memory_agent_item_skipped") {
+    const label = readableMemoryLabel(payload.label);
+    const matched = payload.matched_memory_id ? `，匹配 #${payload.matched_memory_id}` : "";
+    title = `记忆写入跳过：${readableSkipReason(payload.reason)}${label ? ` ${label}` : ""}${matched}`;
+  } else if (step === "memory_write_embedding") {
+    const dim = payload.dim ? `${payload.dim} 维` : "";
+    title = `记忆写入 embedding：${readableMemoryLabel(payload.label)}${dim ? `，${dim}` : ""}`;
+  } else if (step === "event_memory_updater_prompt") {
+    title = `事件维护 Prompt：检查 ${Number(payload.candidate_count || 0)} 个候选日程`;
+  } else if (step === "event_memory_updater_model") {
+    const decision = payload.decision || {};
+    const action = decision.action || "noop";
+    const actionText = action === "noop" ? "无需更新" : `${action} #${decision.supersedes_id || "?"}`;
+    title = `${traceAgentName("事件维护 Agent", payload)}：${actionText}`;
+  } else if (step === "search_planner") {
+    const queries = payload.result && Array.isArray(payload.result.queries) ? payload.result.queries.length : 0;
+    title = `${traceAgentName("搜索规划", payload)}：生成 ${queries || 1} 条查询`;
+  } else if (step === "search_candidates") {
+    title = `联网搜索：找到 ${Number(payload.count || 0)} 条候选结果`;
+  } else if (step.startsWith("read_page_")) {
+    const sourceTitle = compactTraceText(payload.source && payload.source.title, 34);
+    const indexText = payload.index && payload.max_pages ? `第 ${payload.index}/${payload.max_pages} 页` : "读取网页";
+    title = eventType === "web_page_error"
+      ? `网页读取失败：${indexText}${sourceTitle ? `「${sourceTitle}」` : ""}`
+      : `网页读取：${indexText}${sourceTitle ? `「${sourceTitle}」` : ""}`;
+  } else if (step === "search_context") {
+    const sources = traceResultCount(payload, "sources");
+    title = `搜索上下文：汇总 ${sources} 个来源`;
+  } else if (eventType === "guardrail") {
+    title = `安全/时间边界：${step || "已触发"}`;
+  } else {
+    const label = TRACE_EVENT_LABELS[eventType] || eventType || "trace";
+    title = `${step || label}：${label}`;
+  }
+
+  return [title, duration].filter(Boolean);
 }
 
 function preserveScrollDuring(callback) {
@@ -1237,37 +1488,6 @@ function preserveScrollDuring(callback) {
   scroller.scrollTop = scrollTop;
 }
 
-function restorePayloadScroll(pre, positions, key) {
-  const saved = positions.get(key);
-  if (saved === undefined) {
-    return;
-  }
-  const restore = () => {
-    pre.scrollTop = saved;
-  };
-  restore();
-  window.requestAnimationFrame(restore);
-}
-
-function rememberPayloadScroll(pre, positions, key) {
-  pre.addEventListener("scroll", () => {
-    positions.set(key, pre.scrollTop);
-  });
-}
-
-function collectPayloadScrollPositions(container, datasetKey, positions) {
-  if (!container) {
-    return;
-  }
-  container.querySelectorAll("details").forEach((card) => {
-    const key = card.dataset[datasetKey];
-    const payload = card.querySelector("pre, .background-markdown");
-    if (key && payload) {
-      positions.set(key, payload.scrollTop);
-    }
-  });
-}
-
 function traceItemKey(item) {
   if (item.id !== undefined && item.id !== null) {
     return `id:${item.id}`;
@@ -1278,10 +1498,6 @@ function traceItemKey(item) {
     item.event_type || "",
     item.created_at || "",
   ].join("|");
-}
-
-function isTraceOpenByDefault(item) {
-  return item.event_type === "request" || item.event_type === "model_prompt";
 }
 
 function traceSortValue(item) {
@@ -1305,12 +1521,85 @@ function sortTraceItemsNewestFirst(items) {
   });
 }
 
+function traceDisplayTitle(item) {
+  return traceTitleParts(item).join(" · ");
+}
+
+function traceIsUserInputTitle(item) {
+  return traceDisplayTitle(item).startsWith("收到用户输入");
+}
+
+function correctionValidationKey(item, loose = false) {
+  const payload = item && item.payload ? item.payload : {};
+  const decision = payload.decision || {};
+  if (item.step_name !== "memory_candidate_validation" || !decision.corrected_item) {
+    return "";
+  }
+  const traceId = item.trace_id || item.session_id || "default";
+  const label = readableMemoryLabel(validationCandidateLabel(payload));
+  const memory = normalizedMemoryTraceKey(validationCandidateMemoryText(payload));
+  if (!loose && !memory) {
+    return "";
+  }
+  return loose || !memory ? `${traceId}|${label}` : `${traceId}|${label}|${memory}`;
+}
+
+function semanticValidationSkipKey(item, loose = false) {
+  const payload = item && item.payload ? item.payload : {};
+  const reason = String(payload.reason || "");
+  if (item.step_name !== "memory_agent_item_skipped" || !reason.startsWith("semantic_validation_failed:")) {
+    return "";
+  }
+  const traceId = item.trace_id || item.session_id || "default";
+  const label = readableMemoryLabel(payload.label);
+  const memory = normalizedMemoryTraceKey(payload.memory_preview || "");
+  if (!loose && !memory) {
+    return "";
+  }
+  return loose || !memory ? `${traceId}|${label}` : `${traceId}|${label}|${memory}`;
+}
+
+function filterDuplicateTraceItems(items) {
+  const correctionValidationKeys = new Set();
+  const looseCorrectionValidationKeys = new Set();
+  (items || []).forEach((item) => {
+    const key = correctionValidationKey(item);
+    if (key) {
+      correctionValidationKeys.add(key);
+      looseCorrectionValidationKeys.add(correctionValidationKey(item, true));
+    }
+  });
+  const seenUserInputByTrace = new Set();
+  return (items || []).filter((item) => {
+    const skipKey = semanticValidationSkipKey(item);
+    const looseSkipKey = semanticValidationSkipKey(item, true);
+    if (
+      (skipKey && correctionValidationKeys.has(skipKey))
+      || (!skipKey && looseSkipKey && looseCorrectionValidationKeys.has(looseSkipKey))
+    ) {
+      return false;
+    }
+    if (!traceIsUserInputTitle(item)) {
+      return true;
+    }
+    const key = item.trace_id || item.session_id || "default";
+    if (seenUserInputByTrace.has(key)) {
+      return false;
+    }
+    seenUserInputByTrace.add(key);
+    return true;
+  });
+}
+
 function renderTraceItem(item) {
   const key = traceItemKey(item);
   const card = document.createElement("details");
   card.className = `trace-card trace-${item.event_type}`;
+  if (traceIsUserInputTitle(item)) {
+    card.classList.add("trace-user-input-card");
+  }
   card.dataset.traceKey = key;
-  card.open = openTraceKeys.has(key) || (!closedTraceKeys.has(key) && isTraceOpenByDefault(item));
+  card.open = openTraceKeys.has(key);
   card.addEventListener("toggle", () => {
     if (card.open) {
       openTraceKeys.add(key);
@@ -1321,21 +1610,17 @@ function renderTraceItem(item) {
     }
   });
   const summary = document.createElement("summary");
-  const duration = formatDuration(item.duration_ms);
-  summary.textContent = [
+  summary.textContent = traceDisplayTitle(item);
+  summary.title = [
     item.step_name,
     TRACE_EVENT_LABELS[item.event_type] || item.event_type,
     item.visitor_ip,
-    duration,
   ].filter(Boolean).join(" · ");
   const meta = document.createElement("div");
   meta.className = "trace-meta";
   meta.textContent = `${item.created_at} · ${item.trace_id}`;
-  const pre = document.createElement("pre");
-  pre.textContent = renderPayload(item.payload);
-  restorePayloadScroll(pre, tracePayloadScrollPositions, key);
-  rememberPayloadScroll(pre, tracePayloadScrollPositions, key);
-  card.append(summary, meta, pre);
+  const payloadView = renderTraceLightObject(item.payload || {});
+  card.append(summary, meta, payloadView);
   return card;
 }
 
@@ -1350,14 +1635,118 @@ async function refreshTraces() {
     return;
   }
   if (!response.ok) {
-    setStatus("trace 读取失败");
+    if (tracePanel && !tracePanel.children.length) {
+      tracePanel.textContent = "trace 暂时读取失败";
+    }
     return;
   }
   const data = await response.json();
-  collectPayloadScrollPositions(tracePanel, "traceKey", tracePayloadScrollPositions);
   preserveScrollDuring(() => {
-    tracePanel.replaceChildren(...sortTraceItemsNewestFirst(data.items).map(renderTraceItem));
+    tracePanel.replaceChildren(...sortTraceItemsNewestFirst(filterDuplicateTraceItems(data.items)).map(renderTraceItem));
   });
+}
+
+function notePanelRefreshError(error) {
+  const message = error && error.message ? error.message : String(error || "读取失败");
+  if (tracePanel && !tracePanel.children.length) {
+    tracePanel.textContent = `trace 暂时读取失败：${message}`;
+  }
+  console.warn("analysis panel refresh failed", error);
+}
+
+function selectionTouchesRightPanel() {
+  const selection = window.getSelection ? window.getSelection() : null;
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return false;
+  }
+  const rightPanel = tracePanel ? tracePanel.closest(".analysis-trace") : null;
+  if (!rightPanel) {
+    return false;
+  }
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const range = selection.getRangeAt(index);
+    if (rightPanel.contains(range.commonAncestorContainer)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function flushAnalysisPanelsRefresh(options = {}) {
+  const force = Boolean(options.force);
+  if (panelRefreshTimer) {
+    window.clearTimeout(panelRefreshTimer);
+    panelRefreshTimer = 0;
+  }
+  if (!force && selectionTouchesRightPanel()) {
+    return;
+  }
+  if (panelRefreshRunning) {
+    panelRefreshPending = true;
+    backgroundRefreshPending = backgroundRefreshPending || Boolean(options.background);
+    return;
+  }
+  if (!panelRefreshPending && !force) {
+    return;
+  }
+  const shouldRefreshBackground = backgroundRefreshPending || Boolean(options.background);
+  panelRefreshPending = false;
+  backgroundRefreshPending = false;
+  panelRefreshRunning = true;
+  try {
+    await refreshTraces();
+    if (shouldRefreshBackground) {
+      await refreshBackground();
+    }
+  } finally {
+    panelRefreshRunning = false;
+    if (panelRefreshPending && !selectionTouchesRightPanel()) {
+      scheduleAnalysisPanelsRefresh({ background: backgroundRefreshPending, delay: 120 });
+    }
+  }
+}
+
+function scheduleAnalysisPanelsRefresh(options = {}) {
+  panelRefreshPending = true;
+  backgroundRefreshPending = backgroundRefreshPending || Boolean(options.background);
+  const delay = Number.isFinite(Number(options.delay)) ? Number(options.delay) : 350;
+  const force = Boolean(options.force);
+  if (!force && selectionTouchesRightPanel()) {
+    return;
+  }
+  if (panelRefreshTimer) {
+    window.clearTimeout(panelRefreshTimer);
+  }
+  panelRefreshTimer = window.setTimeout(() => {
+    flushAnalysisPanelsRefresh({ force, background: Boolean(options.background) })
+      .catch(notePanelRefreshError);
+  }, delay);
+}
+
+function stopAnalysisPanelsRefreshWatch() {
+  if (panelRefreshWatchTimer) {
+    window.clearTimeout(panelRefreshWatchTimer);
+    panelRefreshWatchTimer = 0;
+  }
+  panelRefreshWatchUntil = 0;
+}
+
+function startAnalysisPanelsRefreshWatch(options = {}) {
+  const durationMs = Number.isFinite(Number(options.durationMs)) ? Number(options.durationMs) : 180000;
+  const intervalMs = Number.isFinite(Number(options.intervalMs)) ? Number(options.intervalMs) : 3000;
+  panelRefreshWatchUntil = Math.max(panelRefreshWatchUntil, Date.now() + durationMs);
+  if (panelRefreshWatchTimer) {
+    return;
+  }
+  const tick = () => {
+    if (Date.now() >= panelRefreshWatchUntil) {
+      stopAnalysisPanelsRefreshWatch();
+      return;
+    }
+    scheduleAnalysisPanelsRefresh({ background: true, delay: 0 });
+    panelRefreshWatchTimer = window.setTimeout(tick, intervalMs);
+  };
+  panelRefreshWatchTimer = window.setTimeout(tick, intervalMs);
 }
 
 function backgroundItemKey(kind, item) {
@@ -1385,8 +1774,6 @@ function renderBackgroundItem(key, title, meta, content) {
   metaEl.textContent = meta;
   const pre = document.createElement("pre");
   pre.textContent = content || "";
-  restorePayloadScroll(pre, backgroundPayloadScrollPositions, key);
-  rememberPayloadScroll(pre, backgroundPayloadScrollPositions, key);
   card.append(summary, metaEl, pre);
   return card;
 }
@@ -1732,8 +2119,6 @@ function renderArtifactItem(artifact) {
   const contentEl = document.createElement("div");
   contentEl.className = "background-artifact-content";
   setRenderedMarkdown(contentEl, artifact.content || "");
-  restorePayloadScroll(body, backgroundPayloadScrollPositions, key);
-  rememberPayloadScroll(body, backgroundPayloadScrollPositions, key);
   body.appendChild(contentEl);
 
   card.append(summary, metaEl, body);
@@ -1750,7 +2135,9 @@ async function refreshBackground() {
     return;
   }
   if (!response.ok) {
-    backgroundPanel.textContent = "后台任务读取失败";
+    if (!backgroundPanel.children.length) {
+      backgroundPanel.textContent = "后台任务暂时读取失败";
+    }
     return;
   }
   const data = await response.json();
@@ -1759,7 +2146,6 @@ async function refreshBackground() {
     .slice()
     .sort((left, right) => backgroundSortTime(right) - backgroundSortTime(left));
   compactWorkerActivities(activities).forEach((item) => items.push(renderWorkerActivity(item)));
-  collectPayloadScrollPositions(backgroundPanel, "backgroundKey", backgroundPayloadScrollPositions);
   preserveScrollDuring(() => {
     backgroundPanel.replaceChildren(...items);
   });
@@ -1796,6 +2182,7 @@ async function sendMessage(text, options = {}) {
     hiddenUser = false,
     showUser = true,
     maxTokens = 8192,
+    drawMode = false,
   } = options;
   const attachmentsForMessage = hiddenUser ? [] : [...pendingAttachments];
   if (!hiddenUser) {
@@ -1810,7 +2197,8 @@ async function sendMessage(text, options = {}) {
   userStoppedGeneration = false;
   activeController = new AbortController();
   setAnalysisBusy(true);
-  setStatus(hasLargeAttachment(attachmentsForMessage) ? "图片过大，狠狠压缩中..." : "生成中");
+  setStatus(hasLargeAttachment(attachmentsForMessage) ? "图片过大，狠狠压缩中..." : (drawMode ? "画图 prompt 优化中" : "生成中"));
+  const sampling = readChatSamplingSettings();
   try {
     const response = await fetch("/api/chat/stream", {
       method: "POST",
@@ -1819,13 +2207,14 @@ async function sendMessage(text, options = {}) {
       body: JSON.stringify({
         session_id: sessionId,
         message: text,
+        mode: drawMode ? "draw" : "chat",
         attachments: attachmentsForMessage,
         hidden_user: hiddenUser,
         cached_opening: Boolean(options.cachedOpening),
-        web_search: webSearchInput.checked,
-        web_search_proxy: proxyInput.value.trim(),
-        temperature: clampNumber(temperatureInput.value, 0, 2, 0.6),
-        top_p: clampNumber(topPInput.value, 0, 1, 0.95),
+        web_search: drawMode ? false : webSearchInput.checked,
+        web_search_proxy: sampling.web_search_proxy,
+        temperature: sampling.temperature,
+        top_p: sampling.top_p,
         max_tokens: maxTokens,
         analysis_mode: true,
       }),
@@ -1860,6 +2249,26 @@ async function sendMessage(text, options = {}) {
           assistantMarkdown += payload.content || "";
           setRenderedMarkdown(assistantBody, assistantMarkdown);
           messagesEl.scrollTop = messagesEl.scrollHeight;
+        } else if (parsed.event === "draw_status") {
+          setStatus(payload.message || "画图中");
+        } else if (parsed.event === "draw_prompt") {
+          setStatus("HiDream 生成中");
+          if (payload.optimized_prompt) {
+            assistantMarkdown = "画图 prompt 已优化，正在生成图片。";
+            setRenderedMarkdown(assistantBody, assistantMarkdown);
+          }
+        } else if (parsed.event === "draw_image_batch") {
+          const images = Array.isArray(payload.images) ? payload.images : [];
+          assistantBody.replaceChildren();
+          assistantBody.appendChild(renderAnalysisGeneratedImageBatch(images, payload.optimized_prompt || ""));
+          assistantBody.dataset.rawMarkdown = `已生成 ${images.length} 张图片。`;
+          assistantMarkdown = assistantBody.dataset.rawMarkdown;
+          setStatus(`图片已生成：${images.length} 张`);
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        } else if (parsed.event === "draw_error") {
+          assistantMarkdown = payload.message || "图片生成失败";
+          setRenderedMarkdown(assistantBody, assistantMarkdown);
+          setStatus("图片生成失败");
         } else if (parsed.event === "memory") {
           setStatus(payload.message || "回忆中");
         } else if (parsed.event === "search") {
@@ -1877,10 +2286,16 @@ async function sendMessage(text, options = {}) {
           setStatus("已停止");
           return;
         } else if (parsed.event === "done") {
+          if (payload.skipped_empty && !assistantMarkdown.trim()) {
+            removeEmptyAssistantBubble(assistantBody);
+          } else if (payload.content && !assistantMarkdown.trim()) {
+            assistantMarkdown = payload.content;
+            setRenderedMarkdown(assistantBody, assistantMarkdown);
+          }
           setStatus(`session ${sessionId.slice(0, 8)}`);
         }
       }
-      await refreshTraces();
+      scheduleAnalysisPanelsRefresh();
     }
   } catch (error) {
     if (error.name === "AbortError" && userStoppedGeneration) {
@@ -1896,7 +2311,8 @@ async function sendMessage(text, options = {}) {
     activeController = null;
     setAnalysisBusy(false);
     messageInput.focus();
-    await refreshTraces();
+    scheduleAnalysisPanelsRefresh({ background: true, delay: 100 });
+    startAnalysisPanelsRefreshWatch({ durationMs: 180000, intervalMs: 3000 });
   }
 }
 
@@ -1907,7 +2323,9 @@ chatForm.addEventListener("submit", async (event) => {
     return;
   }
   messageInput.value = "";
-  await sendMessage(text || "请分析这张图片。");
+  const drawMode = analysisDrawEnabled;
+  await sendMessage(text || "请分析这张图片。", { drawMode });
+  setAnalysisDrawEnabled(analysisDrawEnabled);
 });
 
 sendButton.addEventListener("click", async (event) => {
@@ -1936,70 +2354,44 @@ messageInput.addEventListener("compositionend", () => {
 });
 
 resetButton.addEventListener("click", async () => {
+  clearAnalysisDrawModeSelection();
   if (activeController) {
     await stopActiveGeneration();
   }
   await resetSession();
 });
 
-refreshTraceButton.addEventListener("click", refreshTraces);
+if (refreshTraceButton) {
+  refreshTraceButton.addEventListener("click", () => {
+    clearAnalysisDrawModeSelection();
+    scheduleAnalysisPanelsRefresh({ force: true, background: true, delay: 0 });
+  });
+}
 if (backgroundMoreButton) {
   backgroundMoreButton.addEventListener("click", () => {
     backgroundActivityLimit += 20;
-    refreshBackground().catch((error) => setStatus(`后台任务读取失败: ${error.message}`));
+    refreshBackground().catch(notePanelRefreshError);
   });
 }
-temperatureInput.addEventListener("change", saveAnalysisSamplingSettings);
-topPInput.addEventListener("change", saveAnalysisSamplingSettings);
-proxyInput.addEventListener("change", saveAnalysisSamplingSettings);
-temperatureInput.addEventListener("input", saveAnalysisSamplingSettings);
-topPInput.addEventListener("input", saveAnalysisSamplingSettings);
-proxyInput.addEventListener("input", saveAnalysisSamplingSettings);
 analysisAttachImageButton.addEventListener("click", () => analysisImageInput.click());
 analysisWebSearchButton.addEventListener("click", () => {
   setAnalysisWebSearchEnabled(!webSearchInput.checked);
   setStatus(webSearchInput.checked ? "联网搜索已开启" : "联网搜索已关闭");
   messageInput.focus();
 });
+if (analysisDrawButton) {
+  analysisDrawButton.addEventListener("click", () => {
+    setAnalysisDrawEnabled(!analysisDrawEnabled);
+    setStatus(analysisDrawEnabled ? "画图已开启" : "画图已关闭");
+    messageInput.focus();
+  });
+}
 analysisImageInput.addEventListener("change", () => handleImageFiles(analysisImageInput.files));
 loadPreviousButton.addEventListener("click", () => loadPreviousAnalysisSessionContext());
 messagesEl.addEventListener("wheel", handleDesktopPreviousAnalysisSessionWheel, { passive: false });
-analysisUserMemoryBindingButton.addEventListener("click", openUserMemoryBindingDialog);
-analysisUserMemoryBindingForm.addEventListener("submit", saveUserMemoryBinding);
-analysisUserMemoryBindingCancelButton.addEventListener("click", closeUserMemoryBindingDialog);
-analysisUserMemoryBindingInput.addEventListener("input", () => {
-  const hasValue = Boolean(String(analysisUserMemoryBindingInput.value || "").trim());
-  if (!hasValue) {
-    analysisShareChatHistoryCheckbox.checked = false;
-    analysisHostDeviceCheckbox.checked = false;
-  }
-});
-analysisUserMemoryBindingInfoButton.addEventListener("click", () => {
-  setAnalysisBindingInfoVisible(Boolean(analysisUserMemoryBindingInfo.hidden));
-});
-document.addEventListener("click", (event) => {
-  if (!analysisUserMemoryBindingInfo || analysisUserMemoryBindingInfo.hidden) {
-    return;
-  }
-  const target = event.target;
-  if (analysisUserMemoryBindingInfoButton.contains(target) || analysisUserMemoryBindingInfo.contains(target)) {
-    return;
-  }
-  setAnalysisBindingInfoVisible(false);
-});
-window.addEventListener("storage", (event) => {
-  if (event.key === USER_MEMORY_BINDING_STORAGE_KEY) {
-    if (!applyCachedUserMemoryBindingState()) {
-      loadUserMemoryBinding().catch(() => {});
-    }
-  }
-});
-window.addEventListener("focus", () => {
-  loadUserMemoryBinding().catch(() => {});
-});
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) {
-    loadUserMemoryBinding().catch(() => {});
+document.addEventListener("selectionchange", () => {
+  if (panelRefreshPending && !selectionTouchesRightPanel()) {
+    scheduleAnalysisPanelsRefresh({ background: backgroundRefreshPending, delay: 120 });
   }
 });
 
@@ -2015,26 +2407,25 @@ window.addEventListener("beforeunload", () => {
     });
   }
 });
+window.addEventListener("pageshow", clearAnalysisDrawModeSelection);
 
-loadAnalysisSamplingSettings();
 setAnalysisWebSearchEnabled(false);
-loadUserMemoryBinding().catch(() => {});
+clearAnalysisDrawModeSelection();
+loadAnalysisModelDisplayName().catch(() => {});
 
 setStatus("创建会话中");
 createSession()
   .then(() => {
-    refreshBackground();
-    traceTimer = window.setInterval(() => {
-      refreshTraces();
-      refreshBackground();
-    }, 1500);
+    scheduleAnalysisPanelsRefresh({ background: true, delay: 0 });
   })
   .catch((error) => {
     setStatus(error.message || "初始化失败");
   });
 
 window.addEventListener("pagehide", () => {
-  if (traceTimer) {
-    window.clearInterval(traceTimer);
+  if (panelRefreshTimer) {
+    window.clearTimeout(panelRefreshTimer);
+    panelRefreshTimer = 0;
   }
+  stopAnalysisPanelsRefreshWatch();
 });

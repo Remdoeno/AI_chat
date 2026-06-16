@@ -3,67 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>旺财1.4 Ai助手聊天</title>
+    <title>旺财AI助手</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260614_message_time_dark_fix"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260614_message_time_dark_fix" />
+    <script src="/static/theme.js?v=20260617_dark_draw_prompt"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260617_prompt_pre_dark_align" />
   </head>
   <body>
     <main class="app-shell">
       <aside class="sidebar">
         <div class="brand-block">
-          <button id="bunnyLogoButton" class="logo-button" type="button" aria-label="Qwen logo">
+          <button id="bunnyLogoButton" class="logo-button" type="button" aria-label="旺财入口">
             <span aria-hidden="true">🐰</span>
           </button>
           <div>
-            <p class="eyebrow">Qwen3.6</p>
-            <h1>Ai助手聊天</h1>
+            <p id="modelDisplayName" class="eyebrow">Qwen3.6</p>
+            <h1>AI助手</h1>
           </div>
         </div>
         <div class="session-panel">
           <span class="label">状态</span>
           <strong id="statusText">连接中</strong>
         </div>
-        <section id="advancedOptions" class="advanced-options" aria-label="高级采样选项" hidden>
-          <div class="advanced-header">
-            <span>高级选项</span>
-            <span id="samplingSummary" class="sampling-summary">Temp 1.00 · Top-p 0.95</span>
-          </div>
-          <div class="sampling-grid">
-            <label class="sampling-control" for="temperatureRange">
-              <span class="control-header">
-                <span>Temperature</span>
-                <output id="temperatureValue" for="temperatureRange">1.00</output>
-              </span>
-              <input id="temperatureRange" type="range" min="0" max="2" step="0.05" value="1" />
-            </label>
-
-            <label class="sampling-control" for="topPRange">
-              <span class="control-header">
-                <span>Top-p</span>
-                <output id="topPValue" for="topPRange">0.95</output>
-              </span>
-              <input id="topPRange" type="range" min="0.05" max="1" step="0.01" value="0.95" />
-            </label>
-
-            <label class="sampling-control proxy-control" for="webSearchProxyInput">
-              <span class="control-header">
-                <span>联网代理</span>
-              </span>
-              <input
-                id="webSearchProxyInput"
-                type="url"
-                autocomplete="off"
-                spellcheck="false"
-                value=""
-                placeholder="可选，例如 http://127.0.0.1:7890"
-              />
-            </label>
-          </div>
-          <button id="confirmSamplingButton" class="primary-button compact-button" type="button">
-            确定
-          </button>
-        </section>
         <button id="resetButton" class="secondary-button" type="button" aria-label="重置会话">
           <span aria-hidden="true">↻</span>
           <span>Reset</span>
@@ -114,6 +74,9 @@
               <button id="webSearchButton" class="tool-button toggle-tool-button" type="button" aria-pressed="false" aria-label="启用联网搜索" title="启用联网搜索">
                 联网
               </button>
+              <button id="drawButton" class="tool-button toggle-tool-button" type="button" aria-pressed="false" aria-label="启用画图" title="启用画图">
+                画图
+              </button>
               <input id="imageInput" type="file" accept="image/*,.avif,.bmp,.gif,.heic,.heif,.ico,.jfif,.jpg,.jpeg,.pjpeg,.png,.svg,.tif,.tiff,.webp" multiple hidden />
             </div>
             <button id="sendButton" class="primary-button" type="submit">发送</button>
@@ -121,6 +84,60 @@
         </form>
       </section>
     </main>
+    <dialog id="advancedOptions" class="advanced-options" aria-label="高级配置">
+      <form id="advancedOptionsForm" class="advanced-options-form" method="dialog">
+        <div class="advanced-header">
+          <span>高级配置</span>
+          <span id="samplingSummary" class="sampling-summary">Temp 1.00 · Top-p 0.95</span>
+        </div>
+        <div class="sampling-grid">
+          <label class="sampling-control" for="temperatureRange">
+            <span class="control-header">
+              <span>Temperature</span>
+              <output id="temperatureValue" for="temperatureRange">1.00</output>
+            </span>
+            <input id="temperatureRange" type="range" min="0" max="2" step="0.05" value="1" />
+          </label>
+
+          <label class="sampling-control" for="topPRange">
+            <span class="control-header">
+              <span>Top-p</span>
+              <output id="topPValue" for="topPRange">0.95</output>
+            </span>
+            <input id="topPRange" type="range" min="0.05" max="1" step="0.01" value="0.95" />
+          </label>
+
+          <label class="sampling-control proxy-control" for="webSearchProxyInput">
+            <span class="control-header">
+              <span>联网代理</span>
+            </span>
+            <input
+              id="webSearchProxyInput"
+              type="url"
+              autocomplete="off"
+              spellcheck="false"
+              value=""
+              placeholder="可选，例如 http://127.0.0.1:7890"
+            />
+          </label>
+        </div>
+        <button id="localModelServiceButton" class="secondary-button compact-button service-button" type="button">
+          <span>启动本地模型服务</span>
+          <small id="localModelServiceStatus">检测中</small>
+        </button>
+        <div class="advanced-actions">
+          <button id="openModelSettingsButton" class="secondary-button compact-button" type="button">
+            模型选择
+          </button>
+          <button id="cancelSamplingButton" class="secondary-button compact-button" type="button">
+            取消
+          </button>
+          <button id="confirmSamplingButton" class="primary-button compact-button" type="button">
+            确定
+          </button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="memoryAdminDialog" class="admin-login-dialog" aria-labelledby="memoryAdminDialogTitle">
       <form id="memoryAdminLoginForm" class="admin-login-form" method="dialog">
         <h2 id="memoryAdminDialogTitle">记忆后台</h2>
@@ -164,6 +181,127 @@
         </div>
       </form>
     </dialog>
+    <dialog id="modelSettingsDialog" class="admin-login-dialog model-settings-dialog" aria-labelledby="modelSettingsDialogTitle">
+      <form id="modelSettingsForm" class="admin-login-form model-settings-form" method="dialog">
+        <div class="binding-dialog-header">
+          <h2 id="modelSettingsDialogTitle">模型选择</h2>
+        </div>
+        <section class="model-slot-panel" aria-label="聊天大模型">
+          <h3>聊天大模型</h3>
+          <label class="field" for="chatProviderSelect">
+            <span>服务</span>
+            <select id="chatProviderSelect" data-model-field="provider" data-model-slot="chat">
+              <option value="local">本地 OpenAI 兼容服务</option>
+              <option value="openai">OpenAI</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="dashscope">通义千问</option>
+              <option value="custom">自定义 OpenAI 兼容</option>
+            </select>
+          </label>
+          <label class="field" for="chatDisplayNameInput">
+            <span>显示名称</span>
+            <input id="chatDisplayNameInput" data-model-field="display_name" data-model-slot="chat" type="text" autocomplete="off" />
+          </label>
+          <label class="field" for="chatBaseUrlInput">
+            <span>Base URL</span>
+            <input id="chatBaseUrlInput" data-model-field="base_url" data-model-slot="chat" type="url" autocomplete="off" />
+          </label>
+          <label class="field" for="chatModelInput">
+            <span>模型</span>
+            <input id="chatModelInput" data-model-field="model" data-model-slot="chat" type="text" autocomplete="off" />
+          </label>
+          <label class="field" for="chatApiKeyInput">
+            <span>API Key</span>
+            <input id="chatApiKeyInput" data-model-field="api_key" data-model-slot="chat" type="password" autocomplete="off" placeholder="留空则保留已保存密钥" />
+          </label>
+          <label class="binding-check-field" for="chatUseProxyCheckbox">
+            <input id="chatUseProxyCheckbox" data-model-field="use_proxy" data-model-slot="chat" type="checkbox" />
+            <span>API 调用走代理</span>
+          </label>
+          <label class="field" for="chatProxyUrlInput">
+            <span>代理地址</span>
+            <input id="chatProxyUrlInput" data-model-field="proxy_url" data-model-slot="chat" type="url" autocomplete="off" placeholder="例如 http://127.0.0.1:7890" />
+          </label>
+        </section>
+        <section class="model-slot-panel" aria-label="后台大模型">
+          <h3>后台大模型</h3>
+          <label class="field" for="backgroundProviderSelect">
+            <span>服务</span>
+            <select id="backgroundProviderSelect" data-model-field="provider" data-model-slot="background">
+              <option value="local">本地 OpenAI 兼容服务</option>
+              <option value="openai">OpenAI</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="dashscope">通义千问</option>
+              <option value="custom">自定义 OpenAI 兼容</option>
+            </select>
+          </label>
+          <label class="field" for="backgroundDisplayNameInput">
+            <span>显示名称</span>
+            <input id="backgroundDisplayNameInput" data-model-field="display_name" data-model-slot="background" type="text" autocomplete="off" />
+          </label>
+          <label class="field" for="backgroundBaseUrlInput">
+            <span>Base URL</span>
+            <input id="backgroundBaseUrlInput" data-model-field="base_url" data-model-slot="background" type="url" autocomplete="off" />
+          </label>
+          <label class="field" for="backgroundModelInput">
+            <span>模型</span>
+            <input id="backgroundModelInput" data-model-field="model" data-model-slot="background" type="text" autocomplete="off" />
+          </label>
+          <label class="field" for="backgroundApiKeyInput">
+            <span>API Key</span>
+            <input id="backgroundApiKeyInput" data-model-field="api_key" data-model-slot="background" type="password" autocomplete="off" placeholder="留空则保留已保存密钥" />
+          </label>
+          <label class="binding-check-field" for="backgroundUseProxyCheckbox">
+            <input id="backgroundUseProxyCheckbox" data-model-field="use_proxy" data-model-slot="background" type="checkbox" />
+            <span>API 调用走代理</span>
+          </label>
+          <label class="field" for="backgroundProxyUrlInput">
+            <span>代理地址</span>
+            <input id="backgroundProxyUrlInput" data-model-field="proxy_url" data-model-slot="background" type="url" autocomplete="off" placeholder="例如 http://127.0.0.1:7890" />
+          </label>
+        </section>
+        <section class="model-slot-panel" aria-label="图像生成模型">
+          <h3>图像生成模型</h3>
+          <label class="field" for="imageProviderSelect">
+            <span>服务</span>
+            <select id="imageProviderSelect" data-model-field="provider" data-model-slot="image">
+              <option value="none">未配置</option>
+              <option value="hidream">本地 HiDream 服务</option>
+              <option value="custom">自定义图像 API</option>
+            </select>
+          </label>
+          <label class="field" for="imageDisplayNameInput">
+            <span>显示名称</span>
+            <input id="imageDisplayNameInput" data-model-field="display_name" data-model-slot="image" type="text" autocomplete="off" />
+          </label>
+          <label class="field" for="imageBaseUrlInput">
+            <span>Base URL</span>
+            <input id="imageBaseUrlInput" data-model-field="base_url" data-model-slot="image" type="url" autocomplete="off" placeholder="例如 http://127.0.0.1:8002" />
+          </label>
+          <label class="field" for="imageModelInput">
+            <span>模型</span>
+            <input id="imageModelInput" data-model-field="model" data-model-slot="image" type="text" autocomplete="off" />
+          </label>
+          <label class="field" for="imageApiKeyInput">
+            <span>API Key</span>
+            <input id="imageApiKeyInput" data-model-field="api_key" data-model-slot="image" type="password" autocomplete="off" placeholder="留空则保留已保存密钥" />
+          </label>
+          <label class="binding-check-field" for="imageUseProxyCheckbox">
+            <input id="imageUseProxyCheckbox" data-model-field="use_proxy" data-model-slot="image" type="checkbox" />
+            <span>API 调用走代理</span>
+          </label>
+          <label class="field" for="imageProxyUrlInput">
+            <span>代理地址</span>
+            <input id="imageProxyUrlInput" data-model-field="proxy_url" data-model-slot="image" type="url" autocomplete="off" placeholder="例如 http://127.0.0.1:7890" />
+          </label>
+        </section>
+        <p id="modelSettingsStatus" class="dialog-status"></p>
+        <div class="dialog-actions">
+          <button id="modelSettingsCancelButton" class="secondary-button compact-button" type="button">取消</button>
+          <button class="primary-button compact-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
     <script>
       window.MathJax = {
         tex: {
@@ -177,6 +315,6 @@
       };
     </script>
     <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
-    <script src="/static/app.js?v=20260614_message_time_dark_fix"></script>
+    <script src="/static/app.js?v=20260617_draw_reset_clear"></script>
   </body>
 </html>

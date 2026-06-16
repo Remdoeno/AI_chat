@@ -222,7 +222,7 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("MODEL_API_KEY", app_py)
         self.assertIn("QWEN_IDLE_AGENT_ENABLED", app_py)
         self.assertIn("QWEN_EMBEDDING_API_KEY", embedding_py)
-        self.assertIn("旺财1.4", readme)
+        self.assertIn("旺财1.3", readme)
         self.assertIn("家庭本地部署", readme)
         self.assertIn("QWEN_MODEL_BASE_URL", readme)
         self.assertIn("QWEN_MODEL_API_KEY", readme)
@@ -510,7 +510,7 @@ class StaticRegressionTests(unittest.TestCase):
         css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
         app_py = (ROOT / "app.py").read_text(encoding="utf-8")
 
-        self.assertIn("旺财1.4 Ai助手聊天", html)
+        self.assertIn("旺财1.3 Ai助手聊天", html)
         self.assertIn("PREVIOUS_SESSION_ARM_MS", js)
         self.assertIn("PREVIOUS_SESSION_MIN_RETRY_MS", js)
         self.assertIn("PREVIOUS_SESSION_MIN_RETRY_MS = 800", js)
@@ -751,13 +751,61 @@ class StaticRegressionTests(unittest.TestCase):
         self.assertIn("isImeCompositionEvent(event)", js)
         self.assertIn("event.keyCode === 229", js)
 
+    def test_analysis_trace_distinguishes_system_profile_from_memory_recall(self):
+        js = (ROOT / "static" / "analysis.js").read_text(encoding="utf-8")
+
+        self.assertIn("读取系统资料", js)
+        self.assertIn("无需长期记忆", js)
+        self.assertNotIn("跳过长期记忆", js)
+
+    def test_home_advanced_options_are_centered_dialog_with_ordered_actions(self):
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+        css = (ROOT / "static" / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('<dialog id="advancedOptions"', html)
+        self.assertLess(html.index("openModelSettingsButton"), html.index("confirmSamplingButton"))
+        self.assertLess(html.index("cancelSamplingButton"), html.index("confirmSamplingButton"))
+        self.assertIn("localModelServiceButton", html)
+        self.assertIn("localModelServiceStatus", html)
+        self.assertIn("advancedOptions.addEventListener(\"click\"", js)
+        self.assertIn("closeAdvancedOptions()", js)
+        self.assertIn("/api/local-model-service/start", js)
+        self.assertIn("position: fixed", css)
+        self.assertIn("margin: auto", css)
+        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr));", css)
+
+    def test_analysis_sidebar_removes_configuration_controls(self):
+        html = (ROOT / "static" / "analysis.html").read_text(encoding="utf-8")
+        js = (ROOT / "static" / "analysis.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("temperatureInput", html)
+        self.assertNotIn("topPInput", html)
+        self.assertNotIn("proxyInput", html)
+        self.assertNotIn("analysisModelSettingsDialog", html)
+        self.assertNotIn("analysisUserMemoryBindingDialog", html)
+        self.assertNotIn("analysisModelSettingsButton", html)
+        self.assertNotIn("analysisUserMemoryBindingButton", html)
+        self.assertIn("resetButton", html)
+        self.assertIn("statusText", html)
+        self.assertIn("loadPreviousButton", html)
+        self.assertNotIn("saveAnalysisSamplingSettings", js)
+        self.assertNotIn("/api/model-settings", js)
+
+    def test_self_profile_documents_user_visible_proxy_entry_points(self):
+        profile = (ROOT / "qwen_app" / "prompts" / "self_profile.py").read_text(encoding="utf-8")
+
+        self.assertIn("点击 4 次兔子", profile)
+        self.assertIn("分析模式", profile)
+        self.assertIn("联网代理", profile)
+
     def test_desktop_analysis_send_button_aligns_to_textarea_row(self):
         css = (ROOT / "static" / "analysis.css").read_text(encoding="utf-8")
         html = (ROOT / "static" / "analysis.html").read_text(encoding="utf-8")
         analysis_login = (ROOT / "static" / "analysis_login.html").read_text(encoding="utf-8")
 
-        self.assertIn("/static/analysis.css?v=20260612_worker_reason_label", html)
-        self.assertIn("/static/analysis.css?v=20260612_worker_reason_label", analysis_login)
+        self.assertIn("/static/analysis.css?v=20260611_worker_readable", html)
+        self.assertIn("/static/analysis.css?v=20260611_worker_readable", analysis_login)
         self.assertIn("@media (min-width: 761px)", css)
         self.assertIn(".analysis-composer {\n    grid-template-areas:", css)
         self.assertIn('"input send"', css)

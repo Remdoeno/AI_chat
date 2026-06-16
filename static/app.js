@@ -4,6 +4,7 @@ const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
 const attachImageButton = document.getElementById("attachImageButton");
 const webSearchButton = document.getElementById("webSearchButton");
+const drawButton = document.getElementById("drawButton");
 const imageInput = document.getElementById("imageInput");
 const attachmentPreview = document.getElementById("attachmentPreview");
 const resetButton = document.getElementById("resetButton");
@@ -29,6 +30,7 @@ const userMemoryBindingCancelButton = document.getElementById("userMemoryBinding
 const userMemoryBindingInfoButton = document.getElementById("userMemoryBindingInfoButton");
 const userMemoryBindingInfo = document.getElementById("userMemoryBindingInfo");
 const advancedOptions = document.getElementById("advancedOptions");
+const advancedOptionsForm = document.getElementById("advancedOptionsForm");
 const temperatureRange = document.getElementById("temperatureRange");
 const temperatureValue = document.getElementById("temperatureValue");
 const topPRange = document.getElementById("topPRange");
@@ -36,8 +38,17 @@ const topPValue = document.getElementById("topPValue");
 const webSearchProxyInput = document.getElementById("webSearchProxyInput");
 const samplingSummary = document.getElementById("samplingSummary");
 const confirmSamplingButton = document.getElementById("confirmSamplingButton");
+const cancelSamplingButton = document.getElementById("cancelSamplingButton");
 const searchActivity = document.getElementById("searchActivity");
 const searchActivityList = document.getElementById("searchActivityList");
+const modelDisplayName = document.getElementById("modelDisplayName");
+const openModelSettingsButton = document.getElementById("openModelSettingsButton");
+const modelSettingsDialog = document.getElementById("modelSettingsDialog");
+const modelSettingsForm = document.getElementById("modelSettingsForm");
+const modelSettingsCancelButton = document.getElementById("modelSettingsCancelButton");
+const modelSettingsStatus = document.getElementById("modelSettingsStatus");
+const localModelServiceButton = document.getElementById("localModelServiceButton");
+const localModelServiceStatus = document.getElementById("localModelServiceStatus");
 
 const BUNNY_CLICK_WINDOW_MS = 1000;
 const BUNNY_CLICK_TARGET = 4;
@@ -46,6 +57,7 @@ let warnLongPressTimer = 0;
 let warnLongPressTriggered = false;
 let memoryAdminLongPressTimer = 0;
 let memoryAdminLongPressTriggered = false;
+let localModelServicePollTimer = 0;
 const SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
 const DEVICE_STORAGE_KEY = "qwen_device_id";
 const USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
@@ -53,6 +65,58 @@ const DEFAULT_SAMPLING_SETTINGS = {
   temperature: 0.6,
   top_p: 0.95,
   web_search_proxy: "",
+};
+const LOCAL_MODEL_DISPLAY_NAME = "Qwen3.6";
+const MODEL_PROVIDER_PRESETS = {
+  local: {
+    display_name: LOCAL_MODEL_DISPLAY_NAME,
+    base_url: "http://127.0.0.1:8000/v1",
+    model: "qwen3.6-35b-a3b-262k",
+    use_proxy: false,
+    proxy_url: "",
+  },
+  none: {
+    display_name: "未配置",
+    base_url: "",
+    model: "",
+    use_proxy: false,
+    proxy_url: "",
+  },
+  hidream: {
+    display_name: "HiDream-O1-Image-Dev-2604",
+    base_url: "http://127.0.0.1:8002",
+    model: "HiDream-O1-Image-Dev-2604",
+    use_proxy: false,
+    proxy_url: "",
+  },
+  openai: {
+    display_name: "GPT-4.1",
+    base_url: "https://api.openai.com/v1",
+    model: "gpt-4.1",
+    use_proxy: true,
+    proxy_url: "",
+  },
+  deepseek: {
+    display_name: "DeepSeek Chat",
+    base_url: "https://api.deepseek.com/v1",
+    model: "deepseek-chat",
+    use_proxy: true,
+    proxy_url: "",
+  },
+  dashscope: {
+    display_name: "通义千问",
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-plus",
+    use_proxy: true,
+    proxy_url: "",
+  },
+  custom: {
+    display_name: "自定义模型",
+    base_url: "",
+    model: "",
+    use_proxy: true,
+    proxy_url: "",
+  },
 };
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -91,6 +155,7 @@ let activeAssistantBody = null;
 let userStoppedGeneration = false;
 let pendingAttachments = [];
 let webSearchEnabled = false;
+let drawEnabled = false;
 let activeSearchQuery = "";
 let isMessageComposing = false;
 let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
@@ -105,6 +170,7 @@ let wasTouchScrollingTowardTop = false;
 let touchHistoryArmOnTop = false;
 let touchHistoryClearTimer = 0;
 let userMemoryBindingState = null;
+let modelSettingsState = null;
 
 function isUsableDeviceId(value) {
   return /^[A-Za-z0-9_-]{12,96}$/.test(String(value || "").trim());
@@ -112,6 +178,331 @@ function isUsableDeviceId(value) {
 
 function setStatus(text) {
   statusText.textContent = text;
+}
+
+function modelField(slot, field) {
+  return document.querySelector(`[data-model-slot="${slot}"][data-model-field="${field}"]`);
+}
+
+function modelPreset(provider) {
+  return MODEL_PROVIDER_PRESETS[provider] || MODEL_PROVIDER_PRESETS.custom;
+}
+
+function setModelDisplayName(settings) {
+  const chat = settings && settings.chat ? settings.chat : {};
+  const name = chat.provider === "local"
+    ? LOCAL_MODEL_DISPLAY_NAME
+    : String(chat.model || chat.display_name || "AI模型").trim();
+  if (modelDisplayName) {
+    modelDisplayName.textContent = name || LOCAL_MODEL_DISPLAY_NAME;
+  }
+}
+
+function applyProviderPreset(slot) {
+  const providerInput = modelField(slot, "provider");
+  const provider = providerInput ? providerInput.value : "local";
+  const preset = modelPreset(provider);
+  const displayInput = modelField(slot, "display_name");
+  const baseUrlInput = modelField(slot, "base_url");
+  const modelInput = modelField(slot, "model");
+  const apiKeyInput = modelField(slot, "api_key");
+  const useProxyInput = modelField(slot, "use_proxy");
+  const proxyUrlInput = modelField(slot, "proxy_url");
+
+  if (displayInput) {
+    displayInput.value = provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : preset.display_name;
+    displayInput.disabled = provider === "local" || provider === "none";
+  }
+  if (baseUrlInput) {
+    baseUrlInput.value = preset.base_url;
+  }
+  if (modelInput) {
+    modelInput.value = preset.model;
+  }
+  if (apiKeyInput) {
+    apiKeyInput.value = "";
+    apiKeyInput.disabled = provider === "local" || provider === "none" || provider === "hidream";
+    apiKeyInput.placeholder = provider === "local" || provider === "hidream" ? "本地服务通常不需要 API Key" : "留空则保留已保存密钥";
+  }
+  if (useProxyInput) {
+    useProxyInput.checked = Boolean(preset.use_proxy) && !["local", "none", "hidream"].includes(provider);
+    useProxyInput.disabled = ["local", "none", "hidream"].includes(provider);
+  }
+  if (proxyUrlInput) {
+    proxyUrlInput.value = preset.proxy_url;
+    proxyUrlInput.disabled = ["local", "none", "hidream"].includes(provider);
+  }
+}
+
+function populateModelSlot(slot, settings) {
+  const data = settings && settings[slot] ? settings[slot] : { provider: "local" };
+  const providerInput = modelField(slot, "provider");
+  if (providerInput) {
+    providerInput.value = data.provider || "local";
+  }
+  for (const field of ["display_name", "base_url", "model", "proxy_url"]) {
+    const input = modelField(slot, field);
+    if (input) {
+      input.value = data[field] || "";
+    }
+  }
+  const apiKeyInput = modelField(slot, "api_key");
+  if (apiKeyInput) {
+    apiKeyInput.value = "";
+    apiKeyInput.placeholder = data.has_api_key ? "已保存密钥，留空不修改" : "留空则不设置密钥";
+  }
+  const useProxyInput = modelField(slot, "use_proxy");
+  if (useProxyInput) {
+    useProxyInput.checked = Boolean(data.use_proxy);
+  }
+  if ((data.provider || "local") === "local") {
+    const displayInput = modelField(slot, "display_name");
+    if (displayInput) {
+      displayInput.value = LOCAL_MODEL_DISPLAY_NAME;
+    }
+  }
+  if ((data.provider || "") === "none") {
+    const displayInput = modelField(slot, "display_name");
+    if (displayInput) {
+      displayInput.value = "未配置";
+    }
+  }
+  syncModelSlotDisabledState(slot);
+}
+
+function syncModelSlotDisabledState(slot) {
+  const providerInput = modelField(slot, "provider");
+  const provider = providerInput ? providerInput.value : "local";
+  const displayInput = modelField(slot, "display_name");
+  const baseUrlInput = modelField(slot, "base_url");
+  const modelInput = modelField(slot, "model");
+  const apiKeyInput = modelField(slot, "api_key");
+  const useProxyInput = modelField(slot, "use_proxy");
+  const proxyUrlInput = modelField(slot, "proxy_url");
+  if (displayInput) {
+    displayInput.disabled = provider === "local" || provider === "none";
+    if (provider === "local") {
+      displayInput.value = LOCAL_MODEL_DISPLAY_NAME;
+    } else if (provider === "none") {
+      displayInput.value = "未配置";
+    }
+  }
+  if (baseUrlInput) {
+    baseUrlInput.disabled = provider === "none";
+    if (provider === "none") {
+      baseUrlInput.value = "";
+    }
+  }
+  if (modelInput) {
+    modelInput.disabled = provider === "none";
+    if (provider === "none") {
+      modelInput.value = "";
+    }
+  }
+  if (apiKeyInput) {
+    apiKeyInput.disabled = ["local", "none", "hidream"].includes(provider);
+  }
+  if (useProxyInput) {
+    useProxyInput.disabled = ["local", "none", "hidream"].includes(provider);
+    if (["local", "none", "hidream"].includes(provider)) {
+      useProxyInput.checked = false;
+    }
+  }
+  if (proxyUrlInput) {
+    proxyUrlInput.disabled = ["local", "none", "hidream"].includes(provider);
+    if (["local", "none", "hidream"].includes(provider)) {
+      proxyUrlInput.value = "";
+    }
+  }
+}
+
+function readModelSlot(slot) {
+  const provider = modelField(slot, "provider")?.value || "local";
+  const isLocalLike = ["local", "hidream", "none"].includes(provider);
+  const payload = {
+    provider,
+    display_name: provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : (modelField(slot, "display_name")?.value || ""),
+    base_url: modelField(slot, "base_url")?.value || "",
+    model: modelField(slot, "model")?.value || "",
+    use_proxy: !isLocalLike && Boolean(modelField(slot, "use_proxy")?.checked),
+    proxy_url: isLocalLike ? "" : (modelField(slot, "proxy_url")?.value || ""),
+  };
+  if (provider === "none") {
+    payload.display_name = "未配置";
+    payload.base_url = "";
+    payload.model = "";
+  }
+  const apiKey = modelField(slot, "api_key")?.value || "";
+  if (apiKey.trim()) {
+    payload.api_key = apiKey.trim();
+  }
+  return payload;
+}
+
+async function loadModelSettings() {
+  const response = await fetch("/api/model-settings", { headers: deviceIdentityHeaders() });
+  if (!response.ok) {
+    throw new Error("模型配置读取失败");
+  }
+  modelSettingsState = await response.json();
+  setModelDisplayName(modelSettingsState);
+  return modelSettingsState;
+}
+
+function setLocalModelServiceStatus(text, state = "") {
+  if (localModelServiceStatus) {
+    localModelServiceStatus.textContent = text || "";
+  }
+  if (localModelServiceButton) {
+    localModelServiceButton.dataset.state = state;
+  }
+}
+
+function localModelServiceSummary(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "状态未知";
+  }
+  if (payload.summary) {
+    return String(payload.summary);
+  }
+  const qwen = payload.qwen || {};
+  const embedding = payload.embedding || {};
+  const image = payload.image || {};
+  if (qwen.running && embedding.running && image.running) {
+    return `已运行：Qwen ${qwen.port || "?"} / Embedding ${embedding.port || "?"} / 画图 ${image.port || "?"}`;
+  }
+  if (qwen.running && embedding.running) {
+    return `已运行：Qwen ${qwen.port || "?"} / Embedding ${embedding.port || "?"} / 画图未就绪`;
+  }
+  return "未启动";
+}
+
+async function loadLocalModelServiceStatus(configure = false) {
+  if (!localModelServiceButton) {
+    return null;
+  }
+  try {
+    const url = configure ? "/api/local-model-service/status?configure=1" : "/api/local-model-service/status";
+    const response = await fetch(url, { headers: deviceIdentityHeaders() });
+    if (!response.ok) {
+      throw new Error("状态检测失败");
+    }
+    const payload = await response.json();
+    const ready = Boolean(payload.qwen && payload.qwen.running && payload.embedding && payload.embedding.running);
+    setLocalModelServiceStatus(localModelServiceSummary(payload), ready ? "ready" : "missing");
+    if (ready) {
+      window.clearTimeout(localModelServicePollTimer);
+    }
+    if (payload.settings_updated) {
+      await loadModelSettings();
+    }
+    return payload;
+  } catch (error) {
+    setLocalModelServiceStatus(error.message || "检测失败", "error");
+    return null;
+  }
+}
+
+function pollLocalModelServiceUntilReady(remaining = 60) {
+  window.clearTimeout(localModelServicePollTimer);
+  if (!localModelServiceButton || remaining <= 0) {
+    return;
+  }
+  localModelServicePollTimer = window.setTimeout(async () => {
+    const payload = await loadLocalModelServiceStatus(true);
+    const ready = Boolean(payload && payload.qwen && payload.qwen.running && payload.embedding && payload.embedding.running);
+    if (!ready) {
+      setLocalModelServiceStatus("启动中，等待服务就绪", "starting");
+      pollLocalModelServiceUntilReady(remaining - 1);
+    }
+  }, 5000);
+}
+
+async function startLocalModelService() {
+  if (!localModelServiceButton) {
+    return;
+  }
+  localModelServiceButton.disabled = true;
+  setLocalModelServiceStatus("启动中", "starting");
+  try {
+    const response = await fetch("/api/local-model-service/start", {
+      method: "POST",
+      headers: jsonHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error("启动请求失败");
+    }
+    const payload = await response.json();
+    if (payload.error) {
+      throw new Error(payload.error);
+    }
+    const ready = Boolean(payload.qwen && payload.qwen.running && payload.embedding && payload.embedding.running);
+    setLocalModelServiceStatus(localModelServiceSummary(payload), ready ? "ready" : "starting");
+    if (payload.settings_updated) {
+      await loadModelSettings();
+    }
+    if (!ready) {
+      pollLocalModelServiceUntilReady();
+    }
+  } catch (error) {
+    setLocalModelServiceStatus(error.message || "启动失败", "error");
+  } finally {
+    localModelServiceButton.disabled = false;
+  }
+}
+
+async function openModelSettingsDialog() {
+  if (!modelSettingsDialog) {
+    return;
+  }
+  modelSettingsStatus.textContent = "读取中";
+  try {
+    const settings = await loadModelSettings();
+    populateModelSlot("chat", settings);
+    populateModelSlot("background", settings);
+    populateModelSlot("image", settings);
+    modelSettingsStatus.textContent = "";
+    if (typeof modelSettingsDialog.showModal === "function") {
+      modelSettingsDialog.showModal();
+    } else {
+      modelSettingsDialog.setAttribute("open", "");
+    }
+  } catch (error) {
+    modelSettingsStatus.textContent = error.message || "模型配置读取失败";
+  }
+}
+
+function closeModelSettingsDialog() {
+  if (!modelSettingsDialog) {
+    return;
+  }
+  modelSettingsDialog.close();
+}
+
+async function saveModelSettings(event) {
+  event.preventDefault();
+  modelSettingsStatus.textContent = "保存中";
+  try {
+    const response = await fetch("/api/model-settings", {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        chat: readModelSlot("chat"),
+        background: readModelSlot("background"),
+        image: readModelSlot("image"),
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("保存失败");
+    }
+    modelSettingsState = await response.json();
+    setModelDisplayName(modelSettingsState);
+    modelSettingsStatus.textContent = "已保存";
+    closeModelSettingsDialog();
+    setStatus(`模型已更新：${modelSettingsState.chat.provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : (modelSettingsState.chat.model || modelSettingsState.chat.display_name || "AI模型")}`);
+  } catch (error) {
+    modelSettingsStatus.textContent = error.message || "保存失败";
+  }
 }
 
 async function parseRateLimitPayload(response) {
@@ -280,6 +671,9 @@ function setBusy(busy) {
   confirmSamplingButton.disabled = busy || isResetting;
   attachImageButton.disabled = busy || isResetting;
   webSearchButton.disabled = busy || isResetting;
+  if (drawButton) {
+    drawButton.disabled = busy || isResetting;
+  }
 }
 
 function setWebSearchEnabled(enabled) {
@@ -287,6 +681,23 @@ function setWebSearchEnabled(enabled) {
   webSearchButton.classList.toggle("is-active", webSearchEnabled);
   webSearchButton.setAttribute("aria-pressed", String(webSearchEnabled));
   webSearchButton.title = webSearchEnabled ? "本轮会联网搜索" : "启用联网搜索";
+}
+
+function setDrawEnabled(enabled) {
+  drawEnabled = Boolean(enabled);
+  if (!drawButton) {
+    return;
+  }
+  drawButton.classList.toggle("is-active", drawEnabled);
+  drawButton.setAttribute("aria-pressed", String(drawEnabled));
+  drawButton.title = drawEnabled ? "本轮发送会画图" : "启用画图";
+  if (drawEnabled && webSearchEnabled) {
+    setWebSearchEnabled(false);
+  }
+}
+
+function clearDrawModeSelection() {
+  setDrawEnabled(false);
 }
 
 function clearSearchActivity() {
@@ -435,14 +846,27 @@ function syncSamplingControlsFromSettings() {
 
 function openAdvancedOptions() {
   syncSamplingControlsFromSettings();
-  advancedOptions.hidden = false;
+  if (typeof advancedOptions.showModal === "function") {
+    advancedOptions.showModal();
+  } else {
+    advancedOptions.setAttribute("open", "");
+  }
   advancedOptions.classList.add("is-visible");
+  loadLocalModelServiceStatus();
   temperatureRange.focus();
 }
 
-function hideAdvancedOptions() {
+function closeAdvancedOptions() {
   advancedOptions.classList.remove("is-visible");
-  advancedOptions.hidden = true;
+  if (typeof advancedOptions.close === "function") {
+    advancedOptions.close();
+  } else {
+    advancedOptions.removeAttribute("open");
+  }
+}
+
+function hideAdvancedOptions() {
+  closeAdvancedOptions();
 }
 
 function handleBunnyLogoClick() {
@@ -849,6 +1273,65 @@ function createBubble(role, content = "", attachments = [], options = {}) {
   return body;
 }
 
+function renderGeneratedImageBatch(images, optimizedPrompt = "") {
+  const wrapper = document.createElement("div");
+  wrapper.className = "generated-image-batch";
+  const grid = document.createElement("div");
+  grid.className = "generated-image-grid";
+  const items = Array.isArray(images) ? images : [];
+  for (const [index, item] of items.entries()) {
+    const url = item && item.public_url ? String(item.public_url) : "";
+    if (!url) {
+      continue;
+    }
+    const cell = document.createElement("figure");
+    cell.className = "generated-image-item";
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = item.short_caption || `生成图片 ${index + 1}`;
+    const download = document.createElement("a");
+    download.className = "generated-image-download";
+    download.href = url;
+    download.download = `wangcai-draw-${index + 1}`;
+    download.textContent = "下载";
+    cell.append(image, download);
+    grid.appendChild(cell);
+  }
+  wrapper.appendChild(grid);
+  if (optimizedPrompt) {
+    const details = document.createElement("details");
+    details.className = "generated-image-prompt";
+    const summary = document.createElement("summary");
+    summary.textContent = "优化后的 prompt";
+    const pre = document.createElement("pre");
+    pre.textContent = optimizedPrompt;
+    details.append(summary, pre);
+    wrapper.appendChild(details);
+  }
+  return wrapper;
+}
+
+function messageAttachments(message) {
+  return Array.isArray(message && message.attachments)
+    ? message.attachments.filter((item) => item && typeof item === "object")
+    : [];
+}
+
+function messageDrawMetadata(message) {
+  return message && message.draw && typeof message.draw === "object" ? message.draw : {};
+}
+
+function restoreHistoricalAssistantMedia(body, message) {
+  const draw = messageDrawMetadata(message);
+  const images = Array.isArray(draw.images) ? draw.images : [];
+  if (!images.length) {
+    return;
+  }
+  body.replaceChildren();
+  body.appendChild(renderGeneratedImageBatch(images, draw.optimized_prompt || ""));
+  body.dataset.rawMarkdown = message.content || `已生成 ${images.length} 张图片。`;
+}
+
 function clearMessages() {
   messagesEl.replaceChildren();
   ensureHistoryLoadIndicator();
@@ -976,11 +1459,15 @@ function prependHistoryMessages(messages) {
   const previousTop = messagesEl.scrollTop;
   const loadedMessageItems = [];
   for (const message of [...history].reverse()) {
-    const body = createBubble(message.role === "assistant" ? "assistant" : "user", message.content || "", [], {
+    const role = message.role === "assistant" ? "assistant" : "user";
+    const body = createBubble(role, message.content || "", messageAttachments(message), {
       prepend: true,
       scroll: false,
       createdAt: message.created_at,
     });
+    if (role === "assistant") {
+      restoreHistoricalAssistantMedia(body, message);
+    }
     loadedMessageItems.unshift(body.parentElement);
   }
   ensureHistoryLoadIndicator();
@@ -1344,6 +1831,7 @@ async function resetChat() {
   }
   isResetting = true;
   setStatus("重置中");
+  clearDrawModeSelection();
 
   if (activeController) {
     await stopActiveGeneration();
@@ -1451,6 +1939,7 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
     showUser = true,
     maxTokens = 8192,
     openingPlaceholder = "",
+    drawMode = false,
   } = options;
   if (showUser) {
     createBubble("user", text, attachments);
@@ -1463,7 +1952,7 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
   setBusy(true);
   clearSearchActivity();
   const largeAttachment = hasLargeAttachment(attachments);
-  setStatus(largeAttachment ? "图片过大，狠狠压缩中..." : (options.cachedOpening ? "开场生成中" : (webSearch ? "联网搜索中" : "生成中")));
+  setStatus(largeAttachment ? "图片过大，狠狠压缩中..." : (drawMode ? "画图 prompt 优化中" : (options.cachedOpening ? "开场生成中" : (webSearch ? "联网搜索中" : "生成中"))));
 
   try {
     const response = await fetch("/api/chat/stream", {
@@ -1473,10 +1962,11 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
       body: JSON.stringify({
         session_id: sessionId,
         message: text,
+        mode: drawMode ? "draw" : "chat",
         attachments,
         hidden_user: hiddenUser,
         cached_opening: Boolean(options.cachedOpening),
-        web_search: webSearch,
+        web_search: drawMode ? false : webSearch,
         web_search_proxy: samplingSettings.web_search_proxy,
         max_tokens: maxTokens,
         ...getSamplingSettings(),
@@ -1549,6 +2039,32 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
           setStatus("搜索失败，继续生成");
         }
       },
+      draw_status: (payload) => {
+        setSearchActivity(payload.message || "画图中");
+        setStatus(payload.message || "画图中");
+      },
+      draw_prompt: (payload) => {
+        setSearchActivity("画图 prompt 已优化");
+        setStatus("HiDream 生成中");
+        if (payload.optimized_prompt) {
+          setRenderedMarkdown(assistantBody, "画图 prompt 已优化，正在生成图片。");
+        }
+      },
+      draw_image_batch: (payload) => {
+        const images = Array.isArray(payload.images) ? payload.images : [];
+        assistantBody.replaceChildren();
+        assistantBody.appendChild(renderGeneratedImageBatch(images, payload.optimized_prompt || ""));
+        assistantBody.dataset.rawMarkdown = `已生成 ${images.length} 张图片。`;
+        setSearchActivity(`图片已生成：${images.length} 张`);
+        setStatus("图片已生成");
+        scrollToBottom();
+      },
+      draw_error: (payload) => {
+        setRenderedMarkdown(assistantBody, payload.message || "图片生成失败");
+        assistantBody.parentElement.classList.add("error");
+        setStatus("图片生成失败");
+        return true;
+      },
       token: (payload) => {
         if (!hasReceivedToken && openingPlaceholder) {
           setRenderedMarkdown(assistantBody, "");
@@ -1557,7 +2073,13 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
         setRenderedMarkdown(assistantBody, getRawMarkdown(assistantBody) + (payload.content || ""));
         scrollToBottom();
       },
-      done: () => {
+      done: (payload) => {
+        if (payload && payload.skipped_empty && !hasReceivedToken) {
+          removeEmptyAssistantBubble(assistantBody);
+        } else if (payload && payload.content && !hasReceivedToken && !getRawMarkdown(assistantBody).trim()) {
+          hasReceivedToken = true;
+          setRenderedMarkdown(assistantBody, payload.content);
+        }
         setStatus("就绪");
         return true;
       },
@@ -1745,7 +2267,8 @@ chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   let text = messageInput.value.trim();
   const attachments = pendingAttachments.map((attachment) => ({ ...attachment }));
-  const useWebSearch = webSearchEnabled;
+  const useDraw = drawEnabled;
+  const useWebSearch = useDraw ? false : webSearchEnabled;
   if ((!text && !attachments.length) || activeController) {
     return;
   }
@@ -1754,7 +2277,8 @@ chatForm.addEventListener("submit", async (event) => {
   }
   messageInput.value = "";
   clearPendingAttachments();
-  await sendMessage(text, attachments, useWebSearch);
+  await sendMessage(text, attachments, useWebSearch, { drawMode: useDraw });
+  setDrawEnabled(drawEnabled);
 });
 
 sendButton.addEventListener("click", async (event) => {
@@ -1786,9 +2310,19 @@ resetButton.addEventListener("click", resetChat);
 attachImageButton.addEventListener("click", () => imageInput.click());
 webSearchButton.addEventListener("click", () => {
   setWebSearchEnabled(!webSearchEnabled);
+  if (webSearchEnabled) {
+    setDrawEnabled(false);
+  }
   setStatus(webSearchEnabled ? "联网搜索已开启" : "联网搜索已关闭");
   messageInput.focus();
 });
+if (drawButton) {
+  drawButton.addEventListener("click", () => {
+    setDrawEnabled(!drawEnabled);
+    setStatus(drawEnabled ? "画图已开启" : "画图已关闭");
+    messageInput.focus();
+  });
+}
 messagesEl.addEventListener("scroll", handleMessagesScroll, { passive: true });
 messagesEl.addEventListener("wheel", handleDesktopPreviousSessionWheel, { passive: false });
 messagesEl.addEventListener("touchstart", (event) => {
@@ -1852,6 +2386,7 @@ document.addEventListener("visibilitychange", () => {
     loadUserMemoryBinding().catch(() => {});
   }
 });
+window.addEventListener("pageshow", clearDrawModeSelection);
 memoryAdminButton.addEventListener("pointerdown", handleMemoryAdminLongPressStart);
 memoryAdminButton.addEventListener("pointerup", clearMemoryAdminLongPress);
 memoryAdminButton.addEventListener("pointerleave", clearMemoryAdminLongPress);
@@ -1887,12 +2422,45 @@ confirmSamplingButton.addEventListener("click", () => {
     top_p: topPRange.value,
     web_search_proxy: webSearchProxyInput.value,
   });
-  hideAdvancedOptions();
+  closeAdvancedOptions();
   setStatus(`采样已更新：${samplingSummary.textContent}`);
+});
+if (cancelSamplingButton) {
+  cancelSamplingButton.addEventListener("click", closeAdvancedOptions);
+}
+if (advancedOptions) {
+  advancedOptions.addEventListener("click", (event) => {
+    if (event.target === advancedOptions) {
+      closeAdvancedOptions();
+    }
+  });
+}
+if (advancedOptionsForm) {
+  advancedOptionsForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+  });
+}
+if (openModelSettingsButton) {
+  openModelSettingsButton.addEventListener("click", openModelSettingsDialog);
+}
+if (localModelServiceButton) {
+  localModelServiceButton.addEventListener("click", startLocalModelService);
+}
+if (modelSettingsForm) {
+  modelSettingsForm.addEventListener("submit", saveModelSettings);
+}
+if (modelSettingsCancelButton) {
+  modelSettingsCancelButton.addEventListener("click", closeModelSettingsDialog);
+}
+document.querySelectorAll("[data-model-field=\"provider\"]").forEach((input) => {
+  input.addEventListener("change", () => applyProviderPreset(input.dataset.modelSlot));
 });
 syncSamplingControlsFromSettings();
 
+loadModelSettings().catch(() => {});
+loadLocalModelServiceStatus();
 loadUserMemoryBinding().catch(() => {});
+clearDrawModeSelection();
 createSession().catch((error) => {
   setStatus("连接失败");
   createBubble("assistant", `连接失败：${error.message}`);

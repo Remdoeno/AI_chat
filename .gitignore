@@ -8,17 +8,13 @@ __pycache__/
 !.env.example
 
 data/
-log/
 logs/
 backups/
-backup_*/
 output/
 *.sqlite3
 *.sqlite3-*
 *.db
 *.pid
-*.bundle
-__upload_tmp__/
 
 models/
 model/

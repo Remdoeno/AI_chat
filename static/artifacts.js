@@ -382,6 +382,111 @@ function handleLikeClick(event, artifactId) {
   }, 220);
 }
 
+function artifactImages(item) {
+  return Array.isArray(item && item.images) ? item.images : [];
+}
+
+function artifactCoverImage(item) {
+  return item && item.cover_image ? item.cover_image : artifactImages(item)[0];
+}
+
+function renderArtifactImageGrid(images) {
+  const grid = document.createElement("div");
+  grid.className = "artifact-image-grid";
+  for (const [index, imageItem] of artifactImages({ images }).entries()) {
+    const url = imageItem && imageItem.public_url ? String(imageItem.public_url) : "";
+    if (!url) {
+      continue;
+    }
+    const figure = document.createElement("figure");
+    figure.className = "artifact-image-item";
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = imageItem.plan_title || `成果配图 ${index + 1}`;
+    const download = document.createElement("a");
+    download.className = "artifact-image-download";
+    download.href = url;
+    download.download = `wangcai-artifact-${index + 1}`;
+    download.textContent = "下载";
+    figure.append(image, download);
+    grid.appendChild(figure);
+  }
+  return grid;
+}
+
+function renderArtifactInlineImage(imageItem, index) {
+  const url = imageItem && imageItem.public_url ? String(imageItem.public_url) : "";
+  if (!url) {
+    return null;
+  }
+  const figure = document.createElement("figure");
+  figure.className = "artifact-inline-image";
+  const image = document.createElement("img");
+  image.src = url;
+  image.alt = imageItem.plan_title || `成果配图 ${index + 1}`;
+  const caption = document.createElement("figcaption");
+  caption.textContent = imageItem.plan_title || `配图 ${index + 1}`;
+  const download = document.createElement("a");
+  download.className = "artifact-image-download";
+  download.href = url;
+  download.download = `wangcai-artifact-${index + 1}`;
+  download.textContent = "下载";
+  figure.append(image, caption, download);
+  return figure;
+}
+
+function paragraphInsertionIndexes(paragraphCount, imageCount) {
+  if (paragraphCount <= 0 || imageCount <= 0) {
+    return [];
+  }
+  const indexes = [];
+  for (let index = 0; index < imageCount; index += 1) {
+    const position = Math.max(0, Math.min(paragraphCount - 1, Math.floor(((index + 1) * paragraphCount) / (imageCount + 1))));
+    indexes.push(position);
+  }
+  return indexes;
+}
+
+function renderArtifactBodyInline(content, images) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "artifact-text-content";
+  setRenderedMarkdown(wrapper, content || "");
+  const imageItems = artifactImages({ images });
+  if (!imageItems.length) {
+    return wrapper;
+  }
+  const blocks = Array.from(wrapper.children).filter((node) => node.matches("p, ul, ol, blockquote, pre, h3, h4, h5, h6"));
+  if (!blocks.length) {
+    for (const [index, imageItem] of imageItems.entries()) {
+      const figure = renderArtifactInlineImage(imageItem, index);
+      if (figure) {
+        wrapper.appendChild(figure);
+      }
+    }
+    return wrapper;
+  }
+  const positions = paragraphInsertionIndexes(blocks.length, imageItems.length);
+  const buckets = new Map();
+  imageItems.forEach((imageItem, index) => {
+    const position = positions[index] ?? blocks.length - 1;
+    if (!buckets.has(position)) {
+      buckets.set(position, []);
+    }
+    buckets.get(position).push({ imageItem, index });
+  });
+  for (const [position, entries] of buckets.entries()) {
+    let anchor = blocks[position];
+    for (const entry of entries) {
+      const figure = renderArtifactInlineImage(entry.imageItem, entry.index);
+      if (figure && anchor && anchor.parentElement) {
+        anchor.insertAdjacentElement("afterend", figure);
+        anchor = figure;
+      }
+    }
+  }
+  return wrapper;
+}
+
 function renderArtifactCard(item) {
   artifactsById.set(Number(item.id), item);
   const article = document.createElement("article");
@@ -405,6 +510,26 @@ function renderArtifactCard(item) {
   const cardHead = document.createElement("div");
   cardHead.className = "artifact-card-head";
   cardHead.append(pill);
+  const imageCount = Number(item.image_count || artifactImages(item).length || 0);
+  if (imageCount > 0) {
+    const imagePill = document.createElement("span");
+    imagePill.className = "type-pill image-count-pill";
+    imagePill.textContent = `${imageCount} 图`;
+    cardHead.append(imagePill);
+  }
+
+  const media = document.createElement("div");
+  media.className = "artifact-card-media";
+  const cover = artifactCoverImage(item);
+  if (cover && cover.public_url) {
+    const coverNode = document.createElement("img");
+    coverNode.className = "artifact-card-cover";
+    coverNode.src = cover.public_url;
+    coverNode.alt = item.title || "成果配图";
+    media.append(coverNode);
+  } else {
+    media.classList.add("artifact-card-media-empty");
+  }
 
   const title = document.createElement("h3");
   title.className = "artifact-title";
@@ -420,6 +545,11 @@ function renderArtifactCard(item) {
   const episode = item.episode_index != null ? ` · 第 ${item.episode_index} 集` : "";
   meta.textContent = `#${item.id}${series}${episode} · ${formatTime(item.created_at)}`;
 
+  const overlay = document.createElement("div");
+  overlay.className = "artifact-card-overlay";
+  overlay.append(cardHead, title, summary, meta);
+  media.append(overlay);
+
   const footer = document.createElement("div");
   footer.className = "artifact-card-footer";
   const footerActions = document.createElement("div");
@@ -427,7 +557,7 @@ function renderArtifactCard(item) {
   footerActions.append(renderCommentButton(item), renderLikeButton(item));
   footer.append(renderDeleteButton(item, "delete-artifact-button artifact-card-delete"), footerActions);
 
-  article.append(cardHead, title, summary, meta, footer);
+  article.append(media, footer);
   return article;
 }
 
@@ -706,7 +836,9 @@ function openArtifactDialog(artifactId, options = {}) {
   artifactDialogMeta.textContent = `#${item.id} · ${artifactTypeLabel(item.artifact_type)}${series}${episode} · ${formatTime(item.created_at)}`;
   artifactDialogSummary.textContent = item.summary || "";
   artifactDialogSummary.hidden = !item.summary;
-  setRenderedMarkdown(artifactDialogBody, item.content || "");
+  artifactDialogBody.replaceChildren();
+  const images = artifactImages(item);
+  artifactDialogBody.appendChild(renderArtifactBodyInline(item.content || "", images));
   artifactDialogLike.dataset.artifactId = String(item.id);
   artifactDialogLike.innerHTML = `${likeIconSvg()}<span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
   artifactDialogDelete.dataset.artifactId = String(item.id);

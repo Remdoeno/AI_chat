@@ -742,6 +742,50 @@ class AppBehaviorTests(unittest.TestCase):
 
         self.assertIn("联网搜索参考：Example", prompt)
 
+    def test_memory_gate_response_can_route_self_profile_context(self):
+        decision = self.app.parse_memory_gate_response(
+            '{"needs_memory": false, "needs_self_profile": true, "reason": "用户询问系统功能"}'
+        )
+
+        self.assertFalse(decision["needs_memory"])
+        self.assertTrue(decision["needs_self_profile"])
+
+    def test_system_prompt_omits_self_profile_when_gate_does_not_request_it(self):
+        session_id = self.app.create_session("7.7.7.7", "agent-no-self-profile")
+
+        prompt = self.app.build_system_prompt(
+            session_id=session_id,
+            user_message="讲个普通笑话",
+            visitor_ip="7.7.7.7",
+            precomputed_memory_gate=False,
+        )
+
+        self.assertNotIn("# 旺财系统自我认知档案", prompt)
+        self.assertNotIn("从创建到当前的主要演进", prompt)
+
+    def test_system_prompt_includes_self_profile_when_gate_requests_it(self):
+        session_id = self.app.create_session("7.7.7.7", "agent-with-self-profile")
+
+        prompt = self.app.build_system_prompt(
+            session_id=session_id,
+            user_message="你现在是什么版本，最近升级了什么？",
+            visitor_ip="7.7.7.7",
+            precomputed_memory_gate={
+                "needs_memory": False,
+                "needs_self_profile": True,
+                "reason": "用户询问系统版本和升级历史",
+            },
+        )
+
+        self.assertIn("# 旺财系统自我认知档案", prompt)
+        self.assertIn("从创建到当前的主要演进", prompt)
+
+    def test_cached_opening_system_prompt_omits_full_self_profile(self):
+        prompt = self.app.cached_opening_system_prompt("device:opening-no-self-profile")
+
+        self.assertNotIn("# 旺财系统自我认知档案", prompt)
+        self.assertNotIn("从创建到当前的主要演进", prompt)
+
     def test_web_search_prompt_suppresses_memory_context(self):
         session_id = self.app.create_session("7.7.7.7", "agent-search-memory")
         memory_id = self.app.save_curated_memory(
@@ -2582,16 +2626,59 @@ class AppBehaviorTests(unittest.TestCase):
         self.app.LAST_USER_ACTIVITY_AT = 0
 
         calls = []
-        original_start = self.app.start_memory_agent_worker
-        self.app.start_memory_agent_worker = lambda: calls.append("started")
+        worker_globals = self.app.idle_agent_can_run.__globals__
+        original_start = worker_globals["start_memory_agent_worker"]
+        worker_globals["start_memory_agent_worker"] = lambda: calls.append("started")
         try:
             can_run, reason = self.app.idle_agent_can_run(force=False)
         finally:
-            self.app.start_memory_agent_worker = original_start
+            worker_globals["start_memory_agent_worker"] = original_start
 
         self.assertFalse(can_run)
         self.assertEqual(reason, "memory_agent_busy")
         self.assertEqual(calls, ["started"])
+
+    def test_memory_worker_waits_for_active_generation_then_processes_pending_job(self):
+        calls = []
+        worker_globals = self.app.memory_agent_worker_loop.__globals__
+        active_generations = worker_globals["ACTIVE_GENERATIONS"]
+        cancel_event = worker_globals["MEMORY_AGENT_CANCEL_EVENT"]
+        worker_lock = worker_globals["MEMORY_AGENT_WORKER_LOCK"]
+        time_module = worker_globals["time"]
+        active_generations.add("busy-session")
+        cancel_event.clear()
+
+        original_fetch = worker_globals["fetch_next_memory_agent_job"]
+        original_enqueue = worker_globals["enqueue_unprocessed_memory_agent_jobs"]
+        original_process = worker_globals["process_memory_agent_job"]
+        original_sleep = time_module.sleep
+        original_wait_seconds = worker_globals["MEMORY_AGENT_ACTIVE_WAIT_SECONDS"]
+
+        def fake_fetch():
+            return None if active_generations else (123 if not calls else None)
+
+        def fake_sleep(_seconds):
+            active_generations.clear()
+
+        worker_globals["fetch_next_memory_agent_job"] = fake_fetch
+        worker_globals["enqueue_unprocessed_memory_agent_jobs"] = lambda: 0
+        worker_globals["process_memory_agent_job"] = lambda job_id: calls.append(job_id)
+        worker_globals["MEMORY_AGENT_ACTIVE_WAIT_SECONDS"] = 0.01
+        time_module.sleep = fake_sleep
+        try:
+            self.app.memory_agent_worker_loop()
+        finally:
+            worker_globals["fetch_next_memory_agent_job"] = original_fetch
+            worker_globals["enqueue_unprocessed_memory_agent_jobs"] = original_enqueue
+            worker_globals["process_memory_agent_job"] = original_process
+            worker_globals["MEMORY_AGENT_ACTIVE_WAIT_SECONDS"] = original_wait_seconds
+            time_module.sleep = original_sleep
+            active_generations.clear()
+            cancel_event.clear()
+            if worker_lock.locked():
+                worker_lock.release()
+
+        self.assertEqual(calls, [123])
 
     def test_idle_agent_clears_stale_running_memory_jobs(self):
         session_id = self.app.create_session("7.7.7.7", "agent-stale-memory")
@@ -4052,12 +4139,17 @@ class AppBehaviorTests(unittest.TestCase):
         session_id = self.app.create_session("device:dev_memgate012345", "agent-memory-status")
         client = TestClient(self.app.app)
 
-        original_gate = self.app.should_use_memory_recall
-        original_model = self.app.iter_model_deltas
-        original_worker = self.app.start_memory_agent_worker
-        self.app.should_use_memory_recall = lambda *_args, **_kwargs: False
-        self.app.iter_model_deltas = lambda *_args, **_kwargs: iter(["好"])
-        self.app.start_memory_agent_worker = lambda: None
+        route_globals = self.app.chat_stream.__globals__
+        original_gate = route_globals["resolve_memory_gate_decision"]
+        original_model = route_globals["iter_model_deltas"]
+        original_worker = route_globals["start_memory_agent_worker"]
+        route_globals["resolve_memory_gate_decision"] = lambda *_args, **_kwargs: {
+            "needs_memory": False,
+            "needs_self_profile": False,
+            "reason": "普通闲聊",
+        }
+        route_globals["iter_model_deltas"] = lambda *_args, **_kwargs: iter(["好"])
+        route_globals["start_memory_agent_worker"] = lambda: None
         try:
             response = client.post(
                 "/api/chat/stream",
@@ -4071,14 +4163,52 @@ class AppBehaviorTests(unittest.TestCase):
                 headers={"X-Qwen-Device-Id": "device:dev_memgate012345"},
             )
         finally:
-            self.app.should_use_memory_recall = original_gate
-            self.app.iter_model_deltas = original_model
-            self.app.start_memory_agent_worker = original_worker
+            route_globals["resolve_memory_gate_decision"] = original_gate
+            route_globals["iter_model_deltas"] = original_model
+            route_globals["start_memory_agent_worker"] = original_worker
+            self.app.MEMORY_AGENT_CANCEL_EVENT.clear()
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("判断是否需要回忆", response.text)
         self.assertIn("无需回忆，直接生成", response.text)
         self.assertNotIn("正在回忆", response.text)
+
+    def test_chat_stream_reports_self_profile_status_when_gate_requests_system_profile(self):
+        session_id = self.app.create_session("device:dev_selfprofile_status", "agent-self-profile-status")
+        client = TestClient(self.app.app)
+
+        route_globals = self.app.chat_stream.__globals__
+        original_gate = route_globals["resolve_memory_gate_decision"]
+        original_model = route_globals["iter_model_deltas"]
+        original_worker = route_globals["start_memory_agent_worker"]
+        route_globals["resolve_memory_gate_decision"] = lambda *_args, **_kwargs: {
+            "needs_memory": False,
+            "needs_self_profile": True,
+            "reason": "用户询问系统配置",
+        }
+        route_globals["iter_model_deltas"] = lambda *_args, **_kwargs: iter(["好"])
+        route_globals["start_memory_agent_worker"] = lambda: None
+        try:
+            response = client.post(
+                "/api/chat/stream",
+                json={
+                    "session_id": session_id,
+                    "message": "怎么修改你的联网代理啊？",
+                    "max_tokens": 16,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                },
+                headers={"X-Qwen-Device-Id": "device:dev_selfprofile_status"},
+            )
+        finally:
+            route_globals["resolve_memory_gate_decision"] = original_gate
+            route_globals["iter_model_deltas"] = original_model
+            route_globals["start_memory_agent_worker"] = original_worker
+            self.app.MEMORY_AGENT_CANCEL_EVENT.clear()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("调用系统资料", response.text)
+        self.assertNotIn("无需回忆，直接生成", response.text)
 
     def test_analysis_trace_records_memory_embedding_before_candidate_judge(self):
         identity = "device:dev_traceorder0123"
