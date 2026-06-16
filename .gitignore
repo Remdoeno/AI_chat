@@ -9,6 +9,9 @@ __pycache__/
 
 data/
 logs/
+log/*
+!log/
+!log/wangcai_*_release_*.md
 backups/
 output/
 *.sqlite3
@@ -28,3 +31,21 @@ weights/
 admin_auth.json
 idle_story_seeds.txt
 local_config.*
+
+# Local development and Codex-only materials.
+docs/
+tests/
+tools/
+qwen_docker_start_models.md
+scripts/README_qwen_ssh.md
+scripts/cleanup_shinning_hero_memory.py
+scripts/qwen36_usage_monitor.py
+
+# One-off maintenance/debug scripts kept locally, not in the public release.
+analyze_repeated_prompts.py
+dedupe_curated_memories.py
+inspect_memory_agent_logs.py
+inspect_query_memory.py
+inspect_recent_memory_prompts.py
+rebuild_memory_vectors.py
+rebuild_user_perspective_memories.py
