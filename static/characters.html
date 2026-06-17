@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>旺财角色库</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <script src="/static/theme.js?v=20260617_directive_close_dot"></script>
+    <link rel="stylesheet" href="/static/characters.css?v=20260618_card_text_clamp" />
+  </head>
+  <body>
+    <main class="character-shell">
+      <section class="character-chat-panel" aria-label="角色库聊天">
+        <header class="character-head">
+          <a class="back-link" href="/artifacts">← 返回成果</a>
+          <div class="character-title-wrap">
+            <div id="characterSticker" class="character-sticker" aria-hidden="true">角</div>
+            <p>WANGCAI CAST</p>
+            <h1>旺财角色库</h1>
+          </div>
+        </header>
+
+        <div id="characterMessages" class="character-messages"></div>
+
+        <form id="characterChatForm" class="character-composer">
+          <p id="characterStatus" class="status">读取中</p>
+          <div id="attachmentPreview" class="attachment-preview"></div>
+          <div class="composer-row">
+            <textarea
+              id="characterMessageInput"
+              rows="3"
+              placeholder="创建角色、修改设定、绑定图片、安排角色在成果里出场"
+            ></textarea>
+            <button id="characterSendButton" class="send-button" type="submit">发送</button>
+          </div>
+          <div class="composer-actions">
+            <button id="attachImageButton" class="tool-button" type="button">图片</button>
+            <button id="drawModeButton" class="tool-button" type="button">画图</button>
+          </div>
+          <input id="imageInput" type="file" accept="image/*" multiple hidden />
+        </form>
+      </section>
+
+      <section class="character-library-panel" aria-label="角色卡片">
+        <div class="library-head">
+          <div>
+            <p>CAST</p>
+            <h2>角色</h2>
+          </div>
+          <button id="refreshCharactersButton" class="secondary-button" type="button">刷新</button>
+        </div>
+        <div id="characterGrid" class="character-grid"></div>
+      </section>
+    </main>
+
+    <dialog id="characterDialog" class="character-dialog" aria-labelledby="characterDialogTitle">
+      <div class="character-dialog-shell">
+        <div class="dialog-head">
+          <div>
+            <p id="characterDialogMeta" class="meta"></p>
+            <h2 id="characterDialogTitle"></h2>
+          </div>
+          <button id="characterDialogClose" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <div id="characterDialogBody" class="character-detail"></div>
+        <div class="dialog-actions">
+          <button id="characterDialogDelete" class="danger-button" type="button">删除角色</button>
+          <div class="dialog-actions-right">
+            <button id="characterDialogCancel" class="secondary-button" type="button">取消</button>
+            <button id="characterDialogSave" class="send-button" type="button">确定</button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="/static/characters.js?v=20260618_card_text_bg_personality"></script>
+    <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
+  </body>
+</html>

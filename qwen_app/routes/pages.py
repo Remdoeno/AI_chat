@@ -33,6 +33,11 @@ def artifacts_dashboard() -> FileResponse:
     return html_response("artifacts.html")
 
 
+@app.get("/characters", include_in_schema=False)
+def characters_dashboard() -> FileResponse:
+    return html_response("characters.html")
+
+
 @app.get("/analysis", include_in_schema=False)
 def analysis_dashboard(request: Request) -> FileResponse:
     if not is_analysis_authenticated(request):

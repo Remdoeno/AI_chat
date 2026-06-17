@@ -7,5 +7,5 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Qwen3.6 Web Chat", version="1.1.0", lifespan=lifespan)
+app = FastAPI(title="Wangcai Web", version="2.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

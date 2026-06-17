@@ -139,12 +139,18 @@ def build_system_prompt(
 ) -> str:
     memory_context = ""
     artifact_context = ""
+    artifact_theater_context = ""
     active_recall_context = ""
     visitor_context = format_visitor_identity_context(visitor_ip)
     profile_context = format_profile_context(retrieve_profile_context_memories(visitor_ip))
     timeline_events_context = ""
     date_context = current_date_context()
     memory_gate_decision = normalize_memory_gate_decision(precomputed_memory_gate)
+    try:
+        artifact_theater_context = format_artifact_theater_context_for_chat(user_message)
+    except Exception as exc:
+        artifact_theater_context = ""
+        record_event(session_id, "artifact_theater_context_error", visitor_ip, {"error": str(exc)})
     if not web_search_context:
         if planner_context_messages is None:
             planner_context_messages = load_recent_planner_context_messages(
@@ -288,6 +294,8 @@ def build_system_prompt(
         prompt_parts.append(profile_context)
     if timeline_events_context:
         prompt_parts.append(timeline_events_context)
+    if artifact_theater_context:
+        prompt_parts.append(artifact_theater_context)
     if memory_context:
         prompt_parts.append(memory_context)
     if artifact_context:
@@ -701,6 +709,8 @@ def call_chat_completion_once(
 
 
 def visitor_ip(request: Request) -> str:
+    # Legacy name kept for existing call sites and DB columns.
+    # Live identity is device-based only; never fall back to network IP.
     device_id = clean_device_id(request.headers.get("x-qwen-device-id", ""))
     if device_id:
         return device_id

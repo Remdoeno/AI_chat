@@ -1167,7 +1167,7 @@ function renderTraceLightObject(payload) {
     row.className = "trace-light-row";
     const label = document.createElement("strong");
     label.className = "trace-light-key";
-    label.textContent = key;
+    label.textContent = key === "visitor_ip" ? "device_id" : key;
     row.append(label, renderTraceLightValue(value));
     container.appendChild(row);
   });
@@ -1282,6 +1282,19 @@ function readableMemoryLabel(label) {
   return labels[label] || label || "记忆";
 }
 
+function readableArtifactDirectiveType(type) {
+  const labels = {
+    character_include: "角色出场",
+    character_avoid: "角色避让",
+    plot_direction: "剧情方向",
+    style_rule: "风格规则",
+    series_rule: "系列规则",
+    image_rule: "配图规则",
+    other: "导演指令",
+  };
+  return labels[type] || type || "导演指令";
+}
+
 function readableSkipReason(reason) {
   const reasons = {
     recent_duplicate_memory: "近期重复",
@@ -1375,6 +1388,42 @@ function traceTitleParts(item) {
     title = eventType === "draw_error"
       ? "图片生成：失败"
       : `图片生成：完成${imageCount ? `，${imageCount} 张` : ""}`;
+  } else if (step === "hidden_character_agent_prompt") {
+    const ids = Array.isArray(payload.source_message_ids) ? payload.source_message_ids.length : 0;
+    title = `${traceAgentName("隐性角色整理 Prompt", payload)}：完整输入${ids ? `，${ids} 条来源消息` : ""}`;
+  } else if (step === "hidden_character_agent_model") {
+    const decision = payload.decision || {};
+    const character = decision.character || {};
+    if (eventType === "model_call_error") {
+      title = `${traceAgentName("隐性角色整理 Agent", payload)}：调用失败`;
+    } else if (decision.action === "upsert") {
+      title = `${traceAgentName("隐性角色整理 Agent", payload)}：识别/更新「${character.canonical_name || "未命名角色"}」`;
+    } else {
+      title = `${traceAgentName("隐性角色整理 Agent", payload)}：无需写入角色设定`;
+    }
+  } else if (step === "hidden_character_profile_write") {
+    const result = payload.result || {};
+    const statusNames = { create: "创建", update: "更新", skipped: "跳过" };
+    title = `隐性角色设定写入：${statusNames[result.status] || result.status || "完成"}${result.canonical_name ? `「${result.canonical_name}」` : ""}`;
+  } else if (step === "artifact_directive_agent_prompt") {
+    const ids = Array.isArray(payload.source_message_ids) ? payload.source_message_ids.length : 0;
+    title = `${traceAgentName("成果小剧场指令 Prompt", payload)}：完整输入${ids ? `，${ids} 条来源消息` : ""}`;
+  } else if (step === "artifact_directive_agent_model") {
+    const decision = payload.decision || {};
+    const directive = decision.directive || {};
+    if (eventType === "model_call_error") {
+      title = `${traceAgentName("成果小剧场指令 Agent", payload)}：调用失败`;
+    } else if (decision.action === "upsert") {
+      const subject = directive.subject ? `「${directive.subject}」` : "";
+      title = `${traceAgentName("成果小剧场指令 Agent", payload)}：写入 ${readableArtifactDirectiveType(directive.directive_type)} ${subject}`;
+    } else {
+      title = `${traceAgentName("成果小剧场指令 Agent", payload)}：无需写入`;
+    }
+  } else if (step === "hidden_artifact_directive_write") {
+    const result = payload.result || {};
+    const statusNames = { create: "创建", update: "更新", skipped: "跳过" };
+    const subject = result.subject ? `「${result.subject}」` : "";
+    title = `成果小剧场指令写入：${statusNames[result.status] || result.status || "完成"} ${readableArtifactDirectiveType(result.directive_type)} ${subject}`;
   } else if (step === "memory_recall_gate") {
     const decision = payload.decision || {};
     const needsMemory = Boolean(decision.needs_memory);
@@ -1388,6 +1437,16 @@ function traceTitleParts(item) {
       routeSummary = "读取系统资料";
     }
     title = `${traceAgentName("记忆路由", payload)}：${routeSummary}`;
+  } else if (step === "memory_query_planner") {
+    const decision = payload.decision || {};
+    const queryCount = Array.isArray(decision.queries)
+      ? decision.queries.length
+      : (decision.query ? 1 : 0);
+    const queryPreview = compactTraceText(
+      decision.query || (Array.isArray(decision.queries) ? decision.queries[0] : "") || "",
+      34
+    );
+    title = `${traceAgentName("记忆检索规划", payload)}：生成检索 query${queryCount ? ` ${queryCount} 条` : ""}${queryPreview ? `「${queryPreview}」` : ""}`;
   } else if (step === "memory_query_embedding") {
     const candidates = traceResultCount(payload, "candidate_memories");
     const query = compactTraceText(payload.input_preview || (payload.result && payload.result.query), 28);
@@ -1614,7 +1673,7 @@ function renderTraceItem(item) {
   summary.title = [
     item.step_name,
     TRACE_EVENT_LABELS[item.event_type] || item.event_type,
-    item.visitor_ip,
+    item.device_id || item.visitor_ip,
   ].filter(Boolean).join(" · ");
   const meta = document.createElement("div");
   meta.className = "trace-meta";

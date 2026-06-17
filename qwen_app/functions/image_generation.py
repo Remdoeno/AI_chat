@@ -851,8 +851,11 @@ def hidream_dimensions(aspect_ratio: str) -> Tuple[int, int]:
     return presets.get(ratio, presets["1:1"])
 
 
-def hidream_seed(index: int) -> int:
-    return 32 + (int(index) * 9973)
+def hidream_seed(index: int, batch_seed: int = 0) -> int:
+    base = int(batch_seed or 0) % 2147483647
+    if base <= 0:
+        base = 32
+    return ((base + (int(index) * 9973)) % 2147483647) or 32
 
 
 def request_hidream_flask_images(
@@ -864,6 +867,7 @@ def request_hidream_flask_images(
 ) -> List[bytes]:
     width, height = hidream_dimensions(aspect_ratio)
     images: List[bytes] = []
+    batch_seed = int(uuid.uuid4().int % 2147483647) or 32
     for index in range(int(count)):
         start_resp = client.post(
             f"{base_url}/api/generate/start",
@@ -872,7 +876,7 @@ def request_hidream_flask_images(
                 "prompt": prompt,
                 "width": width,
                 "height": height,
-                "seed": hidream_seed(index),
+                "seed": hidream_seed(index, batch_seed),
                 "refs_b64": [],
                 "keep_original_aspect": False,
             },

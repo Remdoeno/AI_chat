@@ -5,6 +5,9 @@ MODEL_SLOT_CHAT = "chat"
 MODEL_SLOT_BACKGROUND = "background"
 MODEL_SLOT_IMAGE = "image"
 MODEL_SETTING_SLOTS = (MODEL_SLOT_CHAT, MODEL_SLOT_BACKGROUND, MODEL_SLOT_IMAGE)
+MODEL_PROVIDER_API_KEYS_KEY = "provider_api_keys"
+MODEL_WEB_SEARCH_PROXY_KEY = "web_search_proxy"
+MODEL_KEYLESS_PROVIDERS = {"local", "none", "hidream"}
 
 LOCAL_MODEL_DISPLAY_NAME = "Qwen3.6"
 IMAGE_MODEL_DISPLAY_NAME = "HiDream-O1-Image-Dev-2604"
@@ -27,25 +30,41 @@ MODEL_PROVIDER_PRESETS: Dict[str, Dict[str, object]] = {
         "proxy_url": "",
     },
     "openai": {
-        "display_name": "GPT-4.1",
+        "display_name": "gpt-5.5",
         "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4.1",
+        "model": "gpt-5.5",
         "api_key": "",
         "use_proxy": True,
         "proxy_url": "",
     },
     "deepseek": {
-        "display_name": "DeepSeek Chat",
+        "display_name": "deepseek-v4-pro",
         "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-pro",
+        "api_key": "",
+        "use_proxy": True,
+        "proxy_url": "",
+    },
+    "zhipu": {
+        "display_name": "glm-5.2",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-5.2",
         "api_key": "",
         "use_proxy": True,
         "proxy_url": "",
     },
     "dashscope": {
-        "display_name": "通义千问",
+        "display_name": "qwen3.7-max",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-plus",
+        "model": "qwen3.7-max",
+        "api_key": "",
+        "use_proxy": True,
+        "proxy_url": "",
+    },
+    "doubao": {
+        "display_name": "doubao-seed-2.0-pro",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "model": "doubao-seed-2-0-pro-260215",
         "api_key": "",
         "use_proxy": True,
         "proxy_url": "",
@@ -86,12 +105,16 @@ def default_model_settings() -> Dict[str, Dict[str, object]]:
         MODEL_SLOT_CHAT: dict(slot),
         MODEL_SLOT_BACKGROUND: dict(slot),
         MODEL_SLOT_IMAGE: default_model_slot("none"),
+        MODEL_PROVIDER_API_KEYS_KEY: {},
+        MODEL_WEB_SEARCH_PROXY_KEY: "",
     }
 
 
 def normalize_model_slot(
     raw: object,
     existing: Optional[Dict[str, object]] = None,
+    provider_api_keys: Optional[Dict[str, str]] = None,
+    web_search_proxy: str = "",
 ) -> Dict[str, object]:
     data = raw if isinstance(raw, dict) else {}
     provider = str(data.get("provider") or (existing or {}).get("provider") or DEFAULT_MODEL_PROVIDER).strip().lower()
@@ -103,15 +126,21 @@ def normalize_model_slot(
     display_name = str(data.get("display_name") or preset.get("display_name") or model or provider).strip()
 
     existing_provider = str((existing or {}).get("provider") or "").strip().lower()
+    provider_keys = provider_api_keys or {}
     if "api_key" in data and data.get("api_key") is not None:
         api_key = str(data.get("api_key") or "").strip()
+    elif provider not in MODEL_KEYLESS_PROVIDERS and provider_keys.get(provider):
+        api_key = str(provider_keys.get(provider) or "").strip()
     elif existing is not None and existing_provider == provider:
         api_key = str(existing.get("api_key") or "").strip()
     else:
         api_key = str(preset.get("api_key") or "").strip()
 
-    proxy_url = str(data.get("proxy_url") or preset.get("proxy_url") or "").strip()
+    shared_proxy = str(web_search_proxy or "").strip()
+    proxy_url = str(data.get("proxy_url") or shared_proxy or preset.get("proxy_url") or "").strip()
     use_proxy = bool(data.get("use_proxy", preset.get("use_proxy", False)))
+    if provider not in MODEL_KEYLESS_PROVIDERS and shared_proxy:
+        use_proxy = True
 
     if provider == "local":
         display_name = LOCAL_MODEL_DISPLAY_NAME
@@ -146,16 +175,70 @@ def normalize_model_slot(
     }
 
 
+def normalize_provider_api_keys(raw: object, existing: object = None) -> Dict[str, str]:
+    keys: Dict[str, str] = {}
+    for source in (existing, raw):
+        data = source if isinstance(source, dict) else {}
+        provider_keys = data.get(MODEL_PROVIDER_API_KEYS_KEY, {})
+        if isinstance(provider_keys, dict):
+            for provider, api_key in provider_keys.items():
+                key = str(provider or "").strip().lower()
+                value = str(api_key or "").strip()
+                if key and value and key not in MODEL_KEYLESS_PROVIDERS:
+                    keys[key] = value
+        for slot in MODEL_SETTING_SLOTS:
+            slot_data = data.get(slot, {})
+            if not isinstance(slot_data, dict):
+                continue
+            provider = str(slot_data.get("provider") or "").strip().lower()
+            api_key = str(slot_data.get("api_key") or "").strip()
+            if provider and api_key and provider not in MODEL_KEYLESS_PROVIDERS:
+                keys[provider] = api_key
+    return keys
+
+
+def normalize_model_web_search_proxy(raw: object, existing: object = None) -> str:
+    data = raw if isinstance(raw, dict) else {}
+    if MODEL_WEB_SEARCH_PROXY_KEY in data:
+        proxy = str(data.get(MODEL_WEB_SEARCH_PROXY_KEY) or "").strip()
+        if proxy:
+            return proxy
+    existing_data = existing if isinstance(existing, dict) else {}
+    proxy = str(existing_data.get(MODEL_WEB_SEARCH_PROXY_KEY) or "").strip()
+    if proxy:
+        return proxy
+    for source in (data, existing_data):
+        for slot in MODEL_SETTING_SLOTS:
+            slot_data = source.get(slot, {}) if isinstance(source, dict) else {}
+            if not isinstance(slot_data, dict):
+                continue
+            provider = str(slot_data.get("provider") or "").strip().lower()
+            proxy_url = str(slot_data.get("proxy_url") or "").strip()
+            if provider not in MODEL_KEYLESS_PROVIDERS and proxy_url:
+                return proxy_url
+    return ""
+
+
 def normalize_model_settings(
     raw: object,
     existing: Optional[Dict[str, Dict[str, object]]] = None,
 ) -> Dict[str, Dict[str, object]]:
     data = raw if isinstance(raw, dict) else {}
     base = existing or default_model_settings()
-    return {
-        slot: normalize_model_slot(data.get(slot, {}), existing=base.get(slot))
+    provider_api_keys = normalize_provider_api_keys(data, existing=base)
+    web_search_proxy = normalize_model_web_search_proxy(data, existing=base)
+    settings: Dict[str, object] = {
+        slot: normalize_model_slot(
+            data.get(slot, {}),
+            existing=base.get(slot),
+            provider_api_keys=provider_api_keys,
+            web_search_proxy=web_search_proxy,
+        )
         for slot in MODEL_SETTING_SLOTS
     }
+    settings[MODEL_PROVIDER_API_KEYS_KEY] = provider_api_keys
+    settings[MODEL_WEB_SEARCH_PROXY_KEY] = web_search_proxy
+    return settings
 
 
 def load_model_settings() -> Dict[str, Dict[str, object]]:
@@ -194,7 +277,15 @@ def public_model_slot(slot: Dict[str, object]) -> Dict[str, object]:
 
 def public_model_settings(settings: Optional[Dict[str, Dict[str, object]]] = None) -> Dict[str, Dict[str, object]]:
     data = settings or load_model_settings()
-    return {slot: public_model_slot(data[slot]) for slot in MODEL_SETTING_SLOTS}
+    public: Dict[str, object] = {slot: public_model_slot(data[slot]) for slot in MODEL_SETTING_SLOTS}
+    provider_keys = data.get(MODEL_PROVIDER_API_KEYS_KEY, {})
+    public[MODEL_PROVIDER_API_KEYS_KEY] = {
+        str(provider): True
+        for provider, api_key in (provider_keys.items() if isinstance(provider_keys, dict) else [])
+        if str(api_key or "").strip()
+    }
+    public[MODEL_WEB_SEARCH_PROXY_KEY] = str(data.get(MODEL_WEB_SEARCH_PROXY_KEY) or "").strip()
+    return public
 
 
 def model_slot_config(slot: str) -> Dict[str, object]:

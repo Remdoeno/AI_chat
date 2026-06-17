@@ -53,13 +53,13 @@ def health() -> Dict[str, object]:
 
 
 @app.get("/api/model-settings")
-def model_settings_endpoint() -> Dict[str, Dict[str, object]]:
+def model_settings_endpoint() -> Dict[str, object]:
     init_db()
     return public_model_settings()
 
 
 @app.put("/api/model-settings")
-def update_model_settings_endpoint(payload: ModelSettingsPayload) -> Dict[str, Dict[str, object]]:
+def update_model_settings_endpoint(payload: ModelSettingsPayload) -> Dict[str, object]:
     init_db()
     payload_data = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
     settings = save_model_settings(payload_data)
@@ -280,6 +280,7 @@ def admin_memories_endpoint(
     keyword: str = "",
     label: str = "",
     visitor_ip_filter: str = "",
+    device_id_filter: str = "",
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> Dict[str, object]:
     require_admin(request)
@@ -287,7 +288,7 @@ def admin_memories_endpoint(
     return list_admin_memories(
         keyword=keyword,
         label=label,
-        visitor_ip_filter=visitor_ip_filter,
+        visitor_ip_filter=device_id_filter or visitor_ip_filter,
         limit=limit,
     )
 
@@ -299,7 +300,7 @@ def admin_create_memory_endpoint(payload: MemoryAdminPayload, request: Request) 
     memory_id = create_admin_memory(
         payload.content,
         payload.importance_label,
-        payload.visitor_ip or "",
+        payload.device_id or payload.visitor_ip or "",
         payload.timeline_at or "",
         payload.timeline_start_at or "",
         payload.timeline_end_at or "",
@@ -325,7 +326,7 @@ def admin_update_memory_endpoint(
         payload.timeline_start_at,
         payload.timeline_end_at,
         payload.timeline_kind,
-        payload.visitor_ip,
+        payload.device_id if payload.device_id is not None else payload.visitor_ip,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="memory not found")
@@ -569,6 +570,368 @@ def update_artifacts_idle_status_endpoint(payload: IdleStatusPayload, request: R
     paused = set_idle_agent_paused(payload.paused)
     record_event(None, "idle_agent_pause_update", visitor_ip(request), {"paused": paused})
     return {"paused": paused}
+
+
+@app.post("/api/characters/session")
+def create_character_library_session_endpoint(request: Request) -> Dict[str, object]:
+    init_db()
+    current_visitor = visitor_ip(request)
+    session_id = create_session(current_visitor, user_agent(request))
+    record_event(session_id, "character_library_session_created", current_visitor, {})
+    return {
+        "session_id": session_id,
+        "greeting": "今天又来创建或修改角色了嘛~",
+        "has_previous": has_previous_character_library_context_session(session_id),
+    }
+
+
+@app.get("/api/characters")
+def character_library_profiles_endpoint(
+    limit: int = Query(default=200, ge=1, le=500),
+) -> Dict[str, object]:
+    init_db()
+    return list_character_library_profiles(limit=limit)
+
+
+@app.get("/api/characters/sessions/{session_id}/previous-context")
+def previous_character_library_context_endpoint(session_id: str, request: Request) -> Dict[str, object]:
+    init_db()
+    ensure_active_session(session_id)
+    with connect_db() as conn:
+        candidate = previous_character_library_context_candidate(conn, session_id)
+    return {
+        "has_previous": candidate is not None,
+        "session": None if candidate is None else {
+            "id": str(candidate["id"]),
+            "started_at": str(candidate["started_at"]),
+            "ended_at": str(candidate["ended_at"] or ""),
+            "end_reason": str(candidate["end_reason"] or ""),
+        },
+    }
+
+
+@app.post("/api/characters/sessions/{session_id}/load-previous")
+def load_previous_character_library_context_endpoint(session_id: str, request: Request) -> Dict[str, object]:
+    init_db()
+    ensure_active_session(session_id)
+    current_visitor = visitor_ip(request)
+    result = load_previous_character_library_context(session_id)
+    record_event(
+        session_id,
+        "character_library_context_load_previous",
+        current_visitor,
+        {
+            "loaded": bool(result.get("loaded")),
+            "source_session_id": (result.get("session") or {}).get("id") if isinstance(result.get("session"), dict) else "",
+            "message_count": len(result.get("messages") or []),
+            "has_more": bool(result.get("has_more")),
+        },
+    )
+    return result
+
+
+@app.get("/api/characters/{character_id}")
+def character_library_profile_endpoint(character_id: int) -> Dict[str, object]:
+    init_db()
+    try:
+        return get_character_library_profile(character_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="character not found")
+
+
+@app.patch("/api/characters/{character_id}")
+def update_character_library_profile_endpoint(
+    character_id: int,
+    payload: Dict[str, object],
+    request: Request,
+) -> Dict[str, object]:
+    init_db()
+    ip = visitor_ip(request)
+    try:
+        item = update_hidden_character_profile_fields(character_id, payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="character not found")
+    record_event(None, "character_library_manual_update", ip, {"character_id": character_id})
+    return item
+
+
+@app.post("/api/characters/{character_id}/images/generate")
+def generate_character_library_image_endpoint(
+    character_id: int,
+    payload: Dict[str, object],
+    request: Request,
+) -> Dict[str, object]:
+    init_db()
+    ip = visitor_ip(request)
+    kind = str(payload.get("kind") or "photo").strip().lower()
+    if kind not in {"avatar", "photo"}:
+        raise HTTPException(status_code=400, detail="kind must be avatar or photo")
+    try:
+        return generate_character_image(
+            character_id,
+            kind,
+            ip,
+            prompt_hint=str(payload.get("prompt_hint") or ""),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="character not found")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@app.delete("/api/characters/{character_id}/images/{image_id}")
+def delete_character_library_image_endpoint(character_id: int, image_id: int, request: Request) -> Dict[str, object]:
+    init_db()
+    try:
+        return delete_character_image(character_id, image_id, visitor_ip(request))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="image not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.delete("/api/characters/{character_id}")
+def delete_character_library_profile_endpoint(character_id: int, request: Request) -> Dict[str, object]:
+    init_db()
+    ip = visitor_ip(request)
+    deleted = delete_hidden_character_profile(character_id, "", reason="manual delete from character library")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="character not found")
+    record_event(None, "character_library_delete", ip, {"character_id": character_id})
+    return {"id": character_id, "ok": True}
+
+
+@app.post("/api/characters/chat/stream")
+def character_library_chat_stream(payload: CharacterChatPayload, request: Request) -> StreamingResponse:
+    init_db()
+    session_id = payload.session_id
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="message is empty")
+    ensure_active_session(session_id)
+    ip = visitor_ip(request)
+    refresh_session_visitor_ip(session_id, ip, user_agent(request))
+    record_event(
+        session_id,
+        "character_library_chat_start",
+        ip,
+        {
+            "chars": len(message),
+            "attachments": len(payload.attachments),
+            "mode": payload.mode,
+        },
+    )
+    user_message_id = add_message(
+        session_id,
+        "user",
+        message,
+        attachments=payload.attachments,
+        hidden=True,
+        extra_metadata={"character_library": True},
+    )
+
+    def generate() -> Generator[str, None, None]:
+        uploaded_images: List[Dict[str, object]] = []
+        draw_batch: Optional[Dict[str, object]] = None
+        assistant_metadata: Dict[str, object] = {"character_library": True}
+        try:
+            yield format_sse("start", {"session_id": session_id})
+            if payload.attachments:
+                uploaded_images = save_character_library_uploaded_images(payload.attachments, session_id)
+                if uploaded_images:
+                    yield format_sse("uploaded_images", {"images": uploaded_images})
+            if str(payload.mode or "chat").strip().lower() == "draw":
+                status = public_image_model_status()
+                if not status.get("available"):
+                    message_text = "图像生成模型未配置或不可用，无法生成图片"
+                    assistant_id = add_message(session_id, "assistant", message_text, status="failed", hidden=True)
+                    yield format_sse("draw_error", {"message": message_text, "status": status})
+                    yield format_sse("done", {"message_id": assistant_id, "content": message_text})
+                    return
+                yield format_sse("draw_status", {"stage": "prompt", "message": "画图 prompt 优化中"})
+                scene_profiles = character_profiles_mentioned_in_text(message, limit=8)
+                scene_profile_lines: List[str] = []
+                for profile in scene_profiles:
+                    scene_profile_lines.append(
+                        json.dumps(
+                            {
+                                "id": profile.get("id"),
+                                "canonical_name": profile.get("canonical_name"),
+                                "aliases": profile.get("aliases"),
+                                "visual_prompt": clean_character_text(profile.get("visual_prompt"), 2400),
+                                "negative_prompt": clean_character_text(profile.get("negative_prompt"), 800),
+                                "personality": clean_character_text(profile.get("personality"), 900),
+                                "background": clean_character_text(profile.get("background"), 1200),
+                                "relationships": profile.get("relationships"),
+                                "reference_image_ids": profile.get("reference_image_ids"),
+                                "avatar_image_ids": profile.get("avatar_image_ids"),
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                if scene_profile_lines:
+                    draw_context = "\n".join(
+                        [
+                            "角色库一次性场景绘图。",
+                            "本轮用户提出的姿势、情绪、服装变化、地点、动作和剧情只作用于这次图片，不得改写角色库里的固定形象、性格、关系或成果小剧场指令。",
+                            "必须优先保持被点名角色的既有 visual_prompt、发型、发色、脸部气质、标志性服装/配饰、年龄感、体型和身份符号；场景要求只能叠加在这些固定设定上。",
+                            "如果用户场景描述和固定角色形象冲突，保留固定角色形象，按场景描述调整环境、动作、表情和临时道具。",
+                            "被点名角色资料：",
+                            *scene_profile_lines,
+                        ]
+                    )
+                else:
+                    draw_context = (
+                        "角色库一次性场景绘图。用户本轮场景要求只用于生成图片，不修改任何角色设定或成果小剧场指令。"
+                        "如果用户点名现有角色，必须保持角色库里的固定形象。"
+                    )
+                decision = optimize_draw_prompt(
+                    message,
+                    context=(
+                        "角色库绘图：根据用户输入生成一次性角色场景图，不创建、不修改、不补全任何角色设定。"
+                        "如果用户点名现有角色，必须把角色资料当硬约束，不能因为本轮场景描述改变角色本身。不要读取长期记忆。\n\n"
+                        + draw_context
+                    ),
+                    session_id=session_id,
+                    visitor_ip=ip,
+                )
+                yield format_sse(
+                    "draw_prompt",
+                    {
+                        "optimized_prompt": decision.get("optimized_prompt", message),
+                        "negative_prompt": decision.get("negative_prompt", ""),
+                        "aspect_ratio": decision.get("aspect_ratio", "1:1"),
+                        "image_count": CHAT_DRAW_IMAGE_COUNT,
+                        "short_caption": decision.get("short_caption", ""),
+                    },
+                )
+                yield format_sse("draw_status", {"stage": "generating", "message": "HiDream 生成中"})
+                draw_batch = generate_image_batch(
+                    original_prompt=message,
+                    decision=decision,
+                    source_type="character",
+                    source_id=session_id,
+                    count=CHAT_DRAW_IMAGE_COUNT,
+                )
+                scene_link_result = attach_character_scene_images(
+                    message,
+                    draw_batch,
+                    session_id=session_id,
+                    visitor_ip=ip,
+                    source_message_ids=[user_message_id],
+                )
+                if isinstance(scene_link_result, dict):
+                    draw_batch["linked_characters"] = scene_link_result.get("characters", [])
+                    assistant_metadata["scene_link_result"] = scene_link_result
+                assistant_metadata["draw"] = {
+                    "batch_id": draw_batch.get("batch_id", ""),
+                    "images": draw_batch.get("images", []),
+                    "optimized_prompt": draw_batch.get("optimized_prompt", ""),
+                    "negative_prompt": draw_batch.get("negative_prompt", ""),
+                    "aspect_ratio": draw_batch.get("aspect_ratio", "1:1"),
+                    "model_name": draw_batch.get("model_name", ""),
+                    "linked_characters": draw_batch.get("linked_characters", []),
+                }
+                yield format_sse("draw_image_batch", draw_batch)
+                if draw_batch.get("linked_characters"):
+                    yield format_sse(
+                        "character_update",
+                        {
+                            "reason": "scene_images_attached",
+                            "linked_characters": draw_batch.get("linked_characters", []),
+                        },
+                    )
+                linked_names = [
+                    str(item.get("canonical_name") or f"#{item.get('id')}")
+                    for item in draw_batch.get("linked_characters", [])
+                    if isinstance(item, dict)
+                ]
+                if linked_names:
+                    reply = f"已生成本次场景图，并作为一次性场景参考加入：{'、'.join(linked_names)}。本轮改动不会改写角色设定或成果小剧场指令。"
+                else:
+                    reply = "已生成本次场景图。本轮画面要求只作为一次性用法，不会改写角色设定或成果小剧场指令。"
+                assistant_id = add_message(
+                    session_id,
+                    "assistant",
+                    reply,
+                    hidden=True,
+                    extra_metadata=assistant_metadata,
+                )
+                record_event(
+                    session_id,
+                    "character_library_draw_completed_without_profile_update",
+                    ip,
+                    {
+                        "batch_id": draw_batch.get("batch_id", ""),
+                        "linked_characters": draw_batch.get("linked_characters", []),
+                        "image_count": len(draw_batch.get("images", []) if isinstance(draw_batch.get("images"), list) else []),
+                    },
+                )
+                yield format_sse("token", {"content": reply})
+                yield format_sse("done", {"message_id": assistant_id, "content": reply})
+                return
+            yield format_sse("character_status", {"message": "角色库整理中"})
+            context = format_character_library_agent_context(
+                session_id=session_id,
+                user_message=message,
+                attachments=payload.attachments,
+                uploaded_images=uploaded_images,
+                draw_batch=draw_batch,
+            )
+            started = time.perf_counter()
+            decision = call_character_library_agent_model(context)
+            result = apply_character_library_agent_decision(
+                decision,
+                session_id=session_id,
+                visitor_ip=ip,
+                source_message_ids=[user_message_id],
+                allowed_image_ids=[
+                    int(item.get("id") or 0)
+                    for item in uploaded_images
+                    if isinstance(item, dict) and int(item.get("id") or 0) > 0
+                ],
+            )
+            reply = default_character_library_reply(decision, result)
+            assistant_id = add_message(
+                session_id,
+                "assistant",
+                reply,
+                hidden=True,
+                extra_metadata=assistant_metadata,
+            )
+            record_event(
+                session_id,
+                "character_library_agent_completed",
+                ip,
+                {
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                    "action": decision.get("action"),
+                    "target_character_id": decision.get("target_character_id"),
+                    "result": result,
+                },
+            )
+            yield format_sse("character_update", {"decision": decision, "result": result})
+            character_result = result.get("character") if isinstance(result.get("character"), dict) else {}
+            if character_result.get("status") == "delete_confirmation_required":
+                yield format_sse(
+                    "delete_confirmation_required",
+                    {
+                        "id": character_result.get("id"),
+                        "canonical_name": character_result.get("canonical_name", ""),
+                        "message": reply,
+                    },
+                )
+            if reply:
+                yield format_sse("token", {"content": reply})
+            yield format_sse("done", {"message_id": assistant_id, "content": reply})
+        except Exception as exc:
+            message_text = f"角色库处理失败：{exc}"
+            assistant_id = add_message(session_id, "assistant", message_text, status="failed", hidden=True)
+            record_event(session_id, "character_library_agent_error", ip, {"error": str(exc)})
+            yield format_sse("error", {"message": message_text})
+            yield format_sse("done", {"message_id": assistant_id, "content": message_text})
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.get("/api/analysis/traces")
@@ -1617,6 +1980,20 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                         },
                     )
                 queued_memory_job = True
+                artifact_directive_job_started = maybe_start_artifact_directive_agent_job(
+                    session_id=session_id,
+                    visitor_ip=ip,
+                    user_message=message,
+                    source_message_ids=[user_message_id, assistant_id],
+                    analysis_trace_id=analysis_trace_id,
+                )
+                if artifact_directive_job_started:
+                    record_event(
+                        session_id,
+                        "artifact_directive_agent_queued",
+                        ip,
+                        {"user_message_id": user_message_id, "assistant_message_id": assistant_id},
+                    )
             except Exception as exc:
                 record_event(session_id, "memory_agent_enqueue_error", ip, {"error": str(exc)})
             yield format_sse("done", {"message_id": assistant_id, "content": answer})

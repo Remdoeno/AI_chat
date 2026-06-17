@@ -42,6 +42,7 @@ from openai import OpenAI
 from schemas import (
     AdminLoginPayload,
     ArtifactCommentPayload,
+    CharacterChatPayload,
     AuthPasswordPayload,
     ChatAttachment,
     ChatPayload,

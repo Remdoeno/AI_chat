@@ -19,7 +19,7 @@ const memoryList = document.getElementById("memoryList");
 const retrievalList = document.getElementById("retrievalList");
 const operationList = document.getElementById("operationList");
 
-const LABELS = ["preference", "identity", "rule", "persona", "artifact", "risk", "diary", "event", "fact", "other"];
+const LABELS = ["preference", "identity", "rule", "persona", "characters", "artifact", "risk", "diary", "event", "fact", "other"];
 
 const DEVICE_STORAGE_KEY = "qwen_device_id";
 
@@ -225,8 +225,9 @@ function renderMemories(payload) {
       const memoryTags = [
         tag(`#${item.id}`),
         tag(item.importance_label),
+        tag(`add_time: ${formatTime(item.updated_at)}`),
         formatTimelineMain(item) ? tag(formatTimelineMain(item)) : null,
-        item.visitor_ip ? tag(`device ${item.visitor_ip}`) : null,
+        item.device_id || item.visitor_ip ? tag(`device ${item.device_id || item.visitor_ip}`) : null,
         item.confidence != null ? tag(`confidence ${Number(item.confidence).toFixed(2)}`) : null,
         item.supersedes_id ? tag(`supersedes #${item.supersedes_id}`) : null,
         item.refine_status ? tag(`精简 ${item.refine_status}`) : null,
@@ -234,7 +235,7 @@ function renderMemories(payload) {
         tag(item.has_vector ? `vector ${item.vector_dim}` : "no vector"),
       ].filter(Boolean);
       tags.append(...memoryTags);
-      top.append(tags, div("time", formatTime(item.updated_at)));
+      top.append(tags);
       const editGrid = div("memory-edit-grid");
 
       const labelField = document.createElement("label");
@@ -337,9 +338,10 @@ function renderRetrievals(payload) {
       tags.append(
         tag(`#${item.id}`),
         tag(`session ${item.session_id}`),
+        tag(`add_time: ${formatTime(item.created_at)}`),
         tag(`${item.result_count} hits`)
       );
-      top.append(tags, div("time", formatTime(item.created_at)));
+      top.append(tags);
 
       const body = div(
         "content mono",
@@ -369,13 +371,14 @@ function renderOperations(payload) {
       const top = div("item-top");
       const tags = div("tag-row");
       tags.append(tag(item.kind), tag(`#${item.id}`));
+      tags.append(tag(`add_time: ${formatTime(item.updated_at || item.created_at)}`));
       if (item.status) {
         tags.append(tag(item.status));
       }
       if (item.session_id) {
         tags.append(tag(`session ${item.session_id}`));
       }
-      top.append(tags, div("time", formatTime(item.updated_at || item.created_at)));
+      top.append(tags);
 
       const details =
         item.kind === "memory_agent_job"

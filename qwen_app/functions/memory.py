@@ -803,6 +803,78 @@ def upsert_curated_memory_vector(memory_id: int, vector: object, model_name: str
         )
 
 
+def upsert_global_character_memory(
+    character_id: int,
+    content: str,
+    confidence: float = 0.85,
+) -> int:
+    text = str(content or "").strip()
+    if int(character_id) <= 0:
+        raise ValueError("character_id must be positive")
+    if not text:
+        raise ValueError("global character memory content is empty")
+    source_session_id = f"character-profile-{int(character_id)}"
+    source_digest = memory_source_hash(source_session_id, 0, int(character_id), "global-character-profile")
+    now = utc_now()
+    confidence_value = min(1.0, max(0.0, float(confidence)))
+    vector = embedding_client.embed_text(text)
+    with connect_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO curated_memories (
+                source_session_id, start_message_id, end_message_id, source_hash,
+                content, importance_label, visitor_ip, profile_id,
+                timeline_at, timeline_start_at, timeline_end_at, timeline_kind,
+                confidence, created_at, updated_at
+            )
+            VALUES (?, 0, ?, ?, ?, 'characters', NULL, NULL, ?, NULL, NULL, 'point', ?, ?, ?)
+            ON CONFLICT(source_hash) DO UPDATE SET
+                content = excluded.content,
+                importance_label = 'characters',
+                visitor_ip = NULL,
+                profile_id = NULL,
+                timeline_at = excluded.timeline_at,
+                timeline_start_at = NULL,
+                timeline_end_at = NULL,
+                timeline_kind = 'point',
+                confidence = excluded.confidence,
+                updated_at = excluded.updated_at
+            """,
+            (
+                source_session_id,
+                int(character_id),
+                source_digest,
+                text,
+                now,
+                confidence_value,
+                now,
+                now,
+            ),
+        )
+        row = conn.execute(
+            "SELECT id FROM curated_memories WHERE source_hash = ? LIMIT 1",
+            (source_digest,),
+        ).fetchone()
+    memory_id = int(row["id"])
+    upsert_curated_memory_vector(memory_id, vector, embedding_client.EMBEDDING_MODEL)
+    return memory_id
+
+
+def delete_global_character_memory(character_id: int) -> int:
+    source_session_id = f"character-profile-{int(character_id)}"
+    with connect_db() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM curated_memories
+            WHERE source_session_id = ?
+              AND importance_label = 'characters'
+              AND visitor_ip IS NULL
+            """,
+            (source_session_id,),
+        )
+    return int(cur.rowcount or 0)
+
+
 def refresh_duplicate_curated_memory(memory_id: int) -> bool:
     now = utc_now()
     with connect_db() as conn:
@@ -1154,6 +1226,7 @@ def list_admin_memories(
                 "content": str(row["content"]),
                 "importance_label": str(row["importance_label"]),
                 "visitor_ip": str(row["visitor_ip"]) if row["visitor_ip"] else None,
+                "device_id": str(row["visitor_ip"]) if row["visitor_ip"] else None,
                 "profile_id": int(row["profile_id"]) if row["profile_id"] is not None else None,
                 "timeline_at": str(row["timeline_at"] or ""),
                 "timeline_start_at": str(row["timeline_start_at"] or ""),
@@ -1257,7 +1330,10 @@ def retrieve_curated_memories(
                    v.dim, v.vector, v.model_name
             FROM curated_memories m
             JOIN curated_memory_vectors v ON v.memory_id = m.id
-            WHERE m.visitor_ip IN {in_clause}
+            WHERE (
+                m.visitor_ip IN {in_clause}
+                OR (m.visitor_ip IS NULL AND m.importance_label = 'characters')
+            )
             ORDER BY m.id ASC
             """,
             params,
@@ -1346,7 +1422,10 @@ def retrieve_curated_memory_recall_pool(
                    v.dim, v.vector, v.model_name
             FROM curated_memories m
             JOIN curated_memory_vectors v ON v.memory_id = m.id
-            WHERE m.visitor_ip IN {in_clause}
+            WHERE (
+                m.visitor_ip IN {in_clause}
+                OR (m.visitor_ip IS NULL AND m.importance_label = 'characters')
+            )
             ORDER BY m.id ASC
             """,
             params,
@@ -1668,7 +1747,10 @@ def retrieve_curated_memories_by_text(
                    timeline_at, timeline_start_at, timeline_end_at, timeline_kind,
                    supersedes_id, confidence
             FROM curated_memories
-            WHERE visitor_ip IN {in_clause}
+            WHERE (
+                visitor_ip IN {in_clause}
+                OR (visitor_ip IS NULL AND importance_label = 'characters')
+            )
             ORDER BY id DESC
             LIMIT 1000
             """,
@@ -2078,6 +2160,7 @@ def list_analysis_traces(
             "trace_id": str(row["trace_id"]),
             "event_type": str(row["event_type"]),
             "visitor_ip": str(row["visitor_ip"]),
+            "device_id": str(row["visitor_ip"]),
             "step_name": str(row["step_name"]),
             "duration_ms": (
                 float(row["duration_ms"])

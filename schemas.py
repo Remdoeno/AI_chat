@@ -25,10 +25,18 @@ class ChatPayload(BaseModel):
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
 
 
+class CharacterChatPayload(BaseModel):
+    session_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    mode: str = Field(default="chat")
+    attachments: List[ChatAttachment] = Field(default_factory=list)
+
+
 class MemoryAdminPayload(BaseModel):
     content: str = Field(min_length=1)
     importance_label: str = Field(default="other", min_length=1)
     visitor_ip: Optional[str] = None
+    device_id: Optional[str] = None
     timeline_at: Optional[str] = None
     timeline_start_at: Optional[str] = None
     timeline_end_at: Optional[str] = None
@@ -78,3 +86,4 @@ class ModelSettingsPayload(BaseModel):
     chat: ModelSlotPayload
     background: ModelSlotPayload
     image: ModelSlotPayload = Field(default_factory=lambda: ModelSlotPayload(provider="none"))
+    web_search_proxy: str = Field(default="")

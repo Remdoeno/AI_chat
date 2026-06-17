@@ -7,7 +7,18 @@ MEMORY_DEDUPE_AGENT_WORKER_LOCK = threading.Lock()
 MEMORY_REFINE_AGENT_WORKER_LOCK = threading.Lock()
 IDLE_AGENT_THREAD_STARTED = False
 LAST_USER_ACTIVITY_AT = time.time()
-ALLOWED_MEMORY_LABELS = {"preference", "identity", "rule", "persona", "risk", "event", "fact", "diary", "other"}
+ALLOWED_MEMORY_LABELS = {
+    "preference",
+    "identity",
+    "rule",
+    "persona",
+    "characters",
+    "risk",
+    "event",
+    "fact",
+    "diary",
+    "other",
+}
 EVENT_MEMORY_UPDATER_CANDIDATE_LIMIT = int(os.environ.get("QWEN_EVENT_MEMORY_UPDATER_CANDIDATE_LIMIT", "12"))
 OPENING_FUTURE_EVENT_LIMIT = int(os.environ.get("QWEN_OPENING_FUTURE_EVENT_LIMIT", "8"))
 OPENING_FUTURE_EVENT_WINDOW_DAYS = int(os.environ.get("QWEN_OPENING_FUTURE_EVENT_WINDOW_DAYS", "30"))

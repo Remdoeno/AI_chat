@@ -988,7 +988,10 @@ def recent_curated_memory_summaries(limit: int = 12) -> List[Dict[str, object]]:
             """
             SELECT id, content, importance_label, updated_at
             FROM curated_memories
-            WHERE visitor_ip LIKE 'device:%'
+            WHERE (
+                visitor_ip LIKE 'device:%'
+                OR (visitor_ip IS NULL AND importance_label = 'characters')
+              )
               AND importance_label NOT IN ('identity', 'persona', 'preference', 'rule')
             ORDER BY id DESC
             LIMIT ?
@@ -1021,7 +1024,10 @@ def build_active_recall_context(
             f"""
             SELECT id, content, importance_label, visitor_ip, timeline_at, supersedes_id, confidence, updated_at
             FROM curated_memories
-            WHERE visitor_ip IN {in_clause}
+            WHERE (
+                visitor_ip IN {in_clause}
+                OR (visitor_ip IS NULL AND importance_label = 'characters')
+            )
             ORDER BY
               CASE WHEN visitor_ip = ? THEN 0 ELSE 1 END,
               CASE importance_label
@@ -1029,7 +1035,8 @@ def build_active_recall_context(
                 WHEN 'preference' THEN 1
                 WHEN 'persona' THEN 2
                 WHEN 'artifact' THEN 3
-                ELSE 4
+                WHEN 'characters' THEN 4
+                ELSE 5
               END,
               COALESCE(timeline_at, updated_at) DESC,
               id DESC
@@ -1105,6 +1112,22 @@ def build_idle_agent_prompt() -> Tuple[str, str]:
     if formatted_series_context:
         lines.append("")
         lines.append(formatted_series_context)
+    try:
+        artifact_directive_context = format_hidden_artifact_directives_for_artifacts()
+    except Exception as exc:
+        artifact_directive_context = ""
+        record_event(None, "hidden_artifact_directive_context_error", "local", {"error": str(exc)})
+    if artifact_directive_context:
+        lines.append("")
+        lines.append(artifact_directive_context)
+    try:
+        character_context = format_hidden_character_context_for_artifacts()
+    except Exception as exc:
+        character_context = ""
+        record_event(None, "hidden_character_artifact_context_error", "local", {"error": str(exc)})
+    if character_context:
+        lines.append("")
+        lines.append(character_context)
     if story_seeds:
         lines.append("以下是用户配置的可选创作种子，不是强制任务；请在空闲时轮换选择：")
         lines.extend(story_seeds)
@@ -1123,6 +1146,8 @@ def build_idle_agent_prompt() -> Tuple[str, str]:
         f"curated_memories={len(memories)};"
         f"story_seeds={len(story_seeds)};"
         f"series_context={len(series_context)};"
+        f"artifact_directives={'set' if artifact_directive_context else 'empty'};"
+        f"character_context={'set' if character_context else 'empty'};"
         f"custom_prompt={'set' if custom_prompt else 'empty'}"
     )
     return "\n".join(lines), summary

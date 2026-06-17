@@ -31,6 +31,7 @@ weights/
 admin_auth.json
 idle_story_seeds.txt
 local_config.*
+tmp_*/
 
 # Local development and Codex-only materials.
 docs/

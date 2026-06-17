@@ -1,6 +1,6 @@
 const keywordInput = document.getElementById("keywordInput");
 const labelFilter = document.getElementById("labelFilter");
-const ipFilter = document.getElementById("ipFilter");
+const deviceFilter = document.getElementById("deviceFilter");
 const refreshButton = document.getElementById("refreshButton");
 const statusText = document.getElementById("statusText");
 const memoryCount = document.getElementById("memoryCount");
@@ -11,7 +11,7 @@ const newTimeline = document.getElementById("newTimeline");
 const newContent = document.getElementById("newContent");
 const createButton = document.getElementById("createButton");
 
-const LABELS = ["preference", "identity", "rule", "persona", "artifact", "risk", "diary", "event", "fact", "other"];
+const LABELS = ["preference", "identity", "rule", "persona", "characters", "artifact", "risk", "diary", "event", "fact", "other"];
 let refreshTimer = null;
 
 function setStatus(text) {
@@ -156,7 +156,7 @@ function renderMemories(payload) {
       item.supersedes_id ? `supersedes #${item.supersedes_id}` : null,
       item.refine_status ? `精简 ${item.refine_status}` : null,
       item.refined_from_id ? `from #${item.refined_from_id}` : null,
-      item.visitor_ip ? `device ${item.visitor_ip}` : "global",
+      item.device_id || item.visitor_ip ? `device ${item.device_id || item.visitor_ip}` : "global",
       `updated ${formatTime(item.updated_at)}`,
     ].filter(Boolean).join(" · ");
 
@@ -183,7 +183,7 @@ function renderMemories(payload) {
     deviceTitle.textContent = "Device";
     const deviceInput = document.createElement("input");
     deviceInput.type = "text";
-    deviceInput.value = item.visitor_ip || "";
+    deviceInput.value = item.device_id || item.visitor_ip || "";
     deviceInput.placeholder = "留空为全局，例如 device:...";
     deviceField.append(deviceTitle, deviceInput);
 
@@ -229,7 +229,7 @@ function buildQuery() {
   const params = new URLSearchParams();
   if (keywordInput.value.trim()) params.set("keyword", keywordInput.value.trim());
   if (labelFilter.value) params.set("label", labelFilter.value);
-  if (ipFilter.value.trim()) params.set("visitor_ip_filter", ipFilter.value.trim());
+  if (deviceFilter.value.trim()) params.set("device_id_filter", deviceFilter.value.trim());
   params.set("limit", "300");
   return params.toString();
 }
@@ -265,7 +265,7 @@ async function createMemory() {
     body: JSON.stringify({
       content,
       importance_label: newLabel.value,
-      visitor_ip: newIp.value.trim(),
+      device_id: newIp.value.trim(),
       ...newTimelinePicker.value(),
     }),
   });
@@ -288,7 +288,7 @@ async function updateMemory(id, content, label, timelinePayload, deviceId) {
       content,
       importance_label: label,
       ...timelinePayload,
-      visitor_ip: deviceId.trim(),
+      device_id: deviceId.trim(),
     }),
   });
   await ensureOk(response);
@@ -313,7 +313,7 @@ function scheduleLoad() {
 
 keywordInput.addEventListener("input", scheduleLoad);
 labelFilter.addEventListener("change", scheduleLoad);
-ipFilter.addEventListener("input", scheduleLoad);
+deviceFilter.addEventListener("input", scheduleLoad);
 refreshButton.addEventListener("click", () => {
   loadMemories().catch((error) => setStatus(`失败: ${error.message}`));
 });

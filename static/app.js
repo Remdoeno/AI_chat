@@ -90,23 +90,37 @@ const MODEL_PROVIDER_PRESETS = {
     proxy_url: "",
   },
   openai: {
-    display_name: "GPT-4.1",
+    display_name: "gpt-5.5",
     base_url: "https://api.openai.com/v1",
-    model: "gpt-4.1",
+    model: "gpt-5.5",
     use_proxy: true,
     proxy_url: "",
   },
   deepseek: {
-    display_name: "DeepSeek Chat",
+    display_name: "deepseek-v4-pro",
     base_url: "https://api.deepseek.com/v1",
-    model: "deepseek-chat",
+    model: "deepseek-v4-pro",
+    use_proxy: true,
+    proxy_url: "",
+  },
+  zhipu: {
+    display_name: "glm-5.2",
+    base_url: "https://open.bigmodel.cn/api/paas/v4",
+    model: "glm-5.2",
     use_proxy: true,
     proxy_url: "",
   },
   dashscope: {
-    display_name: "通义千问",
+    display_name: "qwen3.7-max",
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    model: "qwen-plus",
+    model: "qwen3.7-max",
+    use_proxy: true,
+    proxy_url: "",
+  },
+  doubao: {
+    display_name: "doubao-seed-2.0-pro",
+    base_url: "https://ark.cn-beijing.volces.com/api/v3",
+    model: "doubao-seed-2-0-pro-260215",
     use_proxy: true,
     proxy_url: "",
   },
@@ -188,6 +202,15 @@ function modelPreset(provider) {
   return MODEL_PROVIDER_PRESETS[provider] || MODEL_PROVIDER_PRESETS.custom;
 }
 
+function isProxylessProvider(provider) {
+  return ["local", "none", "hidream"].includes(provider);
+}
+
+function currentWebSearchProxy() {
+  const liveValue = webSearchProxyInput ? webSearchProxyInput.value : "";
+  return String(liveValue || samplingSettings.web_search_proxy || "").trim();
+}
+
 function setModelDisplayName(settings) {
   const chat = settings && settings.chat ? settings.chat : {};
   const name = chat.provider === "local"
@@ -221,16 +244,16 @@ function applyProviderPreset(slot) {
   }
   if (apiKeyInput) {
     apiKeyInput.value = "";
-    apiKeyInput.disabled = provider === "local" || provider === "none" || provider === "hidream";
-    apiKeyInput.placeholder = provider === "local" || provider === "hidream" ? "本地服务通常不需要 API Key" : "留空则保留已保存密钥";
+    apiKeyInput.disabled = isProxylessProvider(provider);
+    apiKeyInput.placeholder = provider === "local" || provider === "hidream" ? "本地服务通常不需要 API Key" : "留空则使用后台保存密钥";
   }
   if (useProxyInput) {
-    useProxyInput.checked = Boolean(preset.use_proxy) && !["local", "none", "hidream"].includes(provider);
-    useProxyInput.disabled = ["local", "none", "hidream"].includes(provider);
+    useProxyInput.checked = Boolean(preset.use_proxy) && !isProxylessProvider(provider);
+    useProxyInput.disabled = isProxylessProvider(provider);
   }
   if (proxyUrlInput) {
-    proxyUrlInput.value = preset.proxy_url;
-    proxyUrlInput.disabled = ["local", "none", "hidream"].includes(provider);
+    proxyUrlInput.value = isProxylessProvider(provider) ? "" : (currentWebSearchProxy() || preset.proxy_url);
+    proxyUrlInput.disabled = isProxylessProvider(provider);
   }
 }
 
@@ -243,13 +266,17 @@ function populateModelSlot(slot, settings) {
   for (const field of ["display_name", "base_url", "model", "proxy_url"]) {
     const input = modelField(slot, field);
     if (input) {
-      input.value = data[field] || "";
+      input.value = field === "proxy_url" && !isProxylessProvider(data.provider || "local")
+        ? (data[field] || currentWebSearchProxy())
+        : (data[field] || "");
     }
   }
   const apiKeyInput = modelField(slot, "api_key");
   if (apiKeyInput) {
     apiKeyInput.value = "";
-    apiKeyInput.placeholder = data.has_api_key ? "已保存密钥，留空不修改" : "留空则不设置密钥";
+    const providerKeys = settings && settings.provider_api_keys ? settings.provider_api_keys : {};
+    const providerHasKey = Boolean(providerKeys[data.provider || ""]);
+    apiKeyInput.placeholder = data.has_api_key || providerHasKey ? "后台已保存密钥，留空继续使用" : "留空则不设置密钥";
   }
   const useProxyInput = modelField(slot, "use_proxy");
   if (useProxyInput) {
@@ -300,32 +327,35 @@ function syncModelSlotDisabledState(slot) {
     }
   }
   if (apiKeyInput) {
-    apiKeyInput.disabled = ["local", "none", "hidream"].includes(provider);
+    apiKeyInput.disabled = isProxylessProvider(provider);
   }
   if (useProxyInput) {
-    useProxyInput.disabled = ["local", "none", "hidream"].includes(provider);
-    if (["local", "none", "hidream"].includes(provider)) {
+    useProxyInput.disabled = isProxylessProvider(provider);
+    if (isProxylessProvider(provider)) {
       useProxyInput.checked = false;
     }
   }
   if (proxyUrlInput) {
-    proxyUrlInput.disabled = ["local", "none", "hidream"].includes(provider);
-    if (["local", "none", "hidream"].includes(provider)) {
+    proxyUrlInput.disabled = isProxylessProvider(provider);
+    if (isProxylessProvider(provider)) {
       proxyUrlInput.value = "";
+    } else if (!proxyUrlInput.value.trim()) {
+      proxyUrlInput.value = currentWebSearchProxy();
     }
   }
 }
 
 function readModelSlot(slot) {
   const provider = modelField(slot, "provider")?.value || "local";
-  const isLocalLike = ["local", "hidream", "none"].includes(provider);
+  const isLocalLike = isProxylessProvider(provider);
+  const proxyUrl = isLocalLike ? "" : ((modelField(slot, "proxy_url")?.value || "").trim() || currentWebSearchProxy());
   const payload = {
     provider,
     display_name: provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : (modelField(slot, "display_name")?.value || ""),
     base_url: modelField(slot, "base_url")?.value || "",
     model: modelField(slot, "model")?.value || "",
-    use_proxy: !isLocalLike && Boolean(modelField(slot, "use_proxy")?.checked),
-    proxy_url: isLocalLike ? "" : (modelField(slot, "proxy_url")?.value || ""),
+    use_proxy: !isLocalLike && (Boolean(modelField(slot, "use_proxy")?.checked) || Boolean(proxyUrl)),
+    proxy_url: proxyUrl,
   };
   if (provider === "none") {
     payload.display_name = "未配置";
@@ -345,6 +375,12 @@ async function loadModelSettings() {
     throw new Error("模型配置读取失败");
   }
   modelSettingsState = await response.json();
+  if (typeof modelSettingsState.web_search_proxy === "string") {
+    saveSamplingSettings({
+      ...samplingSettings,
+      web_search_proxy: modelSettingsState.web_search_proxy,
+    });
+  }
   setModelDisplayName(modelSettingsState);
   return modelSettingsState;
 }
@@ -490,6 +526,7 @@ async function saveModelSettings(event) {
         chat: readModelSlot("chat"),
         background: readModelSlot("background"),
         image: readModelSlot("image"),
+        web_search_proxy: currentWebSearchProxy(),
       }),
     });
     if (!response.ok) {
@@ -502,6 +539,28 @@ async function saveModelSettings(event) {
     setStatus(`模型已更新：${modelSettingsState.chat.provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : (modelSettingsState.chat.model || modelSettingsState.chat.display_name || "AI模型")}`);
   } catch (error) {
     modelSettingsStatus.textContent = error.message || "保存失败";
+  }
+}
+
+async function syncModelProxySettingToServer() {
+  try {
+    const settings = modelSettingsState || await loadModelSettings();
+    const response = await fetch("/api/model-settings", {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        chat: settings.chat || readModelSlot("chat"),
+        background: settings.background || readModelSlot("background"),
+        image: settings.image || readModelSlot("image"),
+        web_search_proxy: currentWebSearchProxy(),
+      }),
+    });
+    if (response.ok) {
+      modelSettingsState = await response.json();
+      setModelDisplayName(modelSettingsState);
+    }
+  } catch (_error) {
+    // Proxy sync is best-effort; chat requests still carry the current proxy.
   }
 }
 
@@ -2422,6 +2481,7 @@ confirmSamplingButton.addEventListener("click", () => {
     top_p: topPRange.value,
     web_search_proxy: webSearchProxyInput.value,
   });
+  syncModelProxySettingToServer();
   closeAdvancedOptions();
   setStatus(`采样已更新：${samplingSummary.textContent}`);
 });

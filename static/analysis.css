@@ -1052,17 +1052,23 @@ h2 {
   }
 
   .analysis-shell {
-    display: block;
+    display: flex;
+    flex-direction: column;
     height: auto;
     min-height: 100dvh;
     overflow: visible;
+    width: 100%;
   }
 
   .analysis-chat,
   .analysis-trace {
+    flex: 0 0 auto;
     height: auto;
+    max-height: none;
     min-height: auto;
+    max-width: 100%;
     overflow: visible;
+    width: 100%;
   }
 
   .analysis-chat-header {
@@ -1139,6 +1145,7 @@ h2 {
   .analysis-chat {
     display: block;
     position: static;
+    order: 1;
   }
 
   .analysis-chat-history-actions {
@@ -1168,7 +1175,11 @@ h2 {
     display: block;
     border-top: 1px solid var(--line);
     border-left: 0;
+    clear: both;
+    order: 2;
     padding: 10px;
+    position: relative;
+    z-index: 1;
   }
 
   .analysis-trace-header {
@@ -1226,8 +1237,17 @@ h2 {
 
   .analysis-message,
   .analysis-message.user {
-    grid-template-columns: minmax(0, 1fr) auto;
-    justify-content: stretch;
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+    align-items: flex-start;
+    justify-content: flex-start;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .analysis-message.user {
+    align-items: flex-end;
   }
 
   .analysis-message-meta {
@@ -1235,11 +1255,13 @@ h2 {
   }
 
   .analysis-message-body {
-    max-width: 80%;
+    max-width: 100%;
+    width: auto;
   }
 
   .analysis-message.user .analysis-message-body {
-    justify-self: end;
+    justify-self: auto;
+    max-width: min(100%, 92vw);
   }
 
   .analysis-composer textarea {

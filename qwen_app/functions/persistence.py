@@ -303,6 +303,74 @@ def init_db() -> None:
                 FOREIGN KEY(image_id) REFERENCES generated_images(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS hidden_character_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                canonical_name TEXT NOT NULL,
+                name_key TEXT NOT NULL UNIQUE,
+                aliases_json TEXT NOT NULL DEFAULT '[]',
+                visual_prompt TEXT NOT NULL DEFAULT '',
+                negative_prompt TEXT NOT NULL DEFAULT '',
+                personality TEXT NOT NULL DEFAULT '',
+                background TEXT NOT NULL DEFAULT '',
+                relationships_json TEXT NOT NULL DEFAULT '[]',
+                reference_image_ids_json TEXT NOT NULL DEFAULT '[]',
+                avatar_image_ids_json TEXT NOT NULL DEFAULT '[]',
+                source_session_id TEXT NOT NULL DEFAULT '',
+                source_message_ids_json TEXT NOT NULL DEFAULT '[]',
+                source_visitor_ip TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL DEFAULT 'artifact_public',
+                status TEXT NOT NULL DEFAULT 'active',
+                confidence REAL NOT NULL DEFAULT 0.7,
+                revision_count INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS hidden_character_profile_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                character_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_session_id TEXT NOT NULL DEFAULT '',
+                source_message_ids_json TEXT NOT NULL DEFAULT '[]',
+                patch_json TEXT NOT NULL DEFAULT '{}',
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(character_id) REFERENCES hidden_character_profiles(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS hidden_artifact_directives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                directive_key TEXT NOT NULL UNIQUE,
+                directive_type TEXT NOT NULL DEFAULT 'other',
+                subject TEXT NOT NULL DEFAULT '',
+                directive TEXT NOT NULL,
+                characters_json TEXT NOT NULL DEFAULT '[]',
+                series_title TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL DEFAULT 'persistent',
+                status TEXT NOT NULL DEFAULT 'active',
+                priority INTEGER NOT NULL DEFAULT 50,
+                confidence REAL NOT NULL DEFAULT 0.7,
+                source_session_id TEXT NOT NULL DEFAULT '',
+                source_message_ids_json TEXT NOT NULL DEFAULT '[]',
+                source_visitor_ip TEXT NOT NULL DEFAULT '',
+                revision_count INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS hidden_artifact_directive_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                directive_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                source_session_id TEXT NOT NULL DEFAULT '',
+                source_message_ids_json TEXT NOT NULL DEFAULT '[]',
+                patch_json TEXT NOT NULL DEFAULT '{}',
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(directive_id) REFERENCES hidden_artifact_directives(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS app_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -337,6 +405,14 @@ def init_db() -> None:
                 ON generated_images(batch_id, id);
             CREATE INDEX IF NOT EXISTS idx_artifact_images_artifact
                 ON artifact_images(artifact_id, position, image_id);
+            CREATE INDEX IF NOT EXISTS idx_hidden_character_profiles_status
+                ON hidden_character_profiles(status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_hidden_character_profile_events_character
+                ON hidden_character_profile_events(character_id, id);
+            CREATE INDEX IF NOT EXISTS idx_hidden_artifact_directives_status
+                ON hidden_artifact_directives(status, priority, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_hidden_artifact_directive_events_directive
+                ON hidden_artifact_directive_events(directive_id, id);
             """
         )
         ensure_column(conn, "curated_memories", "visitor_ip", "TEXT")
@@ -369,6 +445,13 @@ def init_db() -> None:
         ensure_column(conn, "generated_images", "status", "TEXT NOT NULL DEFAULT 'completed'")
         ensure_column(conn, "generated_images", "error", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "generated_images", "created_at", "TEXT")
+        ensure_column(conn, "hidden_character_profiles", "source_visitor_ip", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "hidden_character_profiles", "avatar_image_ids_json", "TEXT NOT NULL DEFAULT '[]'")
+        ensure_column(conn, "hidden_character_profiles", "scope", "TEXT NOT NULL DEFAULT 'artifact_public'")
+        ensure_column(conn, "hidden_character_profiles", "status", "TEXT NOT NULL DEFAULT 'active'")
+        ensure_column(conn, "hidden_character_profiles", "revision_count", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "hidden_artifact_directives", "source_visitor_ip", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "hidden_artifact_directives", "revision_count", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "shared_user_bindings", "shared_user_id", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "shared_user_bindings", "share_chat_history", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "shared_user_bindings", "is_host", "INTEGER NOT NULL DEFAULT 0")
@@ -546,6 +629,7 @@ def clean_device_id(value: str) -> str:
 
 
 def clean_reported_client_ip(value: str) -> str:
+    # Legacy cleanup helper only. New request identity never uses client IP.
     candidate = (value or "").split(",")[0].strip().strip('"[]')
     if not candidate:
         return ""
@@ -559,6 +643,7 @@ def clean_reported_client_ip(value: str) -> str:
 
 
 def clean_reported_identity(value: str) -> str:
+    # Only browser device identities are accepted as live identities.
     return clean_device_id(value)
 
 
@@ -930,7 +1015,7 @@ def refresh_session_visitor_ip(session_id: str, visitor_ip: str, user_agent: str
         conn.execute(
             """
             INSERT INTO events (session_id, event_type, visitor_ip, created_at, metadata_json)
-            VALUES (?, 'session_ip_refreshed', ?, ?, ?)
+            VALUES (?, 'session_identity_refreshed', ?, ?, ?)
             """,
             (
                 session_id,
@@ -1099,24 +1184,24 @@ def format_visitor_identity_context(visitor_ip: str) -> str:
     identity = lookup_visitor_identity(ip)
     if identity is None:
         return (
-            "当前来访者信息：\n"
-            f"- 当前浏览器身份：{ip}\n"
-            "- 识别状态：陌生来访者。\n"
+            "当前设备信息：\n"
+            f"- 当前设备身份：{ip}\n"
+            "- 识别状态：陌生设备。\n"
             "- 使用方式：不要假装认识对方；可以通过对话内容逐步确认是否是旧用户。"
         )
 
     seen_count = int(identity.get("seen_count", 0))
     memory_count = int(identity.get("memory_count", 0))
     recognized = seen_count >= 2 or memory_count > 0
-    status = "熟悉的来访者" if recognized else "陌生来访者"
+    status = "熟悉的设备" if recognized else "陌生设备"
     lines = [
-        "当前来访者信息：",
-        f"- 当前浏览器身份：{ip}",
+        "当前设备信息：",
+        f"- 当前设备身份：{ip}",
         f"- 识别状态：{status}。",
-        f"- 该浏览器身份已出现次数：{seen_count}。",
+        f"- 该设备身份已出现次数：{seen_count}。",
         f"- 关联长期记忆数量：{memory_count}。",
         f"- 画像摘要：{identity.get('summary')}",
-        "- 使用方式：浏览器身份用于区分用户；如内容证据冲突，优先通过对话确认身份。",
+        "- 使用方式：设备身份用于区分上下文；如内容证据冲突，优先通过对话确认身份。",
     ]
     return "\n".join(lines)
 
