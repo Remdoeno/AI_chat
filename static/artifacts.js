@@ -684,7 +684,7 @@ function renderCommentRow(item, { temporary = false } = {}) {
   const head = document.createElement("div");
   head.className = "comment-head";
   const meta = document.createElement("span");
-  meta.textContent = `${item.role === "assistant" ? "Qwen" : item.author || "visitor"} · ${temporary ? "生成中" : formatTime(item.created_at)}`;
+  meta.textContent = `${item.role === "assistant" ? "旺财" : item.author || "visitor"} · ${temporary ? "生成中" : formatTime(item.created_at)}`;
   head.appendChild(meta);
   if (!temporary) {
     head.appendChild(renderCommentDeleteButton(item));
@@ -805,7 +805,7 @@ async function submitArtifactComment(content) {
           assistantDraft = {
             id: "assistant-draft",
             role: "assistant",
-            author: "Qwen",
+            author: "旺财",
             content: "",
             created_at: "",
           };

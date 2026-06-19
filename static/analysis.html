@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财分析模式</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260617_dark_draw_prompt"></script>
-    <link rel="stylesheet" href="/static/analysis.css?v=20260618_mobile_trace_bottom" />
+    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
+    <link rel="stylesheet" href="/static/analysis.css?v=20260618_history_button_unified" />
   </head>
   <body>
     <main id="analysisMode" class="analysis-shell">
@@ -80,14 +80,14 @@
         window.setTimeout(() => {
           const status = document.getElementById("statusText");
           const text = status ? status.textContent.trim() : "";
-          if (status && !window.__qwenAnalysisStarted && (text === "连接中" || text === "脚本加载中")) {
+          if (status && !window.__wangcaiAnalysisStarted && (text === "连接中" || text === "脚本加载中")) {
             status.textContent = "分析脚本未启动，请强制刷新";
           }
         }, 5000);
       });
     </script>
     <script
-      src="/static/analysis.js?v=20260618_memory_query_planner_title"
+      src="/static/analysis.js?v=20260618_local_display_qwen36"
       onerror="document.getElementById('statusText').textContent='analysis.js 加载失败'"
     ></script>
     <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>

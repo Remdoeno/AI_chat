@@ -21,7 +21,8 @@ const operationList = document.getElementById("operationList");
 
 const LABELS = ["preference", "identity", "rule", "persona", "characters", "artifact", "risk", "diary", "event", "fact", "other"];
 
-const DEVICE_STORAGE_KEY = "qwen_device_id";
+const DEVICE_STORAGE_KEY = "wangcai_device_id";
+const LEGACY_DEVICE_STORAGE_KEY = "qwen_device_id";
 
 function makeDeviceId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -33,6 +34,13 @@ function makeDeviceId() {
 function ensureDeviceId() {
   let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY);
   if (!deviceId) {
+    deviceId = localStorage.getItem(LEGACY_DEVICE_STORAGE_KEY);
+    if (deviceId) {
+      localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
+      localStorage.removeItem(LEGACY_DEVICE_STORAGE_KEY);
+    }
+  }
+  if (!deviceId) {
     deviceId = makeDeviceId();
     localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
   }
@@ -41,7 +49,7 @@ function ensureDeviceId() {
 
 function deviceIdentityHeaders() {
   return {
-    "X-Qwen-Device-Id": ensureDeviceId(),
+    "X-Wangcai-Device-Id": ensureDeviceId(),
   };
 }
 

@@ -1,6 +1,7 @@
 const statusText = document.getElementById("characterStatus");
 const characterSticker = document.getElementById("characterSticker");
 const characterChatPanel = document.querySelector(".character-chat-panel");
+const loadPreviousCharacterButton = document.getElementById("loadPreviousCharacterButton");
 const messagesEl = document.getElementById("characterMessages");
 const chatForm = document.getElementById("characterChatForm");
 const messageInput = document.getElementById("characterMessageInput");
@@ -12,6 +13,7 @@ const attachmentPreview = document.getElementById("attachmentPreview");
 const refreshCharactersButton = document.getElementById("refreshCharactersButton");
 const characterGrid = document.getElementById("characterGrid");
 const characterDialog = document.getElementById("characterDialog");
+const characterDialogShell = characterDialog.querySelector(".character-dialog-shell");
 const characterDialogTitle = document.getElementById("characterDialogTitle");
 const characterDialogMeta = document.getElementById("characterDialogMeta");
 const characterDialogBody = document.getElementById("characterDialogBody");
@@ -118,6 +120,10 @@ function isInPreviousCharacterLoadZone() {
 
 function canScrollMessages() {
   return messagesEl.scrollHeight > messagesEl.clientHeight + 4;
+}
+
+function usesCharacterHistoryButtonMode() {
+  return window.matchMedia("(max-width: 900px)").matches;
 }
 
 function ensureCharacterHistoryLoadIndicator() {
@@ -354,6 +360,14 @@ function setBusy(busy) {
   attachImageButton.disabled = busy;
   if (drawModeButton) drawModeButton.disabled = busy;
   activeController = busy ? activeController : null;
+  syncPreviousCharacterSessionButton();
+}
+
+function syncPreviousCharacterSessionButton() {
+  if (!loadPreviousCharacterButton) return;
+  const disabled = Boolean(activeController || isLoadingPreviousCharacterSession || !sessionId || !hasMorePreviousCharacterSessions);
+  loadPreviousCharacterButton.disabled = disabled;
+  loadPreviousCharacterButton.textContent = hasMorePreviousCharacterSessions ? "加载上一段对话" : "已到第一段";
 }
 
 async function createCharacterSession() {
@@ -364,6 +378,7 @@ async function createCharacterSession() {
   hasMorePreviousCharacterSessions = true;
   localStorage.setItem("wangcai_character_session_id", sessionId);
   appendMessage("assistant", payload.greeting || "今天又来创建或修改角色了嘛~");
+  syncPreviousCharacterSessionButton();
 }
 
 function appendHistoryMessage(message, options = {}) {
@@ -393,7 +408,9 @@ function prependCharacterHistoryMessages(messages) {
   if (!history.length) return;
 
   const indicator = messagesEl.querySelector(".character-history-load");
+  const shouldRestoreIndicator = Boolean(indicator) && !usesCharacterHistoryButtonMode();
   if (indicator) indicator.remove();
+
   const previousHeight = messagesEl.scrollHeight;
   const previousTop = messagesEl.scrollTop;
 
@@ -401,17 +418,23 @@ function prependCharacterHistoryMessages(messages) {
     appendHistoryMessage(message, { prepend: true });
   }
 
-  ensureCharacterHistoryLoadIndicator();
+  if (shouldRestoreIndicator) ensureCharacterHistoryLoadIndicator();
   messagesEl.scrollTop = messagesEl.scrollHeight - previousHeight + previousTop;
 }
 
 async function loadPreviousCharacterSession() {
   if (!sessionId || !hasMorePreviousCharacterSessions || isLoadingPreviousCharacterSession) return;
   isLoadingPreviousCharacterSession = true;
+  if (!usesCharacterHistoryButtonMode()) {
+    window.clearTimeout(previousCharacterSessionHideTimer);
+    previousCharacterSessionHideTimer = 0;
+    setCharacterHistoryLoadState("loading", "加载上一段对话");
+  }
+  syncPreviousCharacterSessionButton();
+  if (loadPreviousCharacterButton) {
+    loadPreviousCharacterButton.textContent = "读取中";
+  }
   const oldStatus = statusText.textContent;
-  window.clearTimeout(previousCharacterSessionHideTimer);
-  previousCharacterSessionHideTimer = 0;
-  setCharacterHistoryLoadState("loading", "加载上一段对话");
   setStatus("读取上一段角色库对话");
   try {
     const response = await fetch(`/api/characters/sessions/${encodeURIComponent(sessionId)}/load-previous`, {
@@ -425,17 +448,22 @@ async function loadPreviousCharacterSession() {
       prependCharacterHistoryMessages(messages);
       setStatus(`已载入上一段角色库对话：${messages.length} 条`);
     } else {
-      setCharacterHistoryLoadState("done", "已经到第一段对话了");
+      if (!usesCharacterHistoryButtonMode()) {
+        setCharacterHistoryLoadState("done", "已经到第一段对话了");
+        window.setTimeout(() => removeCharacterHistoryLoadIndicator(true), 1400);
+      }
       setStatus("没有更早的角色库对话了");
-      window.setTimeout(() => removeCharacterHistoryLoadIndicator(true), 1400);
     }
   } catch (error) {
-    setCharacterHistoryLoadState("error", `加载失败：${error.message}`);
+    if (!usesCharacterHistoryButtonMode()) {
+      setCharacterHistoryLoadState("error", `加载失败：${error.message}`);
+      window.setTimeout(() => removeCharacterHistoryLoadIndicator(true), 1800);
+    }
     setStatus(`历史读取失败：${error.message}`);
-    window.setTimeout(() => removeCharacterHistoryLoadIndicator(true), 1800);
   } finally {
     isLoadingPreviousCharacterSession = false;
     previousCharacterSessionArmedAt = 0;
+    syncPreviousCharacterSessionButton();
     window.setTimeout(() => {
       if (statusText.textContent.startsWith("已载入") || statusText.textContent.startsWith("没有更早") || statusText.textContent.startsWith("历史读取失败")) {
         setStatus(oldStatus || "角色库就绪");
@@ -456,7 +484,8 @@ function renderCharacterCard(item) {
   button.type = "button";
   const cover = document.createElement("div");
   cover.className = "character-cover";
-  const coverImage = item.avatar_image || item.main_image || null;
+  const referenceImages = Array.isArray(item.reference_images) ? item.reference_images : [];
+  const coverImage = referenceImages[0] || item.main_image || item.avatar_image || null;
   const url = coverImage && coverImage.public_url;
   if (url) {
     const img = document.createElement("img");
@@ -812,13 +841,25 @@ function renderCharacterDialog(item) {
   );
 }
 
+function resetCharacterDialogScroll() {
+  characterDialog.scrollTop = 0;
+  if (characterDialogShell) {
+    characterDialogShell.scrollTop = 0;
+  }
+  if (characterDialogBody) {
+    characterDialogBody.scrollTop = 0;
+  }
+}
+
 async function openCharacterDialog(characterId) {
   const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}`);
   if (!response.ok) throw new Error(await response.text());
   const item = await response.json();
   renderCharacterDialog(item);
+  resetCharacterDialogScroll();
   characterDialog.showModal();
-  characterDialog.scrollTop = 0;
+  resetCharacterDialogScroll();
+  requestAnimationFrame(resetCharacterDialogScroll);
 }
 
 async function refreshActiveCharacterDialog() {
@@ -1137,20 +1178,41 @@ messageInput.addEventListener("keydown", (event) => {
   }
 });
 
-messagesEl.addEventListener("scroll", () => {
+function handleCharacterHistoryGestureScroll() {
+  if (usesCharacterHistoryButtonMode()) return;
   if (isInPreviousCharacterLoadZone()) {
     return;
   }
   cancelPreviousCharacterSessionPreparation();
-});
+}
 
-messagesEl.addEventListener("wheel", handleCharacterPreviousSessionWheel, { passive: false });
-messagesEl.addEventListener("touchstart", handleCharacterPreviousSessionTouchStart, { passive: true });
-messagesEl.addEventListener("touchmove", handleCharacterPreviousSessionTouchMove, { passive: false });
+function handleCharacterHistoryGestureWheel(event) {
+  if (usesCharacterHistoryButtonMode()) return;
+  handleCharacterPreviousSessionWheel(event);
+}
+
+function handleCharacterHistoryGestureTouchStart(event) {
+  if (usesCharacterHistoryButtonMode()) return;
+  handleCharacterPreviousSessionTouchStart(event);
+}
+
+function handleCharacterHistoryGestureTouchMove(event) {
+  if (usesCharacterHistoryButtonMode()) return;
+  handleCharacterPreviousSessionTouchMove(event);
+}
+
+messagesEl.addEventListener("scroll", handleCharacterHistoryGestureScroll);
+messagesEl.addEventListener("wheel", handleCharacterHistoryGestureWheel, { passive: false });
+messagesEl.addEventListener("touchstart", handleCharacterHistoryGestureTouchStart, { passive: true });
+messagesEl.addEventListener("touchmove", handleCharacterHistoryGestureTouchMove, { passive: false });
 if (characterChatPanel) {
-  characterChatPanel.addEventListener("wheel", handleCharacterPreviousSessionWheel, { passive: false });
-  characterChatPanel.addEventListener("touchstart", handleCharacterPreviousSessionTouchStart, { passive: true });
-  characterChatPanel.addEventListener("touchmove", handleCharacterPreviousSessionTouchMove, { passive: false });
+  characterChatPanel.addEventListener("wheel", handleCharacterHistoryGestureWheel, { passive: false });
+  characterChatPanel.addEventListener("touchstart", handleCharacterHistoryGestureTouchStart, { passive: true });
+  characterChatPanel.addEventListener("touchmove", handleCharacterHistoryGestureTouchMove, { passive: false });
+}
+
+if (loadPreviousCharacterButton) {
+  loadPreviousCharacterButton.addEventListener("click", () => loadPreviousCharacterSession());
 }
 
 attachImageButton.addEventListener("click", () => imageInput.click());

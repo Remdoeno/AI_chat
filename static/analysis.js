@@ -17,7 +17,7 @@ const analysisDrawButton = document.getElementById("analysisDrawButton");
 const analysisImageInput = document.getElementById("analysisImageInput");
 const analysisAttachmentPreview = document.getElementById("analysisAttachmentPreview");
 
-window.__qwenAnalysisStarted = true;
+window.__wangcaiAnalysisStarted = true;
 
 window.addEventListener("error", (event) => {
   if (statusText) {
@@ -69,9 +69,11 @@ const openTraceKeys = new Set();
 const closedTraceKeys = new Set();
 const openBackgroundKeys = new Set();
 const closedBackgroundKeys = new Set();
-const DEVICE_STORAGE_KEY = "qwen_device_id";
-const CHAT_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
-let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
+const DEVICE_STORAGE_KEY = "wangcai_device_id";
+const CHAT_SAMPLING_STORAGE_KEY = "wangcai_sampling_settings";
+const LEGACY_DEVICE_STORAGE_KEY = "qwen_device_id";
+const LEGACY_CHAT_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
+let deviceId = readMigratedStorage(DEVICE_STORAGE_KEY, LEGACY_DEVICE_STORAGE_KEY) || "";
 
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
@@ -288,6 +290,24 @@ function isUsableDeviceId(value) {
   return /^[A-Za-z0-9_-]{12,96}$/.test(String(value || "").trim());
 }
 
+function readMigratedStorage(currentKey, legacyKey) {
+  try {
+    const current = localStorage.getItem(currentKey);
+    if (current) {
+      return current;
+    }
+    const legacy = legacyKey ? localStorage.getItem(legacyKey) : "";
+    if (legacy) {
+      localStorage.setItem(currentKey, legacy);
+      localStorage.removeItem(legacyKey);
+      return legacy;
+    }
+  } catch (_) {
+    return "";
+  }
+  return "";
+}
+
 function ensureDeviceId() {
   if (isUsableDeviceId(deviceId)) {
     return deviceId;
@@ -300,7 +320,7 @@ function ensureDeviceId() {
 }
 
 function deviceIdentityHeaders() {
-  return { "X-Qwen-Device-Id": ensureDeviceId() };
+  return { "X-Wangcai-Device-Id": ensureDeviceId() };
 }
 
 function jsonHeaders() {
@@ -621,7 +641,7 @@ function readChatModeProxyDefault() {
 
 function readChatSamplingSettings() {
   try {
-    const raw = localStorage.getItem(CHAT_SAMPLING_STORAGE_KEY);
+    const raw = readMigratedStorage(CHAT_SAMPLING_STORAGE_KEY, LEGACY_CHAT_SAMPLING_STORAGE_KEY);
     if (!raw) {
       return { temperature: 0.6, top_p: 0.95, web_search_proxy: "" };
     }
@@ -1202,7 +1222,7 @@ function readableTraceModel(model) {
     return "DeepSeek";
   }
   if (lower.includes("qwen3.6") || lower.includes("qwen3-") || lower.includes("qwen")) {
-    return "Qwen3.6";
+    return "qwen3.6";
   }
   if (lower.includes("gpt-4.1")) {
     return "GPT-4.1";
@@ -1356,6 +1376,15 @@ function traceTitleParts(item) {
   } else if (step === "draw_memory_text_fallback") {
     const results = traceResultCount(payload, "results");
     title = `画图记忆检索降级：文本匹配 ${results} 条结果`;
+  } else if (step === "draw_reference_image_parse") {
+    const count = Number(payload.reference_count || 0);
+    if (eventType === "model_call_error") {
+      title = `${traceAgentName("参考图解析", payload)}：调用失败${count ? `，${count} 张图` : ""}`;
+    } else {
+      const decision = payload.decision || {};
+      const chars = String(decision.reference_prompt || "").length;
+      title = `${traceAgentName("参考图解析", payload)}：提取 ${count || 0} 张图${chars ? `，输出 ${chars} 字` : ""}`;
+    }
   } else if (step === "draw_prompt_translate") {
     const chars = Number(payload.translated_chars || 0);
     title = `${traceAgentName("画图英文直译", payload)}：完整输入${chars ? `，输出 ${chars} 字` : ""}`;

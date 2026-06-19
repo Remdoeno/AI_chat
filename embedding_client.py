@@ -5,10 +5,10 @@ import httpx
 import numpy as np
 
 
-EMBEDDING_BASE_URL = os.environ.get("QWEN_EMBEDDING_BASE_URL", "http://127.0.0.1:8001/v1")
-EMBEDDING_MODEL = os.environ.get("QWEN_EMBEDDING_MODEL", "qwen3-embedding-8b")
-EMBEDDING_API_KEY = os.environ.get("QWEN_EMBEDDING_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
-EMBEDDING_TIMEOUT = float(os.environ.get("QWEN_EMBEDDING_TIMEOUT", "120"))
+EMBEDDING_BASE_URL = os.environ.get("WANGCAI_EMBEDDING_BASE_URL", "http://127.0.0.1:8001/v1")
+EMBEDDING_MODEL = os.environ.get("WANGCAI_EMBEDDING_MODEL", "qwen3-embedding-8b")
+EMBEDDING_API_KEY = os.environ.get("WANGCAI_EMBEDDING_API_KEY", os.environ.get("OPENAI_API_KEY", "")).strip()
+EMBEDDING_TIMEOUT = float(os.environ.get("WANGCAI_EMBEDDING_TIMEOUT", "120"))
 
 
 def embed_texts(texts: List[str]) -> List[np.ndarray]:

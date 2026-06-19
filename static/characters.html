@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财角色库</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260617_directive_close_dot"></script>
-    <link rel="stylesheet" href="/static/characters.css?v=20260618_card_text_clamp" />
+    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
+    <link rel="stylesheet" href="/static/characters.css?v=20260618_history_button_unified" />
   </head>
   <body>
     <main class="character-shell">
@@ -20,6 +20,9 @@
           </div>
         </header>
 
+        <div class="character-chat-history-actions">
+          <button id="loadPreviousCharacterButton" class="secondary-button character-load-previous-button" type="button">加载上一段对话</button>
+        </div>
         <div id="characterMessages" class="character-messages"></div>
 
         <form id="characterChatForm" class="character-composer">
@@ -73,7 +76,7 @@
       </div>
     </dialog>
 
-    <script src="/static/characters.js?v=20260618_card_text_bg_personality"></script>
+    <script src="/static/characters.js?v=20260618_character_desktop_history_gesture"></script>
     <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
   </body>
 </html>

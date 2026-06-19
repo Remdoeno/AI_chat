@@ -25,6 +25,7 @@ const userMemoryBindingForm = document.getElementById("userMemoryBindingForm");
 const userMemoryBindingInput = document.getElementById("userMemoryBindingInput");
 const shareChatHistoryCheckbox = document.getElementById("shareChatHistoryCheckbox");
 const hostDeviceCheckbox = document.getElementById("hostDeviceCheckbox");
+const inheritAssistantProfileCheckbox = document.getElementById("inheritAssistantProfileCheckbox");
 const userMemoryBindingStatus = document.getElementById("userMemoryBindingStatus");
 const userMemoryBindingCancelButton = document.getElementById("userMemoryBindingCancelButton");
 const userMemoryBindingInfoButton = document.getElementById("userMemoryBindingInfoButton");
@@ -58,15 +59,18 @@ let warnLongPressTriggered = false;
 let memoryAdminLongPressTimer = 0;
 let memoryAdminLongPressTriggered = false;
 let localModelServicePollTimer = 0;
-const SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
-const DEVICE_STORAGE_KEY = "qwen_device_id";
-const USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
+const SAMPLING_STORAGE_KEY = "wangcai_sampling_settings";
+const DEVICE_STORAGE_KEY = "wangcai_device_id";
+const USER_MEMORY_BINDING_STORAGE_KEY = "wangcai_user_memory_binding";
+const LEGACY_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
+const LEGACY_DEVICE_STORAGE_KEY = "qwen_device_id";
+const LEGACY_USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
 const DEFAULT_SAMPLING_SETTINGS = {
   temperature: 0.6,
   top_p: 0.95,
   web_search_proxy: "",
 };
-const LOCAL_MODEL_DISPLAY_NAME = "Qwen3.6";
+const LOCAL_MODEL_DISPLAY_NAME = "qwen3.6";
 const MODEL_PROVIDER_PRESETS = {
   local: {
     display_name: LOCAL_MODEL_DISPLAY_NAME,
@@ -172,7 +176,7 @@ let webSearchEnabled = false;
 let drawEnabled = false;
 let activeSearchQuery = "";
 let isMessageComposing = false;
-let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY) || "";
+let deviceId = readMigratedStorage(DEVICE_STORAGE_KEY, LEGACY_DEVICE_STORAGE_KEY) || "";
 let previousSessionArmedAt = 0;
 let previousSessionHideTimer = 0;
 let isLoadingPreviousSession = false;
@@ -401,14 +405,14 @@ function localModelServiceSummary(payload) {
   if (payload.summary) {
     return String(payload.summary);
   }
-  const qwen = payload.qwen || {};
+  const model = payload.model || {};
   const embedding = payload.embedding || {};
   const image = payload.image || {};
-  if (qwen.running && embedding.running && image.running) {
-    return `已运行：Qwen ${qwen.port || "?"} / Embedding ${embedding.port || "?"} / 画图 ${image.port || "?"}`;
+  if (model.running && embedding.running && image.running) {
+    return `已运行：本地模型 ${model.port || "?"} / Embedding ${embedding.port || "?"} / 画图 ${image.port || "?"}`;
   }
-  if (qwen.running && embedding.running) {
-    return `已运行：Qwen ${qwen.port || "?"} / Embedding ${embedding.port || "?"} / 画图未就绪`;
+  if (model.running && embedding.running) {
+    return `已运行：本地模型 ${model.port || "?"} / Embedding ${embedding.port || "?"} / 画图未就绪`;
   }
   return "未启动";
 }
@@ -424,7 +428,7 @@ async function loadLocalModelServiceStatus(configure = false) {
       throw new Error("状态检测失败");
     }
     const payload = await response.json();
-    const ready = Boolean(payload.qwen && payload.qwen.running && payload.embedding && payload.embedding.running);
+    const ready = Boolean(payload.model && payload.model.running && payload.embedding && payload.embedding.running);
     setLocalModelServiceStatus(localModelServiceSummary(payload), ready ? "ready" : "missing");
     if (ready) {
       window.clearTimeout(localModelServicePollTimer);
@@ -446,7 +450,7 @@ function pollLocalModelServiceUntilReady(remaining = 60) {
   }
   localModelServicePollTimer = window.setTimeout(async () => {
     const payload = await loadLocalModelServiceStatus(true);
-    const ready = Boolean(payload && payload.qwen && payload.qwen.running && payload.embedding && payload.embedding.running);
+    const ready = Boolean(payload && payload.model && payload.model.running && payload.embedding && payload.embedding.running);
     if (!ready) {
       setLocalModelServiceStatus("启动中，等待服务就绪", "starting");
       pollLocalModelServiceUntilReady(remaining - 1);
@@ -472,7 +476,7 @@ async function startLocalModelService() {
     if (payload.error) {
       throw new Error(payload.error);
     }
-    const ready = Boolean(payload.qwen && payload.qwen.running && payload.embedding && payload.embedding.running);
+    const ready = Boolean(payload.model && payload.model.running && payload.embedding && payload.embedding.running);
     setLocalModelServiceStatus(localModelServiceSummary(payload), ready ? "ready" : "starting");
     if (payload.settings_updated) {
       await loadModelSettings();
@@ -595,6 +599,11 @@ function bindingSummaryText(binding) {
   if (binding.is_host) {
     parts.push("本设备为主机");
   }
+  if (binding.inherit_assistant_profile) {
+    parts.push("继承助手设定");
+  } else if (binding.profile_owner_device_id) {
+    parts.push("继承其他设备设定");
+  }
   return parts.join(" · ");
 }
 
@@ -612,7 +621,7 @@ function publishUserMemoryBindingState() {
 
 function readCachedUserMemoryBindingState() {
   try {
-    const raw = localStorage.getItem(USER_MEMORY_BINDING_STORAGE_KEY);
+    const raw = readMigratedStorage(USER_MEMORY_BINDING_STORAGE_KEY, LEGACY_USER_MEMORY_BINDING_STORAGE_KEY);
     if (!raw) {
       return null;
     }
@@ -643,6 +652,8 @@ function applyUserMemoryBindingState(binding, options = {}) {
     share_chat_history: Boolean(payload.share_chat_history),
     is_host: Boolean(payload.is_host),
     host_device_id: String(payload.host_device_id || ""),
+    inherit_assistant_profile: Boolean(payload.inherit_assistant_profile),
+    profile_owner_device_id: String(payload.profile_owner_device_id || ""),
   };
   if (userMemoryBindingLabel) {
     userMemoryBindingLabel.textContent = userMemoryBindingState.shared_user_id ? "已绑定" : "记忆绑定";
@@ -669,6 +680,7 @@ function syncUserMemoryBindingForm() {
   userMemoryBindingInput.value = String(binding.shared_user_id || "");
   shareChatHistoryCheckbox.checked = Boolean(binding.share_chat_history);
   hostDeviceCheckbox.checked = Boolean(binding.is_host);
+  inheritAssistantProfileCheckbox.checked = Boolean(binding.inherit_assistant_profile);
 }
 
 function setUserMemoryBindingInfoVisible(visible) {
@@ -685,6 +697,24 @@ function hasLargeAttachment(attachments) {
   return (attachments || []).some((attachment) => Number(attachment.size || 0) > IMAGE_COMPRESSION_NOTICE_BYTES);
 }
 
+function readMigratedStorage(currentKey, legacyKey) {
+  try {
+    const current = localStorage.getItem(currentKey);
+    if (current) {
+      return current;
+    }
+    const legacy = legacyKey ? localStorage.getItem(legacyKey) : "";
+    if (legacy) {
+      localStorage.setItem(currentKey, legacy);
+      localStorage.removeItem(legacyKey);
+      return legacy;
+    }
+  } catch (_) {
+    return "";
+  }
+  return "";
+}
+
 function ensureDeviceId() {
   if (isUsableDeviceId(deviceId)) {
     return deviceId;
@@ -697,7 +727,7 @@ function ensureDeviceId() {
 }
 
 function deviceIdentityHeaders() {
-  return { "X-Qwen-Device-Id": ensureDeviceId() };
+  return { "X-Wangcai-Device-Id": ensureDeviceId() };
 }
 
 function jsonHeaders() {
@@ -859,7 +889,7 @@ function formatSamplingValue(value) {
 
 function loadSamplingSettings() {
   try {
-    const raw = localStorage.getItem(SAMPLING_STORAGE_KEY);
+    const raw = readMigratedStorage(SAMPLING_STORAGE_KEY, LEGACY_SAMPLING_STORAGE_KEY);
     if (!raw) {
       return { ...DEFAULT_SAMPLING_SETTINGS };
     }
@@ -2277,6 +2307,7 @@ async function saveUserMemoryBinding(event) {
     shared_user_id: sharedUserId,
     share_chat_history: sharedUserId ? Boolean(shareChatHistoryCheckbox.checked) : false,
     is_host: sharedUserId ? Boolean(hostDeviceCheckbox.checked) : false,
+    inherit_assistant_profile: sharedUserId ? Boolean(inheritAssistantProfileCheckbox.checked) : false,
   };
   userMemoryBindingStatus.textContent = "保存中";
   try {
@@ -2415,6 +2446,7 @@ userMemoryBindingInput.addEventListener("input", () => {
   if (!hasValue) {
     shareChatHistoryCheckbox.checked = false;
     hostDeviceCheckbox.checked = false;
+    inheritAssistantProfileCheckbox.checked = false;
   }
 });
 userMemoryBindingInfoButton.addEventListener("click", () => {

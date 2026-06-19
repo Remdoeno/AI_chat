@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财AI助手</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260617_dark_draw_prompt"></script>
-    <link rel="stylesheet" href="/static/styles.css?v=20260617_draw_prompt_dark_contrast" />
+    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260618_history_button_unified" />
   </head>
   <body>
     <main class="app-shell">
@@ -16,7 +16,7 @@
             <span aria-hidden="true">🐰</span>
           </button>
           <div>
-            <p id="modelDisplayName" class="eyebrow">Qwen3.6</p>
+            <p id="modelDisplayName" class="eyebrow">qwen3.6</p>
             <h1>AI助手</h1>
           </div>
         </div>
@@ -159,7 +159,7 @@
           <button id="userMemoryBindingInfoButton" class="binding-info-button" type="button" aria-label="查看功能说明" aria-expanded="false">ⓘ</button>
         </div>
         <p id="userMemoryBindingInfo" class="binding-info-text" role="tooltip" hidden>
-          同用户 ID 的多个设备会共享长期记忆、event 和 preference。开启“共享聊天记录”后，本设备上刷历史时可按时间加载同用户 ID 下也开启共享的设备会话。设为主机后，同用户 ID 中最新设为主机的设备会显示皇冠；除各设备自己的助手人设、称呼、开场偏好外，普通记忆和事件会优先归到主机设备。
+          同用户 ID 的多个设备会共享长期记忆和 event。开启“共享聊天记录”后，本设备上刷历史时可按时间加载同用户 ID 下也开启共享的设备会话。设为主机后，同用户 ID 中最新设为主机的设备会显示皇冠，普通记忆和事件会优先归到主机设备。开启“继承用户助手设定”后，同用户 ID 的称呼、助手人设、对话偏好等设定会统一读取并写回本设备。未绑定时仍完全按本设备独立保存。
         </p>
         <label class="field" for="userMemoryBindingInput">
           <span>用户 ID</span>
@@ -173,6 +173,10 @@
           <input id="hostDeviceCheckbox" type="checkbox" />
           <span>设为主机</span>
           <span class="binding-inline-crown" aria-hidden="true">👑</span>
+        </label>
+        <label class="binding-check-field" for="inheritAssistantProfileCheckbox">
+          <input id="inheritAssistantProfileCheckbox" type="checkbox" />
+          <span>继承用户助手设定</span>
         </label>
         <p id="userMemoryBindingStatus" class="dialog-status"></p>
         <div class="dialog-actions">
@@ -319,7 +323,7 @@
       };
     </script>
     <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
-    <script src="/static/app.js?v=20260618_model_presets_global"></script>
+    <script src="/static/app.js?v=20260618_binding_profile_inherit"></script>
     <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
   </body>
 </html>

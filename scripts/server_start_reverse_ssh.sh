@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run this inside the Qwen server/container.
-# It keeps qwen_web on container port 9922 and exposes container SSH
+# Run this inside the Wangcai server/container.
+# It keeps wangcai_ai on container port 9922 and exposes container SSH
 # back to the Mac/jump host as 127.0.0.1:10022.
 
-JUMP_USER="${QWEN_JUMP_USER:-rem}"
-JUMP_HOST="${QWEN_JUMP_HOST:-183.172.57.234}"
-JUMP_SSH_PORT="${QWEN_JUMP_SSH_PORT:-9922}"
-REMOTE_SSH_PORT="${QWEN_REMOTE_SSH_PORT:-10022}"
-LOCAL_SSH_TARGET="${QWEN_LOCAL_SSH_TARGET:-localhost:22}"
-QWEN_WEB_DIR="${QWEN_WEB_DIR:-/base/home/lizhzh/Project3/qwen_web}"
-QWEN_WEB_PORT="${QWEN_WEB_PORT:-9922}"
-WATCHDOG_SCRIPT="${QWEN_REVERSE_SSH_WATCHDOG_SCRIPT:-${QWEN_WEB_DIR}/server_reverse_ssh_watchdog.sh}"
-WATCHDOG_LOG="${QWEN_REVERSE_SSH_WATCHDOG_LOG:-${QWEN_WEB_DIR}/logs/reverse_ssh_watchdog.log}"
+JUMP_USER="${WANGCAI_JUMP_USER:-rem}"
+JUMP_HOST="${WANGCAI_JUMP_HOST:-183.172.57.234}"
+JUMP_SSH_PORT="${WANGCAI_JUMP_SSH_PORT:-9922}"
+REMOTE_SSH_PORT="${WANGCAI_REMOTE_SSH_PORT:-10022}"
+LOCAL_SSH_TARGET="${WANGCAI_LOCAL_SSH_TARGET:-localhost:22}"
+WANGCAI_AI_DIR="${WANGCAI_AI_DIR:-/base/home/lizhzh/Project3/wangcai_ai}"
+WANGCAI_WEB_PORT="${WANGCAI_WEB_PORT:-9922}"
+WATCHDOG_SCRIPT="${WANGCAI_REVERSE_SSH_WATCHDOG_SCRIPT:-${WANGCAI_AI_DIR}/server_reverse_ssh_watchdog.sh}"
+WATCHDOG_LOG="${WANGCAI_REVERSE_SSH_WATCHDOG_LOG:-${WANGCAI_AI_DIR}/logs/reverse_ssh_watchdog.log}"
 
-cd "${QWEN_WEB_DIR}"
+cd "${WANGCAI_AI_DIR}"
 mkdir -p logs
 
-if ! curl -fsS --max-time 5 "http://127.0.0.1:${QWEN_WEB_PORT}/api/health" >/dev/null 2>&1; then
-  ./start_qwen_web.sh
+if ! curl -fsS --max-time 5 "http://127.0.0.1:${WANGCAI_WEB_PORT}/api/health" >/dev/null 2>&1; then
+  ./start_wangcai_ai.sh
   sleep 2
 fi
 
-curl -fsS --max-time 10 "http://127.0.0.1:${QWEN_WEB_PORT}/api/health" >/dev/null
+curl -fsS --max-time 10 "http://127.0.0.1:${WANGCAI_WEB_PORT}/api/health" >/dev/null
 
 existing="$(pgrep -af "ssh .* -R ${REMOTE_SSH_PORT}:${LOCAL_SSH_TARGET} .*${JUMP_HOST}" || true)"
 if [ -n "${existing}" ]; then

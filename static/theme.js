@@ -1,6 +1,7 @@
 (function () {
-  const DEVICE_STORAGE_KEY = "qwen_device_id";
-  const THEME_EVENT = "qwen-theme-change";
+  const DEVICE_STORAGE_KEY = "wangcai_device_id";
+  const LEGACY_DEVICE_STORAGE_KEY = "qwen_device_id";
+  const THEME_EVENT = "wangcai-theme-change";
 
   function makeDeviceId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -13,6 +14,13 @@
     try {
       let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY);
       if (!deviceId) {
+        deviceId = localStorage.getItem(LEGACY_DEVICE_STORAGE_KEY);
+        if (deviceId) {
+          localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
+          localStorage.removeItem(LEGACY_DEVICE_STORAGE_KEY);
+        }
+      }
+      if (!deviceId) {
         deviceId = makeDeviceId();
         localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
       }
@@ -23,7 +31,7 @@
   }
 
   function storageKey() {
-    return `qwen_theme_${ensureDeviceId()}`;
+    return `wangcai_theme_${ensureDeviceId()}`;
   }
 
   function readTheme() {
@@ -70,7 +78,7 @@
     });
   }
 
-  window.QwenTheme = {
+  window.WangcaiTheme = {
     get: readTheme,
     set: setTheme,
     toggle() {
@@ -83,7 +91,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     updateButtons(readTheme());
     document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
-      button.addEventListener("click", () => window.QwenTheme.toggle());
+      button.addEventListener("click", () => window.WangcaiTheme.toggle());
     });
   });
 })();

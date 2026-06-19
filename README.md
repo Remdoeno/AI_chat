@@ -8,7 +8,7 @@ Wangcai 2.1 是一个面向家庭本地部署的 AI 助手网页端。它把本�
 
 2.0 引入的视觉创作链路仍然是 2.1 的基础：你可以在聊天里直接点“画图”，让旺财先把自然语言改写成适合图像模型的英文 prompt，再调用图像生成服务一次生成 4 张图，直接预览和下载；后台成果也升级为图文作品，每篇成果至少带一张主题配图，并在成果库里以封面图作为主要展示对象。
 
-这张图概括了从 1.0 到 2.0 的开发旅程：最早的单体服务被拆成 `qwen_app` 模块，长期记忆从聊天记录里长出来，分析模式把 prompt、召回、trace 和模型调用摊开给开发者看，最终 HiDream 生图和图文成果库让旺财开始把文字想象变成图片。
+这张图概括了从 1.0 到 2.0 的开发旅程：最早的单体服务被拆成 `wangcai_app` 模块，长期记忆从聊天记录里长出来，分析模式把 prompt、召回、trace 和模型调用摊开给开发者看，最终 HiDream 生图和图文成果库让旺财开始把文字想象变成图片。
 
 和常见的云端聊天机器人或通用 Agent 不同，旺财的重点不是一次性问答，而是“长期生活在你家里的私人 AI”：
 
@@ -64,7 +64,7 @@ Wangcai 2.1 是一个面向家庭本地部署的 AI 助手网页端。它把本�
 - 成果评论支持配图上下文：当评论提到封面、配图、构图、画面等内容时，回复会带上图片上下文；普通文字评论不会额外消耗图片分析。
 - 分析模式更透明：画图记忆路由、prompt 翻译、prompt 分类、prompt 优化和图片生成都会进入 trace，可查看模型、耗时、输入和结果。
 - 记忆系统更稳：后台记忆整理能区分用户事实、已召回历史记忆和 assistant_context_only；修正版是否采用会在分析模式中明确显示。
-- qwen_web2 成为新主线：原单体 `app.py` 已拆分为 `qwen_app` 模块，配置、prompt、函数、路由、启动逻辑分层组织。
+- wangcai_ai 成为新主线：原单体 `app.py` 已拆分为 `wangcai_app` 模块，配置、prompt、函数、路由、启动逻辑分层组织。
 
 ## 首次启动与管理员密码
 
@@ -85,42 +85,42 @@ data/admin_auth.json
 常用环境变量：
 
 ```bash
-export QWEN_MODEL_BASE_URL="http://127.0.0.1:8000/v1"
-export QWEN_MODEL_NAME="qwen3.6-35b-a3b-262k"
-export QWEN_MODEL_API_KEY="EMPTY"
-export QWEN_WEB_DB="./data/chat_history.sqlite3"
-export QWEN_AUTH_CONFIG="./data/admin_auth.json"
-export QWEN_MODEL_CONTEXT_CHAR_BUDGET=180000
+export WANGCAI_MODEL_BASE_URL="http://127.0.0.1:8000/v1"
+export WANGCAI_MODEL_NAME="qwen3.6-35b-a3b-262k"
+export WANGCAI_MODEL_API_KEY="EMPTY"
+export WANGCAI_WEB_DB="./data/chat_history.sqlite3"
+export WANGCAI_AUTH_CONFIG="./data/admin_auth.json"
+export WANGCAI_MODEL_CONTEXT_CHAR_BUDGET=180000
 ```
 
-如果使用本地 vLLM / SGLang / LM Studio 等 OpenAI-compatible 服务，通常 `QWEN_MODEL_API_KEY=EMPTY` 即可。
+如果使用本地 vLLM / SGLang / LM Studio 等 OpenAI-compatible 服务，通常 `WANGCAI_MODEL_API_KEY=EMPTY` 即可。
 
 如果使用网络上的其他大模型 API，把 base URL、模型名和 key 改成供应商给出的值：
 
 ```bash
-export QWEN_MODEL_BASE_URL="https://api.example.com/v1"
-export QWEN_MODEL_NAME="provider-model-name"
-export QWEN_MODEL_API_KEY="sk-..."
+export WANGCAI_MODEL_BASE_URL="https://api.example.com/v1"
+export WANGCAI_MODEL_NAME="provider-model-name"
+export WANGCAI_MODEL_API_KEY="sk-..."
 ```
 
-也可以不设置 `QWEN_MODEL_API_KEY`，改用通用的 `OPENAI_API_KEY`。如果两者都设置，优先使用 `QWEN_MODEL_API_KEY`。
+也可以不设置 `WANGCAI_MODEL_API_KEY`，改用通用的 `OPENAI_API_KEY`。如果两者都设置，优先使用 `WANGCAI_MODEL_API_KEY`。
 
 Embedding 服务配置由 `embedding_client.py` 管理。请在本机或服务器启动兼容的 embedding 模型，并按该文件中的环境变量指向对应接口：
 
 ```bash
-export QWEN_EMBEDDING_BASE_URL="http://127.0.0.1:8001/v1"
-export QWEN_EMBEDDING_MODEL="qwen3-embedding-8b"
-export QWEN_EMBEDDING_API_KEY=""
+export WANGCAI_EMBEDDING_BASE_URL="http://127.0.0.1:8001/v1"
+export WANGCAI_EMBEDDING_MODEL="qwen3-embedding-8b"
+export WANGCAI_EMBEDDING_API_KEY=""
 ```
 
-如果 embedding 也使用网络 API，可以填写 `QWEN_EMBEDDING_API_KEY`；留空则不发送 `Authorization` 头。
+如果 embedding 也使用网络 API，可以填写 `WANGCAI_EMBEDDING_API_KEY`；留空则不发送 `Authorization` 头。
 
 图像生成服务可以使用本地 HiDream，也可以改成自己的兼容服务。默认配置指向本机 8002：
 
 ```bash
-export QWEN_IMAGE_MODEL_BASE_URL="http://127.0.0.1:8002"
-export QWEN_IMAGE_MODEL_NAME="HiDream-O1-Image-Dev-2604"
-export QWEN_IMAGE_MODEL_API_KEY=""
+export WANGCAI_IMAGE_MODEL_BASE_URL="http://127.0.0.1:8002"
+export WANGCAI_IMAGE_MODEL_NAME="HiDream-O1-Image-Dev-2604"
+export WANGCAI_IMAGE_MODEL_API_KEY=""
 ```
 
 如果没有启动或配置图像生成服务，聊天里的“画图”模式会直接返回无法生成，不会影响普通聊天、联网搜索、记忆和成果浏览。
@@ -134,12 +134,12 @@ export QWEN_IMAGE_MODEL_API_KEY=""
 如果需要代理，有两种方式：
 
 1. 页面内配置：在聊天主页 1 秒内连续点击兔子 4 次，打开高级选项，填写联网代理、temperature 和 top-p，点“确定”保存到浏览器本地。
-2. 服务端默认值：设置环境变量 `QWEN_WEB_SEARCH_PROXY`。
+2. 服务端默认值：设置环境变量 `WANGCAI_WEB_SEARCH_PROXY`。
 
 示例：
 
 ```bash
-export QWEN_WEB_SEARCH_PROXY="http://127.0.0.1:7890"
+export WANGCAI_WEB_SEARCH_PROXY="http://127.0.0.1:7890"
 ```
 
 ## 空闲创作种子
@@ -147,7 +147,7 @@ export QWEN_WEB_SEARCH_PROXY="http://127.0.0.1:7890"
 仓库不包含任何私人故事设定。你可以用环境变量或外部文件配置空闲创作方向：
 
 ```bash
-export QWEN_IDLE_STORY_SEEDS_FILE="./data/idle_story_seeds.txt"
+export WANGCAI_IDLE_STORY_SEEDS_FILE="./data/idle_story_seeds.txt"
 ```
 
 `idle_story_seeds.txt` 可以写你自己的小说、角色、世界观、写作偏好或长期创作计划。该文件默认不上传。
@@ -158,7 +158,7 @@ export QWEN_IDLE_STORY_SEEDS_FILE="./data/idle_story_seeds.txt"
 如果不想让 idle agent 在空闲时写作品，避免消耗网络模型 token，可以关闭它：
 
 ```bash
-export QWEN_IDLE_AGENT_ENABLED=false
+export WANGCAI_IDLE_AGENT_ENABLED=false
 ```
 
 关闭后，后台空闲创作线程不会启动，手动 force 触发也会被跳过。聊天、记忆整理、联网搜索和成果页浏览不受影响。
@@ -166,14 +166,14 @@ export QWEN_IDLE_AGENT_ENABLED=false
 如果只是想降低消耗而不是完全关闭，可以调大运行间隔或降低输出长度：
 
 ```bash
-export QWEN_IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS=3600
-export QWEN_IDLE_AGENT_MAX_TOKENS=800
+export WANGCAI_IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS=3600
+export WANGCAI_IDLE_AGENT_MAX_TOKENS=800
 ```
 
 如果你的连续作品里有固定译名、角色名或术语，也可以配置结果归一化映射：
 
 ```bash
-export QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS='{"旧术语":"标准术语"}'
+export WANGCAI_IDLE_ARTIFACT_TERM_REPLACEMENTS='{"旧术语":"标准术语"}'
 ```
 
 也可以把同样的 JSON 写入 `data/idle_artifact_term_replacements.json`，该文件同样默认不上传。
@@ -182,7 +182,7 @@ export QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS='{"旧术语":"标准术语"}'
 
 ### 固定端口规则
 
-**生产和日常部署一律使用 `7777` 端口。以后不要再用 `9922` 启动 qwen_web。**
+**生产和日常部署一律使用 `7777` 端口。以后不要再用 `9922` 启动 wangcai_ai。**
 
 当前外部访问入口、服务器本机监听和健康检查都按 `7777` 约定：
 
@@ -191,29 +191,29 @@ export QWEN_IDLE_ARTIFACT_TERM_REPLACEMENTS='{"旧术语":"标准术语"}'
 - 本机健康检查：`http://127.0.0.1:7777/api/health`
 - 告警/访问日志：`http://127.0.0.1:7777/warn`
 
-`start_qwen_web.sh` 的默认端口已经是 `7777`，正常启动不要额外传 `WEB_PORT`：
+`start_wangcai_ai.sh` 的默认端口已经是 `7777`，正常启动不要额外传 `WEB_PORT`：
 
 ```bash
-./start_qwen_web.sh
+./start_wangcai_ai.sh
 ```
 
 如果需要显式写出端口，也只能写：
 
 ```bash
-WEB_PORT=7777 ./start_qwen_web.sh
+WEB_PORT=7777 ./start_wangcai_ai.sh
 ```
 
 不要执行下面这种旧命令：
 
 ```bash
-# 错误：旧端口，不要再用于 qwen_web
-WEB_PORT=9922 ./start_qwen_web.sh
+# 错误：旧端口，不要再用于 wangcai_ai
+WEB_PORT=9922 ./start_wangcai_ai.sh
 ```
 
 停止服务：
 
 ```bash
-./stop_qwen_web.sh
+./stop_wangcai_ai.sh
 ```
 
 健康检查：
@@ -250,7 +250,7 @@ Wangcai 2.1 默认每次打开网页仍会创建一个新 session，这样普通
 - 分析模式：顶部提供“加载上一段对话”按钮，避免移动端调试明细和触摸滚动互相抢占。
 - 加载后，旧 session 会作为当前 session 的上下文前缀参与后续回答，并在页面顶部显示出来。
 
-如果上下文过长，服务端会优先截掉更早的一部分历史，避免超过模型上下文预算。可通过 `QWEN_MODEL_CONTEXT_CHAR_BUDGET` 调整近似字符预算。
+如果上下文过长，服务端会优先截掉更早的一部分历史，避免超过模型上下文预算。可通过 `WANGCAI_MODEL_CONTEXT_CHAR_BUDGET` 调整近似字符预算。
 
 ## 数据与隐私
 

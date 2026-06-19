@@ -171,9 +171,14 @@ h2 {
 
 .analysis-load-previous-button {
   display: none;
+  min-height: 40px;
+  border-radius: 999px;
   border-color: rgba(22, 119, 95, 0.34);
   background: #eef7f4;
   color: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 6px 18px rgba(20, 28, 38, 0.06);
 }
 
 .analysis-load-previous-button:disabled {
@@ -266,18 +271,21 @@ h2 {
 }
 
 .analysis-history-load {
+  width: min(100%, 320px);
+  min-height: 40px;
   margin: 0 auto 14px;
-  max-width: 360px;
+  max-width: 320px;
   max-height: 64px;
-  padding: 7px 12px;
-  border: 1px solid var(--line);
+  padding: 0 16px;
+  border: 1px solid rgba(22, 119, 95, 0.34);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  color: var(--muted);
+  background: #eef7f4;
+  color: var(--accent);
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
+  line-height: 38px;
   text-align: center;
-  box-shadow: 0 2px 10px rgba(24, 36, 50, 0.04);
+  box-shadow: 0 6px 18px rgba(20, 28, 38, 0.06);
   overflow: hidden;
   transition:
     opacity 500ms ease,
@@ -301,14 +309,15 @@ h2 {
 }
 
 .analysis-history-load.is-armed {
-  border-color: rgba(31, 132, 103, 0.26);
-  color: var(--green);
+  border-color: rgba(22, 119, 95, 0.42);
+  color: var(--accent);
   transform: translateY(4px);
   animation: analysis-history-load-hint 3.4s ease forwards;
 }
 
 .analysis-history-load.is-waiting {
-  border-color: rgba(31, 132, 103, 0.2);
+  border-color: rgba(22, 119, 95, 0.24);
+  color: var(--muted);
 }
 
 .analysis-history-load.is-loading {
@@ -317,8 +326,8 @@ h2 {
   justify-content: center;
   gap: 8px;
   margin-bottom: 24px;
-  border-color: rgba(102, 112, 133, 0.3);
-  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(22, 119, 95, 0.24);
+  background: #eef7f4;
   color: var(--muted);
   transform: translateY(10px);
 }
@@ -1161,7 +1170,7 @@ h2 {
     width: min(100%, 320px);
     align-items: center;
     justify-content: center;
-    min-height: 36px;
+    min-height: 40px;
     margin: 0;
   }
 
@@ -1585,7 +1594,7 @@ html[data-theme="dark"] .analysis-load-previous-button:disabled {
   border-color: rgba(216, 168, 50, 0.38);
   background: #171a20;
   color: var(--ink);
-  box-shadow: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
 }
 
 html[data-theme="dark"] .analysis-load-previous-button:disabled {
@@ -1594,10 +1603,10 @@ html[data-theme="dark"] .analysis-load-previous-button:disabled {
 }
 
 html[data-theme="dark"] .analysis-history-load {
-  border-color: rgba(216, 168, 50, 0.34);
-  background: rgba(18, 20, 26, 0.92);
-  color: var(--muted);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  border-color: rgba(216, 168, 50, 0.38);
+  background: #171a20;
+  color: var(--ink);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
 }
 
 html[data-theme="dark"] .trace-card pre,

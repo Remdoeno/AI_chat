@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run this inside the Qwen server/container.
+# Run this inside the Wangcai server/container.
 # It keeps the reverse SSH tunnel alive:
 #   Mac/jump host 10022 -> this container localhost:22
 #
 # Prefer running this script with nohup/tmux/screen, or with a process manager
 # if the container has one.
 
-JUMP_USER="${QWEN_JUMP_USER:-rem}"
-JUMP_HOST="${QWEN_JUMP_HOST:-183.172.57.234}"
-JUMP_SSH_PORT="${QWEN_JUMP_SSH_PORT:-9922}"
-REMOTE_SSH_PORT="${QWEN_REMOTE_SSH_PORT:-10022}"
-LOCAL_SSH_TARGET="${QWEN_LOCAL_SSH_TARGET:-localhost:22}"
-RETRY_SECONDS="${QWEN_REVERSE_SSH_RETRY_SECONDS:-10}"
-LOCK_DIR="${QWEN_REVERSE_SSH_LOCK_DIR:-/tmp/qwen_reverse_ssh_watchdog.lock}"
-LOG_PREFIX="${QWEN_REVERSE_SSH_LOG_PREFIX:-reverse-ssh}"
+JUMP_USER="${WANGCAI_JUMP_USER:-rem}"
+JUMP_HOST="${WANGCAI_JUMP_HOST:-183.172.57.234}"
+JUMP_SSH_PORT="${WANGCAI_JUMP_SSH_PORT:-9922}"
+REMOTE_SSH_PORT="${WANGCAI_REMOTE_SSH_PORT:-10022}"
+LOCAL_SSH_TARGET="${WANGCAI_LOCAL_SSH_TARGET:-localhost:22}"
+RETRY_SECONDS="${WANGCAI_REVERSE_SSH_RETRY_SECONDS:-10}"
+LOCK_DIR="${WANGCAI_REVERSE_SSH_LOCK_DIR:-/tmp/wangcai_reverse_ssh_watchdog.lock}"
+LOG_PREFIX="${WANGCAI_REVERSE_SSH_LOG_PREFIX:-reverse-ssh}"
 
 if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
   printf '%s [%s] watchdog already running: %s\n' "$(date -Is)" "${LOG_PREFIX}" "${LOCK_DIR}"
