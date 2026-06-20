@@ -369,6 +369,61 @@ def artifacts_endpoint(
     )
 
 
+@app.get("/api/artifacts/runs")
+def artifacts_runs_endpoint(
+    status: str = "",
+    limit: int = Query(default=3, ge=1, le=500),
+) -> Dict[str, object]:
+    init_db()
+    runs = list_idle_agent_runs(status=status, limit=limit)
+    runs["progress"] = current_idle_write_progress()
+    return runs
+
+
+@app.get("/api/artifacts/prompt")
+def artifacts_prompt_endpoint() -> Dict[str, object]:
+    init_db()
+    return {"prompt": get_idle_agent_custom_prompt()}
+
+
+@app.put("/api/artifacts/prompt")
+def update_artifacts_prompt_endpoint(payload: IdlePromptPayload, request: Request) -> Dict[str, object]:
+    init_db()
+    prompt = payload.prompt.strip()
+    set_idle_agent_custom_prompt(prompt)
+    record_event(None, "idle_agent_prompt_update", visitor_ip(request), {"chars": len(prompt)})
+    return {"prompt": prompt}
+
+
+@app.get("/api/artifacts/idle-status")
+def artifacts_idle_status_endpoint() -> Dict[str, object]:
+    init_db()
+    return {"paused": is_idle_agent_paused()}
+
+
+@app.put("/api/artifacts/idle-status")
+def update_artifacts_idle_status_endpoint(payload: IdleStatusPayload, request: Request) -> Dict[str, object]:
+    init_db()
+    paused = set_idle_agent_paused(payload.paused)
+    record_event(None, "idle_agent_pause_update", visitor_ip(request), {"paused": paused})
+    return {"paused": paused}
+
+
+@app.get("/api/artifacts/idle-frequency")
+def artifacts_idle_frequency_endpoint() -> Dict[str, object]:
+    init_db()
+    minutes = get_idle_agent_frequency_minutes()
+    return {"minutes": minutes, "seconds": minutes * 60}
+
+
+@app.put("/api/artifacts/idle-frequency")
+def update_artifacts_idle_frequency_endpoint(payload: IdleFrequencyPayload, request: Request) -> Dict[str, object]:
+    init_db()
+    minutes = set_idle_agent_frequency_minutes(payload.minutes)
+    record_event(None, "idle_agent_frequency_update", visitor_ip(request), {"minutes": minutes})
+    return {"minutes": minutes, "seconds": minutes * 60}
+
+
 @app.delete("/api/artifacts/{artifact_id}")
 def delete_artifact_endpoint(artifact_id: int, request: Request) -> Dict[str, object]:
     init_db()
@@ -530,46 +585,6 @@ def delete_artifact_comment_endpoint(comment_id: int, request: Request) -> Dict[
         raise HTTPException(status_code=404, detail="comment not found")
     record_event(None, "artifact_comment_delete", visitor_ip(request), result)
     return result
-
-
-@app.get("/api/artifacts/runs")
-def artifacts_runs_endpoint(
-    status: str = "",
-    limit: int = Query(default=3, ge=1, le=500),
-) -> Dict[str, object]:
-    init_db()
-    runs = list_idle_agent_runs(status=status, limit=limit)
-    runs["progress"] = current_idle_write_progress()
-    return runs
-
-
-@app.get("/api/artifacts/prompt")
-def artifacts_prompt_endpoint() -> Dict[str, object]:
-    init_db()
-    return {"prompt": get_idle_agent_custom_prompt()}
-
-
-@app.put("/api/artifacts/prompt")
-def update_artifacts_prompt_endpoint(payload: IdlePromptPayload, request: Request) -> Dict[str, object]:
-    init_db()
-    prompt = payload.prompt.strip()
-    set_idle_agent_custom_prompt(prompt)
-    record_event(None, "idle_agent_prompt_update", visitor_ip(request), {"chars": len(prompt)})
-    return {"prompt": prompt}
-
-
-@app.get("/api/artifacts/idle-status")
-def artifacts_idle_status_endpoint() -> Dict[str, object]:
-    init_db()
-    return {"paused": is_idle_agent_paused()}
-
-
-@app.put("/api/artifacts/idle-status")
-def update_artifacts_idle_status_endpoint(payload: IdleStatusPayload, request: Request) -> Dict[str, object]:
-    init_db()
-    paused = set_idle_agent_paused(payload.paused)
-    record_event(None, "idle_agent_pause_update", visitor_ip(request), {"paused": paused})
-    return {"paused": paused}
 
 
 @app.post("/api/characters/session")

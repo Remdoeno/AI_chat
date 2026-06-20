@@ -222,6 +222,7 @@ IDLE_SERIES_PLANNER_SYSTEM_PROMPT = (
     "- 如果创作 prompt 明确要求地点、关系、角色或题材，例如“咖啡厅”，计划必须让作品发生在该地点，或至少有关键段落发生在那里。\n"
     "- must_obey 只能写用户配置创作 prompt 原文明确要求的硬约束；不要把历史前情、角色习惯或你推断的写法升级成 must_obey。\n"
     "- 如果创作 prompt 明确要求连载/续写某个系列，应继续该系列，直到剧情自然完结或达到 prompt 要求的篇数。\n"
+    "- 如果 prompt 明确写了连载篇数，你必须以同一个规范 series_title 和连续 episode_index 管理主线；达到目标篇数时，episode_policy 设为 finale，release_prompt_after_this 设为 true。\n"
     "- 如果创作 prompt 没有明确要求开始或续写某个系列，不要因为历史里存在系列就默认续写；优先规划新短篇、诗歌、剧本、设定或独立单元。\n\n"
     "# 系列阅读\n"
     "- 如果决定续写某系列，必须综合同一 series_title 下全部前序作品，包括主线、番外、前传、外传和起源篇。\n"
@@ -242,7 +243,7 @@ IDLE_SERIES_PLANNER_SYSTEM_PROMPT = (
     "# 输出 JSON\n"
     "只能输出 JSON，不要 Markdown："
     "{\"use_series\":false,\"series_title\":\"\",\"episode_policy\":\"new|continue|finale|spinoff\","
-    "\"next_episode_index\":null,\"release_prompt_after_this\":false,"
+    "\"next_episode_index\":null,\"target_episode_count\":null,\"release_prompt_after_this\":false,"
     "\"title_idea\":\"\",\"intent\":\"\",\"must_obey\":[\"...\"],\"candidate_characters\":[\"...\"],"
     "\"setting_plan\":\"\",\"beats\":[\"...\"],\"anti_repetition_strategy\":\"\","
     "\"image_plan_brief\":\"\",\"reason\":\"\"}"
@@ -290,3 +291,16 @@ IDLE_AGENT_SYSTEM_PROMPT = (
     "# 输出 JSON\n"
     "{\"task_type\":\"novel|poetry|script|worldbuilding|persona|notes|other\",\"title\":\"...\",\"content\":\"...\",\"series_title\":\"...\",\"episode_index\":数字或null,\"summary\":\"...\",\"release_prompt_after_this\":false,\"image_count\":1,\"image_plan\":[{\"title\":\"封面\",\"brief\":\"...\",\"role\":\"cover\"}]}"
 )
+
+IDLE_AGENT_REPAIR_SYSTEM_PROMPT = """# 任务
+你是旺财成果 JSON 修复 agent。你不重新创作作品，只把上游 idle agent 输出的不完整、不合法或被截断的结果修复为可解析的成果 JSON。
+
+# 原则
+- 保留原作品的标题、正文、角色、场景、语气和剧情，不要重写成新故事。
+- 如果原文已经包含 title/task_type/content/summary/series_title/episode_index/image_plan，优先抽取原值。
+- 如果字段缺失，基于原文最小补全：标题要像作品标题，summary 用 1 到 3 句概括正文，image_plan 至少 1 张。
+- 如果原文是 JSON 外壳损坏、引号损坏、尾部截断或混入 Markdown，修复结构即可。
+- 不要输出解释、Markdown 代码块、注释或 JSON 以外的任何文字。
+
+# 输出 JSON
+{"task_type":"novel|poetry|script|worldbuilding|persona|notes|other","title":"...","content":"...","series_title":"","episode_index":null,"summary":"...","release_prompt_after_this":false,"image_count":1,"image_plan":[{"title":"封面","brief":"...","role":"cover"}]}"""

@@ -577,6 +577,39 @@ def set_idle_agent_paused(paused: bool) -> bool:
     return paused
 
 
+IDLE_AGENT_FREQUENCY_SETTING_KEY = "idle_agent_frequency_minutes"
+IDLE_AGENT_FREQUENCY_MINUTES_MIN = 1
+IDLE_AGENT_FREQUENCY_MINUTES_MAX = 10080
+
+
+def default_idle_agent_frequency_minutes() -> int:
+    minutes = int(round(float(IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS) / 60.0))
+    return max(IDLE_AGENT_FREQUENCY_MINUTES_MIN, min(IDLE_AGENT_FREQUENCY_MINUTES_MAX, minutes))
+
+
+def normalize_idle_agent_frequency_minutes(value: object) -> int:
+    try:
+        minutes = int(round(float(str(value).strip())))
+    except Exception:
+        return default_idle_agent_frequency_minutes()
+    return max(IDLE_AGENT_FREQUENCY_MINUTES_MIN, min(IDLE_AGENT_FREQUENCY_MINUTES_MAX, minutes))
+
+
+def get_idle_agent_frequency_minutes() -> int:
+    raw = get_app_setting(IDLE_AGENT_FREQUENCY_SETTING_KEY, str(default_idle_agent_frequency_minutes()))
+    return normalize_idle_agent_frequency_minutes(raw)
+
+
+def set_idle_agent_frequency_minutes(minutes: object) -> int:
+    normalized = normalize_idle_agent_frequency_minutes(minutes)
+    set_app_setting(IDLE_AGENT_FREQUENCY_SETTING_KEY, str(normalized))
+    return normalized
+
+
+def get_idle_agent_min_run_interval_seconds() -> float:
+    return float(get_idle_agent_frequency_minutes() * 60)
+
+
 def load_idle_story_seeds() -> List[str]:
     # Story seeds were an early bootstrap mechanism. The current artifact chain
     # is driven by the user creative prompt, series planner, character cards and

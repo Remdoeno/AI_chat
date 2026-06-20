@@ -46,6 +46,7 @@ from schemas import (
     AuthPasswordPayload,
     ChatAttachment,
     ChatPayload,
+    IdleFrequencyPayload,
     IdlePromptPayload,
     IdleStatusPayload,
     MemoryAdminPayload,

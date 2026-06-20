@@ -759,7 +759,7 @@ def recent_idle_agent_run_exists() -> bool:
         updated = datetime.fromisoformat(str(row["updated_at"]))
     except ValueError:
         return False
-    return (datetime.now(timezone.utc) - updated).total_seconds() < IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS
+    return (datetime.now(timezone.utc) - updated).total_seconds() < get_idle_agent_min_run_interval_seconds()
 
 
 def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
@@ -799,7 +799,39 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
     try:
         IDLE_AGENT_CANCEL_EVENT.clear()
         original_custom_prompt = get_idle_agent_custom_prompt()
-        prompt, prompt_summary = build_idle_agent_prompt()
+        completion_state = idle_custom_prompt_target_reached(original_custom_prompt)
+        if completion_state.get("reached"):
+            completed_prompt = completed_idle_agent_custom_prompt(original_custom_prompt)
+            if completed_prompt:
+                set_idle_agent_custom_prompt(completed_prompt)
+            record_event(None, "idle_agent_prompt_marked_completed", "local", {
+                "reason": "target_count_already_reached",
+                "directive": completion_state.get("directive"),
+                "status": completion_state.get("status"),
+            })
+            return {
+                "status": "skipped",
+                "reason": "custom_prompt_target_reached",
+                "started_at": started_at,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+            }
+        prompt, prompt_summary, prompt_meta = build_idle_agent_prompt()
+        series_plan = prompt_meta.get("series_plan") if isinstance(prompt_meta, dict) else {}
+        if isinstance(series_plan, dict) and str(series_plan.get("reason") or "") == "series_target_reached":
+            completed_prompt = completed_idle_agent_custom_prompt(original_custom_prompt)
+            if completed_prompt:
+                set_idle_agent_custom_prompt(completed_prompt)
+            record_event(None, "idle_agent_prompt_marked_completed", "local", {
+                "reason": "planner_series_target_reached",
+                "series_title": series_plan.get("series_title"),
+                "target_episode_count": series_plan.get("target_episode_count"),
+            })
+            return {
+                "status": "skipped",
+                "reason": "custom_prompt_target_reached",
+                "started_at": started_at,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+            }
         run_id = create_idle_agent_run("other", "idle-agent", prompt_summary, status="writing")
         decision = call_idle_agent_model(prompt)
         if decision.get("cancelled") or IDLE_AGENT_CANCEL_EVENT.is_set():
@@ -813,11 +845,29 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
         artifact_type = str(decision.get("task_type", "other")) or "other"
         title = str(decision.get("title", "未命名成果")) or "未命名成果"
         series_title = str(decision.get("series_title", "") or "").strip()
+        if series_title.lower() in {"none", "null", "nil", "undefined"}:
+            series_title = ""
         raw_episode = decision.get("episode_index")
         try:
             episode_index = int(raw_episode) if raw_episode not in (None, "", "null") else None
         except Exception:
             episode_index = None
+        if isinstance(series_plan, dict) and series_plan.get("use_series") and str(series_plan.get("series_title") or "").strip():
+            planned_series_title = canonical_idle_series_title(series_plan.get("series_title"))
+            planned_episode = series_plan.get("next_episode_index")
+            try:
+                planned_episode_index = int(planned_episode) if planned_episode not in (None, "", "null") else None
+            except Exception:
+                planned_episode_index = None
+            series_title = planned_series_title
+            if str(series_plan.get("episode_policy") or "").strip() != "spinoff":
+                episode_index = planned_episode_index
+            title = normalize_idle_series_artifact_title(
+                title,
+                series_title,
+                episode_index,
+                str(series_plan.get("title_idea") or ""),
+            )
         summary = str(decision.get("summary", "") or "").strip()
         image_plan = decision.get("image_plan") if isinstance(decision.get("image_plan"), list) else []
         update_idle_agent_run_status(run_id, "polishing", title=title, task_type=artifact_type)
@@ -837,12 +887,10 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
             content,
             image_plan,
         )
-        release_requested = bool(decision.get("release_prompt_after_this"))
-        planner_requested_release = "planner_release=true" in str(prompt_summary or "")
+        release_requested = bool(decision.get("release_prompt_after_this")) or bool(series_plan.get("release_prompt_after_this") if isinstance(series_plan, dict) else False)
+        planner_requested_release = bool(series_plan.get("release_prompt_after_this") if isinstance(series_plan, dict) else False) or "planner_release=true" in str(prompt_summary or "")
         if release_requested and planner_requested_release:
-            completed_prompt = original_custom_prompt.strip()
-            if completed_prompt and "【已完结】" not in completed_prompt:
-                completed_prompt = f"{completed_prompt}\n【已完结】"
+            completed_prompt = completed_idle_agent_custom_prompt(original_custom_prompt)
             if completed_prompt:
                 set_idle_agent_custom_prompt(completed_prompt)
             record_event(None, "idle_agent_prompt_marked_completed", "local", {

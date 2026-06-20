@@ -7,6 +7,7 @@ const refreshButton = document.getElementById("refreshButton");
 const shuffleButton = document.getElementById("shuffleButton");
 const idleToggleButton = document.getElementById("idleToggleButton");
 const idleStatusText = document.getElementById("idleStatusText");
+const idleFrequencyInput = document.getElementById("idleFrequencyInput");
 const idlePromptInput = document.getElementById("idlePromptInput");
 const savePromptButton = document.getElementById("savePromptButton");
 const statusText = document.getElementById("statusText");
@@ -40,6 +41,7 @@ let activeDialogArtifactId = null;
 const artifactsById = new Map();
 let likeClickTimer = null;
 let idlePaused = false;
+let idleFrequencyMinutes = 5;
 let activeArtifactComments = [];
 
 function setStatus(text) {
@@ -52,6 +54,43 @@ function updateIdleToggle(paused) {
   idleToggleButton.textContent = idlePaused ? "开始生成" : "暂停生成";
   idleToggleButton.classList.toggle("is-paused", idlePaused);
   idleToggleButton.setAttribute("aria-pressed", idlePaused ? "true" : "false");
+}
+
+function updateIdleFrequency(payload = {}) {
+  const minutes = Math.max(1, Math.min(10080, Math.round(Number(payload.minutes || idleFrequencyMinutes || 5))));
+  idleFrequencyMinutes = Number.isFinite(minutes) ? minutes : 5;
+  if (idleFrequencyInput && document.activeElement !== idleFrequencyInput) {
+    idleFrequencyInput.value = String(idleFrequencyMinutes);
+  }
+}
+
+async function saveIdleFrequency() {
+  if (!idleFrequencyInput) return;
+  const minutes = Math.max(1, Math.min(10080, Math.round(Number(idleFrequencyInput.value || idleFrequencyMinutes || 5))));
+  if (!Number.isFinite(minutes)) {
+    idleFrequencyInput.value = String(idleFrequencyMinutes);
+    setStatus("创作间隔格式不正确");
+    return;
+  }
+  idleFrequencyInput.value = String(minutes);
+  if (minutes === idleFrequencyMinutes) return;
+  idleFrequencyInput.disabled = true;
+  setStatus("保存创作间隔中");
+  try {
+    const response = await fetch("/api/artifacts/idle-frequency", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ minutes }),
+    });
+    if (!response.ok) throw new Error(`idle-frequency ${response.status}`);
+    updateIdleFrequency(await response.json());
+    setStatus(`创作间隔已设为 ${idleFrequencyMinutes} min`);
+  } catch (error) {
+    idleFrequencyInput.value = String(idleFrequencyMinutes);
+    setStatus(`保存间隔失败: ${error.message}`);
+  } finally {
+    idleFrequencyInput.disabled = false;
+  }
 }
 
 function renderArtifactIdleProgress(progress = {}) {
@@ -415,6 +454,39 @@ function renderArtifactImageGrid(images) {
   return grid;
 }
 
+function artifactImagePromptText(imageItem) {
+  const optimizedPrompt = imageItem && imageItem.optimized_prompt ? String(imageItem.optimized_prompt).trim() : "";
+  const originalPrompt = imageItem && imageItem.original_prompt ? String(imageItem.original_prompt).trim() : "";
+  const negativePrompt = imageItem && imageItem.negative_prompt ? String(imageItem.negative_prompt).trim() : "";
+  const prompt = optimizedPrompt || originalPrompt;
+  if (!prompt && !negativePrompt) {
+    return "";
+  }
+  const parts = [];
+  if (prompt) {
+    parts.push(prompt);
+  }
+  if (negativePrompt) {
+    parts.push(`Negative prompt:\n${negativePrompt}`);
+  }
+  return parts.join("\n\n");
+}
+
+function renderArtifactImagePromptDetails(imageItem) {
+  const promptText = artifactImagePromptText(imageItem);
+  if (!promptText) {
+    return null;
+  }
+  const details = document.createElement("details");
+  details.className = "artifact-image-prompt";
+  const summary = document.createElement("summary");
+  summary.textContent = "绘图prompt";
+  const content = document.createElement("pre");
+  content.textContent = promptText;
+  details.append(summary, content);
+  return details;
+}
+
 function renderArtifactInlineImage(imageItem, index) {
   const url = imageItem && imageItem.public_url ? String(imageItem.public_url) : "";
   if (!url) {
@@ -422,6 +494,8 @@ function renderArtifactInlineImage(imageItem, index) {
   }
   const figure = document.createElement("figure");
   figure.className = "artifact-inline-image";
+  const media = document.createElement("div");
+  media.className = "artifact-inline-image-media";
   const image = document.createElement("img");
   image.src = url;
   image.alt = imageItem.plan_title || `成果配图 ${index + 1}`;
@@ -432,7 +506,12 @@ function renderArtifactInlineImage(imageItem, index) {
   download.href = url;
   download.download = `wangcai-artifact-${index + 1}`;
   download.textContent = "下载";
-  figure.append(image, caption, download);
+  media.append(image, download);
+  figure.append(media, caption);
+  const promptDetails = renderArtifactImagePromptDetails(imageItem);
+  if (promptDetails) {
+    figure.appendChild(promptDetails);
+  }
   return figure;
 }
 
@@ -926,17 +1005,19 @@ async function loadData({ append = false } = {}) {
   updateLoadMoreButton();
 
   try {
-    const [artifactsResp, runsResp, promptResp, idleStatusResp] = await Promise.all([
+    const [artifactsResp, runsResp, promptResp, idleStatusResp, idleFrequencyResp] = await Promise.all([
       fetch(`/api/artifacts?${params.toString()}`),
       fetch("/api/artifacts/runs?limit=3"),
       fetch("/api/artifacts/prompt"),
       fetch("/api/artifacts/idle-status"),
+      fetch("/api/artifacts/idle-frequency"),
     ]);
 
     if (!artifactsResp.ok) throw new Error(`artifacts ${artifactsResp.status}`);
     if (!runsResp.ok) throw new Error(`runs ${runsResp.status}`);
     if (!promptResp.ok) throw new Error(`prompt ${promptResp.status}`);
     if (!idleStatusResp.ok) throw new Error(`idle-status ${idleStatusResp.status}`);
+    if (!idleFrequencyResp.ok) throw new Error(`idle-frequency ${idleFrequencyResp.status}`);
 
     renderArtifacts(await artifactsResp.json(), append);
     renderRuns(await runsResp.json());
@@ -945,6 +1026,7 @@ async function loadData({ append = false } = {}) {
       idlePromptInput.value = promptPayload.prompt || "";
     }
     updateIdleToggle((await idleStatusResp.json()).paused);
+    updateIdleFrequency(await idleFrequencyResp.json());
     setStatus("已更新");
   } finally {
     artifactLoading = false;
@@ -1001,6 +1083,21 @@ idleToggleButton.addEventListener("click", async () => {
     idleToggleButton.disabled = false;
   }
 });
+if (idleFrequencyInput) {
+  idleFrequencyInput.addEventListener("change", () => {
+    saveIdleFrequency().catch((error) => setStatus(`保存间隔失败: ${error.message}`));
+  });
+  idleFrequencyInput.addEventListener("blur", () => {
+    saveIdleFrequency().catch((error) => setStatus(`保存间隔失败: ${error.message}`));
+  });
+  idleFrequencyInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveIdleFrequency().catch((error) => setStatus(`保存间隔失败: ${error.message}`));
+      idleFrequencyInput.blur();
+    }
+  });
+}
 loadMoreButton.addEventListener("click", () => {
   loadData({ append: true }).catch((error) => setStatus(`失败: ${error.message}`));
 });

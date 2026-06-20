@@ -67,6 +67,10 @@ class IdleStatusPayload(BaseModel):
     paused: bool = False
 
 
+class IdleFrequencyPayload(BaseModel):
+    minutes: int = Field(default=5, ge=1, le=10080)
+
+
 class ArtifactCommentPayload(BaseModel):
     content: str = Field(min_length=1)
     parent_id: Optional[int] = None
