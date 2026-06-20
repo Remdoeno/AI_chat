@@ -637,7 +637,7 @@ def artifact_memory_text(
 ) -> str:
     clean_title = normalize_idle_artifact_terms(title).strip()
     clean_type = normalize_idle_artifact_terms(artifact_type).strip()
-    clean_content = normalize_idle_artifact_terms(content)
+    clean_content = normalize_idle_artifact_content_text(content)
     clean_summary = normalize_idle_artifact_terms(summary)
     series = normalize_idle_artifact_terms(series_title).strip()
     episode_text = f"第 {int(episode_index)} 集" if episode_index is not None else ""
@@ -797,7 +797,7 @@ def save_idle_agent_artifact(
     clean_title = normalize_idle_artifact_terms(title)
     clean_series = normalize_idle_artifact_terms(series_title)
     clean_summary = normalize_idle_artifact_terms(summary)
-    text = normalize_idle_artifact_terms(content).strip()
+    text = normalize_idle_artifact_content_text(content).strip()
     clean_type = normalize_artifact_type(artifact_type, clean_title, text)
     if not text:
         raise ValueError("idle artifact content is empty")
@@ -904,8 +904,34 @@ def replace_idle_artifact_terms(text: str, replacements: Dict[str, str]) -> str:
     return normalized
 
 
+def strip_idle_artifact_unicode_noise(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    cleaned = text.replace("\ufffd", "")
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", cleaned)
+    for match in re.finditer(r"(?:\\u[0-9a-fA-F]{4}){3,}", cleaned):
+        run = match.group(0).lower()
+        if "\\ufffd" in run or re.search(r"\\u00(?:0[0-8bcef]|1[0-9a-f]|7f)", run):
+            return cleaned[: match.start()].rstrip()
+    cleaned = re.sub(r"\\ufffd", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\\u00(?:0[0-8bcef]|1[0-9a-f]|7f)", "", cleaned, flags=re.I)
+    return cleaned
+
+
+def unescape_idle_artifact_markdown_marks(text: str) -> str:
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"\\+([*_~`#\[\]\(\)>-])", r"\1", text)
+
+
 def normalize_idle_artifact_terms(text: str) -> str:
-    return replace_idle_artifact_terms(text, load_idle_artifact_term_replacements())
+    replaced = replace_idle_artifact_terms(text, load_idle_artifact_term_replacements())
+    return strip_idle_artifact_unicode_noise(replaced)
+
+
+def normalize_idle_artifact_content_text(text: str) -> str:
+    normalized = normalize_idle_artifact_terms(text)
+    return unescape_idle_artifact_markdown_marks(normalized)
 
 
 class TermReplacementStreamFilter:
@@ -1901,7 +1927,7 @@ def build_idle_agent_prompt() -> Tuple[str, str, Dict[str, object]]:
 
 
 def fallback_idle_agent_payload(text: str) -> Dict[str, object]:
-    cleaned = normalize_idle_artifact_terms(text).strip()
+    cleaned = normalize_idle_artifact_content_text(text).strip()
     return {
         "task_type": "notes",
         "title": "未命名成果",
@@ -1956,7 +1982,9 @@ def parse_idle_agent_response(text: str) -> Dict[str, object]:
         if brief:
             normalized_image_plan.append({"title": title, "brief": brief, "role": role})
     if not normalized_image_plan:
-        fallback_brief = normalize_idle_artifact_terms(str(payload.get("summary") or payload.get("title") or payload.get("content") or "")).strip()
+        fallback_brief = normalize_idle_artifact_content_text(
+            str(payload.get("summary") or payload.get("title") or payload.get("content") or "")
+        ).strip()
         normalized_image_plan = [{"title": "封面", "brief": compact_idle_artifact_content(fallback_brief, 220), "role": "cover"}]
     try:
         image_count = int(payload.get("image_count") or len(normalized_image_plan) or 1)
@@ -1967,7 +1995,7 @@ def parse_idle_agent_response(text: str) -> Dict[str, object]:
     return {
         "task_type": normalize_idle_artifact_terms(str(payload.get("task_type", "other"))).strip() or "other",
         "title": normalize_idle_artifact_terms(str(payload.get("title", "未命名成果"))).strip() or "未命名成果",
-        "content": normalize_idle_artifact_terms(str(payload.get("content", ""))).strip(),
+        "content": normalize_idle_artifact_content_text(str(payload.get("content", ""))).strip(),
         "series_title": normalize_idle_artifact_terms(str(payload.get("series_title", ""))).strip(),
         "episode_index": payload.get("episode_index"),
         "summary": normalize_idle_artifact_terms(str(payload.get("summary", ""))).strip(),
@@ -2044,7 +2072,7 @@ def infer_idle_agent_title_from_content(content: str, raw_text: str = "") -> str
 
 def deterministic_repair_idle_agent_payload(raw_text: str, fallback: Dict[str, object]) -> Dict[str, object]:
     raw = str(raw_text or "")
-    fallback_content = normalize_idle_artifact_terms(str(fallback.get("content") or raw)).strip()
+    fallback_content = normalize_idle_artifact_content_text(str(fallback.get("content") or raw)).strip()
     task_type = decode_idle_agent_jsonish_text(extract_idle_agent_jsonish_value(raw, "task_type")) or str(fallback.get("task_type") or "other")
     title = decode_idle_agent_jsonish_text(extract_idle_agent_jsonish_value(raw, "title"))
     content = decode_idle_agent_jsonish_text(extract_idle_agent_jsonish_value(raw, "content")) or fallback_content
@@ -2068,7 +2096,7 @@ def deterministic_repair_idle_agent_payload(raw_text: str, fallback: Dict[str, o
     return {
         "task_type": normalize_artifact_type(str(task_type or "other"), title, content),
         "title": normalize_idle_artifact_terms(title).strip() or UNNAMED_IDLE_ARTIFACT_TITLE,
-        "content": normalize_idle_artifact_terms(content).strip(),
+        "content": normalize_idle_artifact_content_text(content).strip(),
         "series_title": normalize_idle_artifact_terms(series_title).strip(),
         "episode_index": episode_index,
         "summary": normalize_idle_artifact_terms(summary).strip(),
