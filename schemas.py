@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -20,7 +20,17 @@ class ChatPayload(BaseModel):
     web_search: bool = False
     analysis_mode: bool = False
     web_search_proxy: str = Field(default="")
+    client_timing: Dict[str, float] = Field(default_factory=dict)
     max_tokens: int = Field(default=8192, ge=1, le=65536)
+    temperature: float = Field(default=0.6, ge=0.0, le=2.0)
+    top_p: float = Field(default=0.95, ge=0.0, le=1.0)
+
+
+class OpeningStreamPayload(BaseModel):
+    opening_id: str = Field(min_length=1)
+    opening_prompt: str = Field(min_length=1)
+    client_timing: Dict[str, float] = Field(default_factory=dict)
+    max_tokens: int = Field(default=512, ge=1, le=4096)
     temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     top_p: float = Field(default=0.95, ge=0.0, le=1.0)
 

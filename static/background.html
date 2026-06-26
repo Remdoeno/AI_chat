@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>旺财后台观测</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
+    <link rel="stylesheet" href="/static/background.css?v=20260624_background_agent_height_align" />
+  </head>
+  <body>
+    <main class="background-shell">
+      <header class="background-header">
+        <div>
+          <p class="kicker">WANGCAI BACKGROUND</p>
+          <h1>旺财后台观测</h1>
+        </div>
+        <nav class="header-actions" aria-label="页面导航">
+          <a href="/" class="secondary-link">返回聊天</a>
+          <a href="/analysis" class="secondary-link">分析模式</a>
+          <button id="refreshButton" type="button">刷新</button>
+        </nav>
+      </header>
+
+      <section id="statusStrip" class="status-strip">读取中</section>
+      <section id="summaryGrid" class="summary-grid" aria-label="系统总览"></section>
+
+      <section class="dashboard-grid">
+        <article class="panel wide-panel">
+          <div class="panel-title">
+            <p class="kicker">AGENTS</p>
+            <h2>Agent 调用统计</h2>
+          </div>
+          <div id="agentRows" class="table-wrap agent-table-wrap"></div>
+        </article>
+
+        <article class="panel resource-panel">
+          <div class="panel-title">
+            <p class="kicker">SERVER</p>
+            <h2>服务器资源</h2>
+          </div>
+          <div id="resourceView" class="resource-view"></div>
+          <div id="gpuDeployment" class="resource-view gpu-deployment"></div>
+        </article>
+      </section>
+
+      <section class="tables-grid">
+        <article class="panel">
+          <div class="panel-title">
+            <p class="kicker">MODELS</p>
+            <h2>模型使用统计</h2>
+          </div>
+          <div id="modelRows" class="table-wrap model-table-wrap"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-title">
+            <p class="kicker">DATABASE</p>
+            <h2>数据库规模</h2>
+          </div>
+          <div id="tableStats" class="table-wrap database-table-wrap"></div>
+        </article>
+      </section>
+    </main>
+    <script src="/static/background.js?v=20260624_background_agent_height_align"></script>
+  </body>
+</html>

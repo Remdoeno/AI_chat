@@ -44,13 +44,26 @@ def timed_text_for_model(content: str, created_at: object) -> str:
     return f"[message_time: {timestamp}]\n{body}"
 
 
-def connect_db() -> sqlite3.Connection:
+@contextmanager
+def connect_db(busy_timeout_ms: int = 5000) -> Generator[sqlite3.Connection, None, None]:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
+    timeout_ms = max(0, int(busy_timeout_ms))
+    conn.execute(f"PRAGMA busy_timeout={timeout_ms}")
     conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+_DB_SCHEMA_READY = False
+_DB_SCHEMA_LOCK = threading.Lock()
 
 
 def ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, column_sql: str) -> None:
@@ -71,7 +84,19 @@ def normalize_artifact_type(artifact_type: str, title: str = "", content: str = 
 
 
 def init_db() -> None:
+    global _DB_SCHEMA_READY
+    if _DB_SCHEMA_READY:
+        return
+    with _DB_SCHEMA_LOCK:
+        if _DB_SCHEMA_READY:
+            return
+        _init_db_unlocked()
+        _DB_SCHEMA_READY = True
+
+
+def _init_db_unlocked() -> None:
     with connect_db() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -229,6 +254,17 @@ def init_db() -> None:
                 scores_json TEXT NOT NULL,
                 labels_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_recent_states (
+                scope_key TEXT NOT NULL,
+                window_days INTEGER NOT NULL,
+                state_json TEXT NOT NULL,
+                source_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+                source_memory_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                PRIMARY KEY(scope_key, window_days)
             );
 
             CREATE TABLE IF NOT EXISTS idle_agent_runs (
@@ -391,6 +427,8 @@ def init_db() -> None:
                 ON memory_agent_jobs(status, id);
             CREATE INDEX IF NOT EXISTS idx_memory_retrieval_logs_created
                 ON memory_retrieval_logs(created_at, id);
+            CREATE INDEX IF NOT EXISTS idx_user_recent_states_updated
+                ON user_recent_states(updated_at);
             CREATE INDEX IF NOT EXISTS idx_idle_agent_runs_status
                 ON idle_agent_runs(status, id);
             CREATE INDEX IF NOT EXISTS idx_idle_agent_artifacts_type
@@ -1323,24 +1361,27 @@ def is_known_device_identity(visitor_ip: str) -> bool:
     ip = normalize_visitor_ip(visitor_ip)
     if not is_device_identity(ip):
         return False
-    with connect_db() as conn:
-        link = conn.execute(
-            """
-            SELECT profile_id, seen_count
-            FROM visitor_ip_links
-            WHERE visitor_ip = ?
-            """,
-            (ip,),
-        ).fetchone()
-        if link and int(link["seen_count"] or 0) > 0:
-            return True
-        scope = binding_scope_for_device(conn, ip)
-        device_ids = list(scope.get("device_ids") or [ip])
-        in_clause, params = sql_in_clause_params(device_ids)
-        memory_count = conn.execute(
-            f"SELECT COUNT(*) AS c FROM curated_memories WHERE visitor_ip IN {in_clause}",
-            params,
-        ).fetchone()["c"]
+    try:
+        with connect_db(busy_timeout_ms=250) as conn:
+            link = conn.execute(
+                """
+                SELECT profile_id, seen_count
+                FROM visitor_ip_links
+                WHERE visitor_ip = ?
+                """,
+                (ip,),
+            ).fetchone()
+            if link and int(link["seen_count"] or 0) > 0:
+                return True
+            scope = binding_scope_for_device(conn, ip)
+            device_ids = list(scope.get("device_ids") or [ip])
+            in_clause, params = sql_in_clause_params(device_ids)
+            memory_count = conn.execute(
+                f"SELECT COUNT(*) AS c FROM curated_memories WHERE visitor_ip IN {in_clause}",
+                params,
+            ).fetchone()["c"]
+    except sqlite3.OperationalError:
+        return False
     return int(memory_count or 0) > 0
 
 
@@ -1595,20 +1636,29 @@ def format_future_events_context(events: List[Dict[str, object]]) -> str:
     if not events:
         return ""
     lines = [
-        "即将到来的事件/日程提醒（开篇必须优先参考）：",
-        "这些是结构化日程事件，不是普通画像；请在开篇自然提醒用户近期事项，不要泄露内部编号。",
+        "即将到来的事件/日程提醒（开篇必须提到）：",
+        "这些是结构化日程事件，不是普通画像；只要下面有事件，开篇必须自然、具体地提醒用户近期事项，不要只泛泛询问有没有日程，不要泄露内部编号。",
+        "回复第一段必须包含下面事件中的明确内容；除非用户当下明确禁止提醒。",
     ]
     for index, item in enumerate(events, start=1):
         lines.append(
             f"{index}. time={timeline_display_text(item)} "
             f"confidence={float(item.get('confidence', 0.7)):.2f} "
-            f"{str(item['content']).strip()}"
+            f"必须提到：{str(item['content']).strip()}"
         )
     return "\n".join(lines)
 
 
 TIMELINE_QUERY_SCHEDULE_TERMS = (
+    "todo",
+    "to-do",
+    "待办",
+    "待办事项",
     "日程",
+    "事项",
+    "任务",
+    "要做",
+    "要完成",
     "活动",
     "安排",
     "会议",
@@ -1623,6 +1673,18 @@ TIMELINE_QUERY_SCHEDULE_TERMS = (
     "deadline",
     "什么事",
     "有事",
+)
+
+TIMELINE_QUERY_DIRECT_TERMS = (
+    "todo",
+    "to-do",
+    "待办",
+    "待办事项",
+    "要做",
+    "要完成",
+    "提醒我",
+    "不提醒我",
+    "为什么不提醒",
 )
 
 TIMELINE_QUERY_TIME_TERMS = (
@@ -1695,6 +1757,8 @@ def is_timeline_event_query(user_message: str) -> bool:
     text = clean_search_text(user_message, 300).lower()
     if not text:
         return False
+    if any(term in text for term in TIMELINE_QUERY_DIRECT_TERMS):
+        return True
     has_schedule_term = any(term in text for term in TIMELINE_QUERY_SCHEDULE_TERMS)
     has_time_term = any(term in text for term in TIMELINE_QUERY_TIME_TERMS)
     if has_schedule_term and has_time_term:
@@ -1751,8 +1815,8 @@ def format_regular_timeline_events_context(events: List[Dict[str, object]]) -> s
     if not events:
         return ""
     lines = [
-        "普通聊天中可参考的未来事件/日程：",
-        "这些是用户曾明确提供或后台整理的结构化 event；当用户询问日程、活动、提醒、会议或日期范围时，必须优先依据这些事件回答。",
+        "普通聊天中的未来事件/日程/待办（相关问题必须优先回答）：",
+        "这些是用户曾明确提供或后台整理的结构化 event；当用户询问 todo、待办、要做什么、提醒、日程、活动、会议或日期范围时，必须优先依据这些事件回答。",
         "如果这些事件中没有匹配项，只能说目前没有记录到对应日程；不要根据用户身份、学校或常识泛泛猜测。",
         "",
     ]

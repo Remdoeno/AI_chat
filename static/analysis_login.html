@@ -7,6 +7,7 @@
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
     <link rel="stylesheet" href="/static/analysis.css?v=20260618_history_button_unified" />
+    <link rel="stylesheet" href="/static/password_visibility.css?v=20260623_password_visibility" />
   </head>
   <body class="analysis-login-page">
     <main class="analysis-login-card">
@@ -36,12 +37,13 @@
           if (!response.ok) {
             throw new Error("密码错误");
           }
-          window.location.href = "/analysis";
+          window.location.href = window.location.pathname === "/background" ? "/background" : "/analysis";
         } catch (error) {
           statusText.textContent = error.message || "验证失败";
         }
       });
     </script>
+    <script src="/static/password_visibility.js?v=20260623_password_visibility"></script>
     <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
   </body>
 </html>

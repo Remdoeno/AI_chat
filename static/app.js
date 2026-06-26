@@ -62,6 +62,7 @@ let localModelServicePollTimer = 0;
 const SAMPLING_STORAGE_KEY = "wangcai_sampling_settings";
 const DEVICE_STORAGE_KEY = "wangcai_device_id";
 const USER_MEMORY_BINDING_STORAGE_KEY = "wangcai_user_memory_binding";
+const OPENING_PROMPT_STORAGE_KEY = "wangcai_opening_prompt";
 const LEGACY_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
 const LEGACY_DEVICE_STORAGE_KEY = "qwen_device_id";
 const LEGACY_USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
@@ -171,6 +172,8 @@ let bunnyClickTimes = [];
 let samplingSettings = loadSamplingSettings();
 let activeAssistantBody = null;
 let userStoppedGeneration = false;
+let openingGenerationActive = false;
+let activeOpeningId = "";
 let pendingAttachments = [];
 let webSearchEnabled = false;
 let drawEnabled = false;
@@ -713,6 +716,30 @@ function readMigratedStorage(currentKey, legacyKey) {
     return "";
   }
   return "";
+}
+
+function openingPromptStorageKey() {
+  return `${OPENING_PROMPT_STORAGE_KEY}:${ensureDeviceId()}`;
+}
+
+function storeCachedOpeningPrompt(prompt) {
+  const text = String(prompt || "").trim();
+  if (!text) {
+    return;
+  }
+  try {
+    localStorage.setItem(openingPromptStorageKey(), text);
+  } catch (_) {
+    // localStorage can be unavailable in strict private contexts.
+  }
+}
+
+function readCachedOpeningPrompt() {
+  try {
+    return String(localStorage.getItem(openingPromptStorageKey()) || "").trim();
+  } catch (_) {
+    return "";
+  }
 }
 
 function ensureDeviceId() {
@@ -1700,7 +1727,7 @@ function clearPendingAttachments() {
   renderAttachmentPreview();
 }
 
-async function startOpeningPrompt(payload, openingPrompt = true) {
+async function startOpeningPrompt(payload, openingPrompt = true, openingTiming = null) {
   if (!openingPrompt || !sessionId || activeController) {
     return;
   }
@@ -1708,12 +1735,107 @@ async function startOpeningPrompt(payload, openingPrompt = true) {
   if (!prompt) {
     return;
   }
-  await sendMessage(prompt, [], false, {
-    hiddenUser: true,
-    showUser: false,
-    maxTokens: 512,
-    cachedOpening: true,
-  });
+  const clientTiming = openingTiming ? {
+    session_fetch_ms: Number(openingTiming.sessionFetchMs || 0),
+    session_json_ms: Number(openingTiming.sessionJsonMs || 0),
+    session_to_opening_send_ms: Number(performance.now() - openingTiming.sessionStartMs),
+    opening_prompt_chars: prompt.length,
+  } : {};
+  openingGenerationActive = true;
+  try {
+    await sendMessage(prompt, [], false, {
+      hiddenUser: true,
+      showUser: false,
+      maxTokens: 512,
+      cachedOpening: true,
+      clientTiming,
+    });
+  } finally {
+    openingGenerationActive = false;
+  }
+}
+
+async function startFastOpeningPrompt(openingPrompt) {
+  const prompt = String(openingPrompt || "").trim();
+  if (!prompt || activeController) {
+    return false;
+  }
+  activeOpeningId = crypto.randomUUID
+    ? crypto.randomUUID().replace(/-/g, "")
+    : `opening_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+  openingGenerationActive = true;
+  userStoppedGeneration = false;
+  activeController = new AbortController();
+  const assistantBody = createBubble("assistant", "");
+  activeAssistantBody = assistantBody;
+  setBusy(true);
+  setStatus("开场生成中");
+
+  try {
+    const response = await fetch("/api/opening/stream", {
+      method: "POST",
+      headers: jsonHeaders(),
+      signal: activeController.signal,
+      body: JSON.stringify({
+        opening_id: activeOpeningId,
+        opening_prompt: prompt,
+        cached_opening: true,
+        max_tokens: 512,
+        ...getSamplingSettings(),
+      }),
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(await response.text());
+    }
+    await consumeSse(response, {
+      token: (payload) => {
+        setRenderedMarkdown(assistantBody, getRawMarkdown(assistantBody) + (payload.content || ""));
+        scrollToBottom();
+      },
+      done: (payload) => {
+        if (payload && payload.content && !getRawMarkdown(assistantBody).trim()) {
+          setRenderedMarkdown(assistantBody, payload.content);
+        }
+        setStatus("就绪");
+        return true;
+      },
+      stopped: () => {
+        const raw = getRawMarkdown(assistantBody);
+        if (!raw.trim()) {
+          setRenderedMarkdown(assistantBody, "[已停止]");
+        } else if (!raw.includes("[已停止]")) {
+          setRenderedMarkdown(assistantBody, `${raw}\n\n[已停止]`);
+        }
+        assistantBody.parentElement.classList.add("stopped");
+        setStatus("已停止");
+        return true;
+      },
+      error: (payload) => {
+        setRenderedMarkdown(assistantBody, payload.message || "模型服务调用失败");
+        assistantBody.parentElement.classList.add("error");
+        setStatus("错误");
+        return true;
+      },
+    });
+    return true;
+  } catch (error) {
+    if (error.name === "AbortError" && userStoppedGeneration) {
+      setStatus("已停止");
+    } else if (error.name !== "AbortError") {
+      setRenderedMarkdown(assistantBody, `请求失败：${error.message}`);
+      assistantBody.parentElement.classList.add("error");
+      setStatus("错误");
+    }
+    return false;
+  } finally {
+    activeController = null;
+    activeAssistantBody = null;
+    activeOpeningId = "";
+    openingGenerationActive = false;
+    userStoppedGeneration = false;
+    setBusy(false);
+    messageInput.focus();
+  }
 }
 
 function readFileAsDataUrl(file) {
@@ -1848,24 +1970,34 @@ async function addImageFiles(files) {
 }
 
 async function createSession(options = {}) {
-  const { openingPrompt = true } = options;
+  const { openingPrompt = true, clearExisting = true } = options;
+  const sessionStartMs = performance.now();
   const response = await fetch("/api/sessions", {
     method: "POST",
     headers: deviceIdentityHeaders(),
   });
+  const responseMs = performance.now();
   if (!response.ok) {
     throw new Error(await response.text());
   }
   const payload = await response.json();
+  const jsonMs = performance.now();
   sessionId = payload.session_id;
   if (payload.memory_binding) {
     applyUserMemoryBindingState(payload.memory_binding);
   }
-  resetPreviousSessionLoadState();
-  clearMessages();
-  clearPendingAttachments();
+  storeCachedOpeningPrompt(payload.opening_prompt);
+  if (clearExisting) {
+    resetPreviousSessionLoadState();
+    clearMessages();
+    clearPendingAttachments();
+  }
   setStatus("就绪");
-  await startOpeningPrompt(payload, openingPrompt);
+  await startOpeningPrompt(payload, openingPrompt, {
+    sessionStartMs,
+    sessionFetchMs: responseMs - sessionStartMs,
+    sessionJsonMs: jsonMs - responseMs,
+  });
 }
 
 function closeCurrentSession() {
@@ -1873,15 +2005,32 @@ function closeCurrentSession() {
     return;
   }
   const deviceIdQuery = `?device_id=${encodeURIComponent(ensureDeviceId())}`;
-  fetch(`/api/sessions/${sessionId}/close${deviceIdQuery}`, {
+  const closePath = `/api/sessions/${sessionId}/close${deviceIdQuery}`;
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(closePath, new Blob([], { type: "application/json" }));
+    return;
+  }
+  fetch(closePath, {
     method: "POST",
     headers: deviceIdentityHeaders(),
     keepalive: true,
-  }).catch(() => {
+  }).catch(() => {});
+}
+
+function handlePageHide() {
+  if (activeOpeningId) {
+    const cancelPath = `/api/opening/cancel/${activeOpeningId}?device_id=${encodeURIComponent(ensureDeviceId())}`;
     if (navigator.sendBeacon) {
-      navigator.sendBeacon(`/api/sessions/${sessionId}/close${deviceIdQuery}`, new Blob([], { type: "application/json" }));
+      navigator.sendBeacon(cancelPath, new Blob([], { type: "application/json" }));
+    } else {
+      fetch(cancelPath, {
+        method: "POST",
+        headers: deviceIdentityHeaders(),
+        keepalive: true,
+      }).catch(() => {});
     }
-  });
+  }
+  closeCurrentSession();
 }
 
 async function stopActiveGeneration() {
@@ -1891,7 +2040,13 @@ async function stopActiveGeneration() {
   userStoppedGeneration = true;
   sendButton.disabled = true;
   try {
-    if (sessionId) {
+    if (activeOpeningId) {
+      await fetch(`/api/opening/cancel/${activeOpeningId}`, {
+        method: "POST",
+        headers: deviceIdentityHeaders(),
+        keepalive: true,
+      });
+    } else if (sessionId) {
       await fetch(`/api/sessions/${sessionId}/cancel`, {
         method: "POST",
         headers: deviceIdentityHeaders(),
@@ -2055,6 +2210,7 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
         attachments,
         hidden_user: hiddenUser,
         cached_opening: Boolean(options.cachedOpening),
+        client_timing: options.clientTiming || {},
         web_search: drawMode ? false : webSearch,
         web_search_proxy: samplingSettings.web_search_proxy,
         max_tokens: maxTokens,
@@ -2492,7 +2648,7 @@ memoryAdminButton.addEventListener("click", (event) => {
 });
 memoryAdminLoginForm.addEventListener("submit", loginMemoryAdmin);
 memoryAdminCancelButton.addEventListener("click", closeMemoryAdminDialog);
-window.addEventListener("pagehide", closeCurrentSession);
+window.addEventListener("pagehide", handlePageHide);
 bunnyLogoButton.addEventListener("pointerdown", handleBunnyWarnLongPressStart);
 bunnyLogoButton.addEventListener("pointerup", clearBunnyWarnLongPress);
 bunnyLogoButton.addEventListener("pointerleave", clearBunnyWarnLongPress);
@@ -2553,8 +2709,26 @@ loadModelSettings().catch(() => {});
 loadLocalModelServiceStatus();
 loadUserMemoryBinding().catch(() => {});
 clearDrawModeSelection();
-createSession().catch((error) => {
-  setStatus("连接失败");
-  createBubble("assistant", `连接失败：${error.message}`);
-  setBusy(false);
-});
+
+function bootChatSession() {
+  const cachedOpeningPrompt = readCachedOpeningPrompt();
+  if (cachedOpeningPrompt) {
+    resetPreviousSessionLoadState();
+    clearMessages();
+    clearPendingAttachments();
+    startFastOpeningPrompt(cachedOpeningPrompt).finally(() => {
+      createSession({ openingPrompt: false, clearExisting: false }).catch((error) => {
+        setStatus("会话准备失败");
+        createBubble("assistant", `会话准备失败：${error.message}`);
+      });
+    });
+    return;
+  }
+  createSession().catch((error) => {
+    setStatus("连接失败");
+    createBubble("assistant", `连接失败：${error.message}`);
+    setBusy(false);
+  });
+}
+
+bootChatSession();

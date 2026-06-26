@@ -45,6 +45,13 @@ def analysis_dashboard(request: Request) -> FileResponse:
     return html_response("analysis.html")
 
 
+@app.get("/background", include_in_schema=False)
+def background_dashboard(request: Request) -> FileResponse:
+    if not is_analysis_authenticated(request):
+        return html_response("analysis_login.html")
+    return html_response("background.html")
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon() -> Response:
     return Response(status_code=204)

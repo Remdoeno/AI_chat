@@ -1529,8 +1529,92 @@ def normalize_artifact_image_plan(
     return plans[:4]
 
 
+def artifact_image_character_names(profile: Dict[str, object]) -> List[str]:
+    names = [str(profile.get("canonical_name") or ""), *[str(item) for item in profile.get("aliases", [])]]
+    unique: List[str] = []
+    for name in names:
+        clean = str(name or "").strip()
+        if clean and clean not in unique:
+            unique.append(clean)
+    return unique
+
+
+def scrub_artifact_image_character_names(text: str, names: List[str]) -> str:
+    cleaned = str(text or "")
+    for name in sorted({item.strip() for item in names if item and item.strip()}, key=len, reverse=True):
+        escaped = re.escape(name)
+        cleaned = re.sub(rf"\b(named|called)\s+{escaped}\b", "", cleaned, flags=re.I)
+        cleaned = re.sub(rf"\b{escaped}'s\b", "this character's", cleaned, flags=re.I)
+        cleaned = re.sub(escaped, "this character", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bthis character\s+this character\b", "this character", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+([,.;:，。；：])", r"\1", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\bwoman,\s+exuding\b", "woman exuding", cleaned, flags=re.I)
+    cleaned = re.sub(r"\bman,\s+exuding\b", "man exuding", cleaned, flags=re.I)
+    return cleaned.strip()
+
+
+def artifact_image_mentioned_character_profiles(text: str, limit: int = 4) -> List[Dict[str, object]]:
+    source = str(text or "").strip()
+    if not source:
+        return []
+    try:
+        profiles = list_active_character_profiles(limit=80)
+    except Exception as exc:
+        record_event(None, "artifact_image_character_context_error", "local", {"error": str(exc)})
+        return []
+    matched: List[Dict[str, object]] = []
+    for profile in profiles:
+        try:
+            if character_profile_matches_message(profile, source):
+                matched.append(profile)
+        except Exception:
+            continue
+        if len(matched) >= max(1, int(limit)):
+            break
+    return matched
+
+
+def artifact_image_character_visual_context(profiles: List[Dict[str, object]]) -> str:
+    if not profiles:
+        return ""
+    lines = [
+        "固定角色视觉锚点（硬约束）：",
+        "以下角色名只用于系统匹配，最终 optimized_prompt 不要输出角色名或别名；用 the woman, the man, this character, mentioned character 等通用称呼。",
+        "画图时必须保留角色库里的族裔/地域、年龄、发型、额头/刘海、体型、面部结构、气质、关键道具和可见身份特征；本轮场景可以改变服装、妆容、姿态和环境，但不能把角色画成另一种人。",
+    ]
+    for index, profile in enumerate(profiles[:4], start=1):
+        names = artifact_image_character_names(profile)
+        visual_prompt = scrub_artifact_image_character_names(
+            clean_character_text(profile.get("visual_prompt"), 1800),
+            names,
+        )
+        personality = scrub_artifact_image_character_names(
+            clean_character_text(profile.get("personality"), 450),
+            names,
+        )
+        background = scrub_artifact_image_character_names(
+            clean_character_text(profile.get("background"), 550),
+            names,
+        )
+        negative_prompt = scrub_artifact_image_character_names(
+            clean_character_text(profile.get("negative_prompt"), 320),
+            names,
+        )
+        lines.append(f"出场角色 {index}：")
+        if visual_prompt:
+            lines.append(f"- 完整视觉参考：{visual_prompt}")
+        if personality:
+            lines.append(f"- 气质/表情参考：{personality}")
+        if background:
+            lines.append(f"- 身份/背景参考：{background}")
+        if negative_prompt:
+            lines.append(f"- 角色专属负面约束：{negative_prompt}")
+    return "\n".join(lines).strip()
+
+
 def artifact_image_prompt_source(title: str, summary: str, content: str, plan: Dict[str, str]) -> str:
-    return "\n".join(
+    raw_source = "\n".join(
         [
             f"成果标题：{title}",
             f"成果摘要：{summary}",
@@ -1542,6 +1626,16 @@ def artifact_image_prompt_source(title: str, summary: str, content: str, plan: D
             compact_idle_artifact_content(content, 900),
         ]
     )
+    profiles = artifact_image_mentioned_character_profiles(raw_source)
+    if not profiles:
+        return raw_source
+    all_names: List[str] = []
+    for profile in profiles:
+        all_names.extend(artifact_image_character_names(profile))
+    scrubbed_source = scrub_artifact_image_character_names(raw_source, all_names)
+    character_context = artifact_image_character_visual_context(profiles)
+    return "\n\n".join([scrubbed_source, character_context]).strip()
+
 
 
 def generate_artifact_theme_images(

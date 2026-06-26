@@ -95,6 +95,10 @@ def idle_series_directive_from_prompt(prompt: str) -> Dict[str, object]:
         prefix = re.split(r"[\n。；;]", prefix)[-1]
         prefix = re.sub(r"(?:请|帮我|给我|来|搞|写|生成|创作|继续|续写|连载|系列|故事|作品|一组|一些)+", "", prefix)
         series_title = canonical_idle_series_title(prefix)
+    if not series_title and count_match:
+        leading_clause = re.split(r"[\n。；;，,]", text, maxsplit=1)[0]
+        leading_clause = re.sub(r"(?:请|帮我|给我|来|搞|写|生成|创作|继续|续写|连载|系列|故事|作品|一组|一些)+", "", leading_clause)
+        series_title = canonical_idle_series_title(leading_clause)
     explicit_series = bool(series_title and (target_count or "连载" in text or "续写" in text or "系列" in text))
     return {
         "series_title": series_title,
@@ -535,7 +539,7 @@ def current_idle_agent_progress() -> Dict[str, object]:
     return progress
 
 
-def list_idle_worker_activity(limit: int = 20) -> List[Dict[str, object]]:
+def list_idle_worker_activity(limit: int = 20, offset: int = 0) -> List[Dict[str, object]]:
     event_types = {
         "idle_worker_tick",
         "idle_worker_tick_done",
@@ -552,7 +556,8 @@ def list_idle_worker_activity(limit: int = 20) -> List[Dict[str, object]]:
         "idle_agent_error",
     }
     placeholders = ",".join("?" for _ in event_types)
-    max_rows = min(max(int(limit), 1), 500)
+    max_rows = min(max(int(limit), 1), 501)
+    start_row = max(int(offset), 0)
     with connect_db() as conn:
         rows = conn.execute(
             f"""
@@ -560,9 +565,9 @@ def list_idle_worker_activity(limit: int = 20) -> List[Dict[str, object]]:
             FROM events
             WHERE event_type IN ({placeholders})
             ORDER BY datetime(created_at) DESC, id DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (*sorted(event_types), max_rows),
+            (*sorted(event_types), max_rows, start_row),
         ).fetchall()
     return [
         {

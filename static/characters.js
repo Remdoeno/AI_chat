@@ -25,6 +25,8 @@ const characterDialogSave = document.getElementById("characterDialogSave");
 let sessionId = "";
 let pendingAttachments = [];
 let activeController = null;
+let activeAssistantBody = null;
+let userStoppedCharacterGeneration = false;
 let activeDialogCharacterId = null;
 let activeDialogCharacter = null;
 let drawModeEnabled = false;
@@ -355,8 +357,24 @@ function updateDrawModeButton() {
   drawModeButton.setAttribute("aria-pressed", drawModeEnabled ? "true" : "false");
 }
 
+function setCharacterSendButtonGenerating(generating) {
+  sendButton.classList.toggle("is-stopping", generating);
+  if (generating) {
+    sendButton.textContent = "■";
+    sendButton.type = "button";
+    sendButton.setAttribute("aria-label", "停止生成");
+    sendButton.title = "停止生成";
+    return;
+  }
+  sendButton.textContent = "发送";
+  sendButton.type = "submit";
+  sendButton.setAttribute("aria-label", "发送消息");
+  sendButton.title = "发送消息";
+}
+
 function setBusy(busy) {
-  sendButton.disabled = busy;
+  setCharacterSendButtonGenerating(Boolean(busy && activeController));
+  sendButton.disabled = false;
   attachImageButton.disabled = busy;
   if (drawModeButton) drawModeButton.disabled = busy;
   activeController = busy ? activeController : null;
@@ -993,11 +1011,55 @@ function consumeSse(response, handlers) {
   })();
 }
 
+function markCharacterAssistantStopped(element) {
+  if (!element) return;
+  element.parentElement.classList.add("stopped");
+  const generatedGrid = element.querySelector(".generated-grid");
+  let textTarget = element;
+  if (generatedGrid) {
+    textTarget = element.querySelector(".assistant-reply-text");
+    if (!textTarget) {
+      textTarget = document.createElement("div");
+      textTarget.className = "assistant-reply-text markdown-body";
+      element.append(textTarget);
+    }
+  }
+  const raw = String(textTarget.dataset.rawMarkdown || "").trim();
+  if (!raw) {
+    setAssistantMarkdown(textTarget, "[已停止]");
+    return;
+  }
+  if (!raw.includes("[已停止]")) {
+    setAssistantMarkdown(textTarget, `${raw}\n\n[已停止]`);
+  }
+}
+
+async function stopActiveCharacterGeneration() {
+  if (!activeController) return;
+  userStoppedCharacterGeneration = true;
+  sendButton.disabled = true;
+  try {
+    if (sessionId) {
+      await fetch(`/api/characters/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+        method: "POST",
+        keepalive: true,
+      });
+    }
+  } catch {
+    // Close the browser stream even if the cancel request cannot be delivered.
+  }
+  activeController.abort();
+  markCharacterAssistantStopped(activeAssistantBody);
+  setStatus("已停止");
+}
+
 async function sendCharacterMessage(text, attachments, mode = "chat") {
   const userText = text || (attachments.length ? "请根据这张图片创建或修改角色。" : "");
   if (!userText) return;
   appendMessage("user", userText, attachments);
   const assistantBody = appendMessage("assistant", "角色库整理中");
+  activeAssistantBody = assistantBody;
+  userStoppedCharacterGeneration = false;
   activeController = new AbortController();
   setBusy(true);
   setStatus("角色库整理中");
@@ -1067,6 +1129,10 @@ async function sendCharacterMessage(text, attachments, mode = "chat") {
         setAssistantMarkdown(assistantBody, payload.message || "角色库处理失败");
         setStatus("角色库处理失败");
       },
+      stopped: () => {
+        markCharacterAssistantStopped(assistantBody);
+        setStatus("已停止");
+      },
       delete_confirmation_required: async (payload) => {
         const characterId = payload.id;
         const name = payload.canonical_name || `#${characterId}`;
@@ -1095,9 +1161,16 @@ async function sendCharacterMessage(text, attachments, mode = "chat") {
       },
     });
   } catch (error) {
-    setAssistantMarkdown(assistantBody, `请求失败：${error.message}`);
-    setStatus("请求失败");
+    if (error.name === "AbortError" && userStoppedCharacterGeneration) {
+      setStatus("已停止");
+    } else if (error.name !== "AbortError") {
+      setAssistantMarkdown(assistantBody, `请求失败：${error.message}`);
+      setStatus("请求失败");
+    }
   } finally {
+    activeController = null;
+    activeAssistantBody = null;
+    userStoppedCharacterGeneration = false;
     setBusy(false);
     clearPendingAttachments();
   }
@@ -1161,6 +1234,12 @@ chatForm.addEventListener("submit", async (event) => {
   if (!text && !attachments.length) return;
   messageInput.value = "";
   await sendCharacterMessage(text, attachments, drawModeEnabled ? "draw" : "chat");
+});
+
+sendButton.addEventListener("click", async (event) => {
+  if (!activeController) return;
+  event.preventDefault();
+  await stopActiveCharacterGeneration();
 });
 
 messageInput.addEventListener("compositionstart", () => {

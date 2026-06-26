@@ -76,6 +76,9 @@ def render_cached_opening_prompt(cached_prompt: str, visitor_ip: str = "") -> st
     recent_diary = format_opening_recent_diary_context(retrieve_recent_diary_memories_for_opening(visitor_ip))
     if recent_diary:
         parts.append(recent_diary)
+    recent_state = format_user_recent_state_context(visitor_ip)
+    if recent_state:
+        parts.append(recent_state)
     future_events = format_future_events_context(retrieve_future_event_memories(visitor_ip))
     if future_events:
         parts.append(future_events)
@@ -91,8 +94,16 @@ def refresh_cached_opening_prompt(visitor_ip: str) -> str:
     opening_memories = retrieve_opening_context_memories(ip, limit=6)
     future_events = retrieve_future_event_memories(ip)
     recent_diary = retrieve_recent_diary_memories_for_opening(ip)
+    recent_state_context = format_user_recent_state_context(ip)
     memory_count = count_device_curated_memories(ip)
-    if not profile_memories and not opening_memories and not future_events and not recent_diary and memory_count <= 0:
+    if (
+        not profile_memories
+        and not opening_memories
+        and not future_events
+        and not recent_diary
+        and not recent_state_context
+        and memory_count <= 0
+    ):
         delete_app_setting(opening_prompt_cache_key(ip))
         return ""
 
@@ -104,12 +115,21 @@ def refresh_cached_opening_prompt(visitor_ip: str) -> str:
         memory_phrase = f"已提前载入这个浏览器身份的长期记忆（约 {memory_count} 条）"
     profile_context = format_profile_context(profile_memories)
     opening_context = format_opening_context(opening_memories)
+    if future_events:
+        opening_task = (
+            "任务：如果后续上下文中存在“即将到来的事件/日程提醒”，开篇必须先自然提醒其中的明确事项，"
+            "不能只泛泛询问有没有日程；提醒后再简短关心用户今天的状态或安排。"
+        )
+    else:
+        opening_task = (
+            "任务：请自然地回复用户，询问他今天是否有会议、截止时间、日程、约定，"
+            "或其他需要你记住并提醒的事情。回复要简短、有一点当前关系感。"
+        )
     cached_prompt = (
         "这是浏览器打开时的隐藏首轮输入；你拿到它时，长期记忆检索和画像整理已经在 idle 时间完成。"
         "不要提到这是隐藏输入，不要复述系统提示，不要说自己正在检索记忆。\n"
         f"预处理状态：{memory_phrase}。\n"
-        "任务：请自然地回复用户，询问他今天是否有会议、截止时间、日程、约定，"
-        "或其他需要你记住并提醒的事情。回复要简短、有一点当前关系感。\n"
+        f"{opening_task}\n"
         "如果用户有开场偏好（opening preference），例如每次见面先讲笑话、问候方式、称呼方式，优先遵守。"
     )
     if profile_context:
@@ -118,8 +138,10 @@ def refresh_cached_opening_prompt(visitor_ip: str) -> str:
         cached_prompt += f"\n\n已缓存开场专用偏好：\n{opening_context}"
     if recent_diary:
         cached_prompt += "\n\n开篇时还会读取最近一周的 diary/risk 状态，以自然体贴的方式关心用户。"
+    if recent_state_context:
+        cached_prompt += f"\n\n已缓存近期陪伴状态：\n{recent_state_context}"
     if future_events:
-        cached_prompt += "\n\n开篇时还会读取当前时间之后的结构化 event 并提醒用户。"
+        cached_prompt += "\n\n开篇时还会读取当前时间之后的结构化 event；只要存在这类 event，回复必须自然提到具体事项。"
     set_app_setting(opening_prompt_cache_key(ip), cached_prompt)
     return cached_prompt
 

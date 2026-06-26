@@ -57,6 +57,7 @@ def memory_dedupe_agent_can_run(force: bool = False) -> Tuple[bool, str]:
         return False, "memory_dedupe_disabled"
     if force:
         return True, "forced"
+    cleanup_stale_active_generations()
     with ACTIVE_GENERATIONS_LOCK:
         if ACTIVE_GENERATIONS:
             return False, "active_generation"
@@ -405,6 +406,7 @@ def memory_refine_agent_can_run(force: bool = False) -> Tuple[bool, str]:
         return False, "memory_refine_disabled"
     if force:
         return True, "forced"
+    cleanup_stale_active_generations()
     with ACTIVE_GENERATIONS_LOCK:
         if ACTIVE_GENERATIONS:
             return False, "active_generation"
@@ -769,6 +771,7 @@ def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
         return False, "idle_paused"
     if force:
         return True, "forced"
+    cleanup_stale_active_generations()
     with ACTIVE_GENERATIONS_LOCK:
         if ACTIVE_GENERATIONS:
             return False, "active_generation"
@@ -935,22 +938,99 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
         IDLE_AGENT_WORKER_LOCK.release()
 
 
+IDLE_WORKER_SKIP_COALESCE_SECONDS = int(os.getenv("WANGCAI_IDLE_WORKER_SKIP_COALESCE_SECONDS", "600"))
+
+
+def idle_worker_skip_metadata(task: str, status: str, reason: str, result: Dict[str, object]) -> Dict[str, object]:
+    now = utc_now()
+    return {
+        "task": task,
+        "status": status,
+        "reason": reason,
+        "started_at": result.get("started_at"),
+        "duration_ms": float(result.get("duration_ms") or 0.0),
+        "skip_count": 1,
+        "first_seen_at": now,
+        "last_seen_at": now,
+    }
+
+
+def coalesce_idle_worker_skip_event(metadata: Dict[str, object]) -> bool:
+    if IDLE_WORKER_SKIP_COALESCE_SECONDS <= 0:
+        return False
+    task = str(metadata.get("task") or "")
+    status = str(metadata.get("status") or "")
+    reason = str(metadata.get("reason") or "")
+    if not task or not status or not reason:
+        return False
+    now = utc_now()
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=IDLE_WORKER_SKIP_COALESCE_SECONDS)
+    with connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, created_at, metadata_json
+            FROM events
+            WHERE event_type = 'idle_worker_skip'
+              AND visitor_ip = 'local'
+            ORDER BY id DESC
+            LIMIT 80
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                existing = json.loads(str(row["metadata_json"] or "{}"))
+            except Exception:
+                continue
+            if not isinstance(existing, dict):
+                continue
+            if str(existing.get("task") or "") != task:
+                continue
+            if str(existing.get("status") or "") != status:
+                continue
+            if str(existing.get("reason") or "") != reason:
+                continue
+            last_seen_raw = str(existing.get("last_seen_at") or row["created_at"] or "")
+            try:
+                last_seen = datetime.fromisoformat(last_seen_raw)
+            except Exception:
+                continue
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if last_seen < cutoff:
+                continue
+            merged = dict(existing)
+            merged["skip_count"] = int(existing.get("skip_count") or 1) + 1
+            merged["first_seen_at"] = existing.get("first_seen_at") or existing.get("started_at") or row["created_at"]
+            merged["last_seen_at"] = now
+            merged["started_at"] = metadata.get("started_at")
+            merged["duration_ms"] = round(float(existing.get("duration_ms") or 0.0) + float(metadata.get("duration_ms") or 0.0), 3)
+            merged["last_duration_ms"] = metadata.get("duration_ms")
+            conn.execute(
+                """
+                UPDATE events
+                SET created_at = ?,
+                    metadata_json = ?
+                WHERE id = ?
+                """,
+                (now, json.dumps(merged, ensure_ascii=False), int(row["id"])),
+            )
+            return True
+    return False
+
+
 def record_idle_worker_skip(task: str, result: Dict[str, object]) -> None:
     status = str(result.get("status") or "")
     if status not in {"busy", "skipped", "failed"}:
         return
     reason = str(result.get("reason") or result.get("error") or status)
+    metadata = idle_worker_skip_metadata(task, status, reason, result)
+    if status != "failed" and coalesce_idle_worker_skip_event(metadata):
+        return
     record_event(
         None,
         "idle_worker_skip" if status != "failed" else "idle_worker_error",
         "local",
-        {
-            "task": task,
-            "status": status,
-            "reason": reason,
-            "started_at": result.get("started_at"),
-            "duration_ms": result.get("duration_ms"),
-        },
+        metadata,
     )
 
 
@@ -959,8 +1039,8 @@ def idle_agent_worker_loop() -> None:
         time.sleep(IDLE_AGENT_LOOP_SECONDS)
         tick_started = utc_now()
         tick_timer = time.perf_counter()
-        record_event(None, "idle_worker_tick", "local", {"started_at": tick_started, "loop_seconds": IDLE_AGENT_LOOP_SECONDS})
         try:
+            record_event(None, "idle_worker_tick", "local", {"started_at": tick_started, "loop_seconds": IDLE_AGENT_LOOP_SECONDS})
             cache_result = run_opening_cache_refresh_once(force=False)
             record_idle_worker_skip("opening_cache", cache_result)
             dedupe_result = run_memory_dedupe_agent_once(force=False)
@@ -991,6 +1071,20 @@ def idle_agent_worker_loop() -> None:
                     },
                 )
                 continue
+            recent_state_result = run_user_recent_state_agent_once(force=False)
+            record_idle_worker_skip("user_recent_state", recent_state_result)
+            if recent_state_result.get("status") == "completed":
+                record_event(
+                    None,
+                    "idle_worker_tick_done",
+                    "local",
+                    {
+                        "started_at": tick_started,
+                        "duration_ms": round((time.perf_counter() - tick_timer) * 1000, 3),
+                        "completed_task": "user_recent_state",
+                    },
+                )
+                continue
             idle_result = run_idle_agent_once(force=False)
             record_idle_worker_skip("idle_write", idle_result)
             record_event(
@@ -1004,16 +1098,19 @@ def idle_agent_worker_loop() -> None:
                 },
             )
         except Exception as exc:
-            record_event(
-                None,
-                "idle_worker_error",
-                "local",
-                {
-                    "error": str(exc),
-                    "started_at": tick_started,
-                    "duration_ms": round((time.perf_counter() - tick_timer) * 1000, 3),
-                },
-            )
+            try:
+                record_event(
+                    None,
+                    "idle_worker_error",
+                    "local",
+                    {
+                        "error": str(exc),
+                        "started_at": tick_started,
+                        "duration_ms": round((time.perf_counter() - tick_timer) * 1000, 3),
+                    },
+                )
+            except Exception:
+                pass
 
 
 def start_idle_agent_worker() -> None:

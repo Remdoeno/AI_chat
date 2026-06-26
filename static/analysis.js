@@ -35,7 +35,6 @@ window.addEventListener("unhandledrejection", (event) => {
 let sessionId = null;
 let activeController = null;
 let pendingAttachments = [];
-let backgroundActivityLimit = 20;
 let userStoppedGeneration = false;
 let isMessageComposing = false;
 let isLoadingPreviousSession = false;
@@ -47,6 +46,14 @@ let backgroundRefreshPending = false;
 let panelRefreshRunning = false;
 let panelRefreshWatchTimer = 0;
 let panelRefreshWatchUntil = 0;
+const BACKGROUND_ACTIVITY_INITIAL_LIMIT = 20;
+const BACKGROUND_ACTIVITY_PAGE_SIZE = 100;
+let backgroundActivities = [];
+let backgroundNextOffset = 0;
+let backgroundHasMore = true;
+let backgroundLoading = false;
+let backgroundRenderSignature = "";
+let traceRenderSignature = "";
 
 function updateAnalysisComposerHeight() {
   if (!chatForm || !chatForm.parentElement) {
@@ -1588,6 +1595,10 @@ function traceItemKey(item) {
   ].join("|");
 }
 
+function traceItemsSignature(items) {
+  return (items || []).map(traceItemKey).join("|");
+}
+
 function traceSortValue(item) {
   if (Number.isFinite(Number(item.id))) {
     return Number(item.id);
@@ -1729,8 +1740,14 @@ async function refreshTraces() {
     return;
   }
   const data = await response.json();
+  const items = sortTraceItemsNewestFirst(filterDuplicateTraceItems(data.items));
+  const signature = traceItemsSignature(items);
+  if (signature === traceRenderSignature) {
+    return;
+  }
+  traceRenderSignature = signature;
   preserveScrollDuring(() => {
-    tracePanel.replaceChildren(...sortTraceItemsNewestFirst(filterDuplicateTraceItems(data.items)).map(renderTraceItem));
+    tracePanel.replaceChildren(...items.map(renderTraceItem));
   });
 }
 
@@ -1839,6 +1856,65 @@ function startAnalysisPanelsRefreshWatch(options = {}) {
 
 function backgroundItemKey(kind, item) {
   return `${kind}:${item.id || item.run_id || item.title || item.created_at || ""}`;
+}
+
+function backgroundActivityIdentity(item) {
+  return `${item.event_type || "activity"}:${item.id || item.created_at || ""}`;
+}
+
+function mergeBackgroundActivities(existing, incoming) {
+  const seen = new Set();
+  const merged = [];
+  [...incoming, ...existing].forEach((item) => {
+    const key = backgroundActivityIdentity(item);
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(item);
+  });
+  return merged.sort((left, right) => backgroundSortTime(right) - backgroundSortTime(left));
+}
+
+function backgroundProgressSignature(progress = {}) {
+  return [
+    progress.stage || "",
+    progress.label || "",
+    progress.percent || "",
+    progress.task || "",
+    progress.title || "",
+    progress.reason || "",
+    progress.updated_at || "",
+    progress.last_run_id || "",
+    progress.last_status || "",
+  ].join("|");
+}
+
+function backgroundRenderKey(progress, activities) {
+  return [
+    backgroundProgressSignature(progress),
+    (activities || []).map((item) => {
+      if (item && item.__quiet_group) {
+        return `quiet:${item.id || ""}:${item.items ? item.items.length : 0}`;
+      }
+      return backgroundActivityIdentity(item);
+    }).join("|"),
+  ].join("::");
+}
+
+function syncBackgroundMoreButton(options = {}) {
+  if (!backgroundMoreButton) {
+    return;
+  }
+  const count = backgroundActivities.length;
+  const loading = Boolean(options.loading);
+  backgroundMoreButton.hidden = !loading && !backgroundHasMore;
+  backgroundMoreButton.disabled = loading;
+  if (loading) {
+    backgroundMoreButton.textContent = options.append ? "加载中..." : `显示更多（当前 ${count} 条）`;
+    return;
+  }
+  backgroundMoreButton.textContent = backgroundHasMore ? `显示更多（当前 ${count} 条）` : `已加载全部（共 ${count} 条）`;
 }
 
 function renderBackgroundItem(key, title, meta, content) {
@@ -2213,34 +2289,54 @@ function renderArtifactItem(artifact) {
   return card;
 }
 
-async function refreshBackground() {
+async function refreshBackground(options = {}) {
   if (!backgroundPanel) {
     return;
   }
-  const response = await fetch(`/api/analysis/background?limit=${encodeURIComponent(backgroundActivityLimit)}`);
-  if (response.status === 401) {
-    window.location.href = "/analysis";
+  if (backgroundLoading) {
     return;
   }
-  if (!response.ok) {
-    if (!backgroundPanel.children.length) {
-      backgroundPanel.textContent = "后台任务暂时读取失败";
+  const append = Boolean(options.append);
+  const limit = append ? BACKGROUND_ACTIVITY_PAGE_SIZE : BACKGROUND_ACTIVITY_INITIAL_LIMIT;
+  const offset = append ? backgroundNextOffset : 0;
+  backgroundLoading = true;
+  syncBackgroundMoreButton({ loading: true, append });
+  try {
+    const response = await fetch(
+      `/api/analysis/background?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`,
+    );
+    if (response.status === 401) {
+      window.location.href = "/analysis";
+      return;
     }
-    return;
-  }
-  const data = await response.json();
-  const items = [renderIdleProgress(data.progress || {})];
-  const activities = (data.activities || [])
-    .slice()
-    .sort((left, right) => backgroundSortTime(right) - backgroundSortTime(left));
-  compactWorkerActivities(activities).forEach((item) => items.push(renderWorkerActivity(item)));
-  preserveScrollDuring(() => {
-    backgroundPanel.replaceChildren(...items);
-  });
-  if (backgroundMoreButton) {
-    const count = Array.isArray(data.activities) ? data.activities.length : 0;
-    backgroundMoreButton.hidden = count < backgroundActivityLimit;
-    backgroundMoreButton.textContent = `显示更多（当前 ${count} 条）`;
+    if (!response.ok) {
+      if (!backgroundPanel.children.length) {
+        backgroundPanel.textContent = "后台任务暂时读取失败";
+      }
+      return;
+    }
+    const data = await response.json();
+    const loadedActivities = Array.isArray(data.activities) ? data.activities : [];
+    backgroundActivities = mergeBackgroundActivities(backgroundActivities, loadedActivities);
+    backgroundNextOffset = Math.max(Number(data.next_offset || 0), backgroundActivities.length);
+    backgroundHasMore = Boolean(data.has_more);
+    const activities = backgroundActivities
+      .slice()
+      .sort((left, right) => backgroundSortTime(right) - backgroundSortTime(left));
+    const compactedActivities = compactWorkerActivities(activities);
+    const signature = backgroundRenderKey(data.progress || {}, compactedActivities);
+    if (!append && signature === backgroundRenderSignature) {
+      return;
+    }
+    backgroundRenderSignature = signature;
+    const items = [renderIdleProgress(data.progress || {})];
+    compactedActivities.forEach((item) => items.push(renderWorkerActivity(item)));
+    preserveScrollDuring(() => {
+      backgroundPanel.replaceChildren(...items);
+    });
+  } finally {
+    backgroundLoading = false;
+    syncBackgroundMoreButton();
   }
 }
 
@@ -2457,8 +2553,7 @@ if (refreshTraceButton) {
 }
 if (backgroundMoreButton) {
   backgroundMoreButton.addEventListener("click", () => {
-    backgroundActivityLimit += 20;
-    refreshBackground().catch(notePanelRefreshError);
+    refreshBackground({ append: true }).catch(notePanelRefreshError);
   });
 }
 analysisAttachImageButton.addEventListener("click", () => analysisImageInput.click());

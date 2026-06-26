@@ -143,6 +143,7 @@ def build_system_prompt(
     active_recall_context = ""
     visitor_context = format_visitor_identity_context(visitor_ip)
     profile_context = format_profile_context(retrieve_profile_context_memories(visitor_ip))
+    recent_state_context = format_user_recent_state_context(visitor_ip)
     timeline_events_context = ""
     date_context = current_date_context()
     memory_gate_decision = normalize_memory_gate_decision(precomputed_memory_gate)
@@ -292,6 +293,8 @@ def build_system_prompt(
         prompt_parts.append(format_wangcai_self_profile_context())
     if profile_context:
         prompt_parts.append(profile_context)
+    if recent_state_context:
+        prompt_parts.append(recent_state_context)
     if timeline_events_context:
         prompt_parts.append(timeline_events_context)
     if artifact_theater_context:
@@ -313,10 +316,29 @@ def cached_opening_system_prompt(visitor_ip: str = "unknown") -> str:
         MARKDOWN_OUTPUT_GUIDELINES,
         current_date_context(),
         format_visitor_identity_context(visitor_ip),
+        format_user_recent_state_context(visitor_ip),
         (
             "本轮是浏览器打开时的预缓存开场回复。"
             "开场所需长期记忆、画像和开场偏好已经提前整理进用户消息。"
             "不要声称正在检索记忆，不要泄露浏览器身份、session、IP 或后台状态。"
+            "如果用户消息中包含“即将到来的事件/日程提醒”或“必须提到”，这是开场硬约束，"
+            "必须自然提到对应具体事项，不能改成泛泛询问有没有日程。"
+        ),
+    ]
+    return "\n\n".join(part for part in prompt_parts if part)
+
+
+def cached_opening_fast_system_prompt() -> str:
+    prompt_parts = [
+        SYSTEM_PROMPT,
+        MARKDOWN_OUTPUT_GUIDELINES,
+        current_date_context(),
+        (
+            "本轮是浏览器刷新或打开时的快速预缓存开场回复。"
+            "开场所需长期记忆、画像和开场偏好已经在用户消息里给出；"
+            "不要再声明正在检索记忆，不要泄露浏览器身份、session、IP 或后台状态。"
+            "如果用户消息中包含“即将到来的事件/日程提醒”或“必须提到”，这是开场硬约束，"
+            "必须自然提到对应具体事项，不能改成泛泛询问有没有日程。"
         ),
     ]
     return "\n\n".join(part for part in prompt_parts if part)
@@ -824,6 +846,7 @@ def acquire_generation_token(session_id: str) -> str:
         generation_token = str(uuid.uuid4())
         ACTIVE_GENERATIONS.add(session_id)
         ACTIVE_GENERATION_TOKENS[session_id] = generation_token
+        ACTIVE_GENERATION_STARTED_AT[session_id] = time.time()
         GENERATION_CANCEL_REQUESTS.discard(session_id)
         return generation_token
 
@@ -837,6 +860,7 @@ def release_generation_token(session_id: str, generation_token: str) -> None:
         if ACTIVE_GENERATION_TOKENS.get(session_id) == generation_token:
             ACTIVE_GENERATIONS.discard(session_id)
             ACTIVE_GENERATION_TOKENS.pop(session_id, None)
+            ACTIVE_GENERATION_STARTED_AT.pop(session_id, None)
         GENERATION_CANCEL_REQUESTS.discard((session_id, generation_token))
 
 
@@ -844,6 +868,7 @@ def release_generation(session_id: str) -> None:
     with ACTIVE_GENERATIONS_LOCK:
         ACTIVE_GENERATIONS.discard(session_id)
         current_token = ACTIVE_GENERATION_TOKENS.pop(session_id, None)
+        ACTIVE_GENERATION_STARTED_AT.pop(session_id, None)
         GENERATION_CANCEL_REQUESTS.discard(session_id)
         if current_token:
             GENERATION_CANCEL_REQUESTS.discard((session_id, current_token))
@@ -857,6 +882,7 @@ def request_generation_cancel(session_id: str) -> bool:
         if session_id not in ACTIVE_GENERATIONS:
             return False
         current_token = ACTIVE_GENERATION_TOKENS.pop(session_id, "")
+        ACTIVE_GENERATION_STARTED_AT.pop(session_id, None)
         if current_token:
             GENERATION_CANCEL_REQUESTS.add((session_id, current_token))
         else:
@@ -876,3 +902,26 @@ def is_generation_cancelled(session_id: str, generation_token: str = "") -> bool
                 for item in GENERATION_CANCEL_REQUESTS
             )
         )
+
+
+def cleanup_stale_active_generations(max_age_seconds: float = ACTIVE_GENERATION_STALE_SECONDS) -> int:
+    cutoff = time.time() - max(1.0, float(max_age_seconds))
+    cleared = 0
+    with ACTIVE_GENERATIONS_LOCK:
+        for session_id, started_at in list(ACTIVE_GENERATION_STARTED_AT.items()):
+            try:
+                is_stale = float(started_at) < cutoff
+            except Exception:
+                is_stale = True
+            if not is_stale:
+                continue
+            ACTIVE_GENERATIONS.discard(session_id)
+            token = ACTIVE_GENERATION_TOKENS.pop(session_id, "")
+            ACTIVE_GENERATION_STARTED_AT.pop(session_id, None)
+            GENERATION_CANCEL_REQUESTS.discard(session_id)
+            if token:
+                GENERATION_CANCEL_REQUESTS.discard((session_id, token))
+            cleared += 1
+    if cleared:
+        record_event(None, "stale_active_generation_cleared", "local", {"count": cleared})
+    return cleared

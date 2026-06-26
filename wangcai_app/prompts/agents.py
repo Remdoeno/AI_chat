@@ -214,6 +214,53 @@ MEMORY_REFINE_AGENT_SYSTEM_PROMPT = (
     "{\"action\":\"split|checked|skip\",\"rationale\":\"一句话说明\",\"items\":[{\"label\":\"preference|identity|rule|persona|risk|event|fact|diary|other\",\"memory\":\"原子记忆\",\"timeline_at\":\"ISO时间或空字符串\",\"timeline_start_at\":\"ISO时间或空字符串\",\"timeline_end_at\":\"ISO时间或空字符串\",\"timeline_kind\":\"point|range|deadline|空字符串\",\"confidence\":0.0到1.0}]}"
 )
 
+USER_RECENT_STATE_AGENT_SYSTEM_PROMPT = (
+    "# 任务\n"
+    "你是旺财的近期状态抽象 agent。你只根据已经写入的 diary/risk/event 记忆，概括用户最近处在什么生活节奏、情绪天气和关系需求里。\n\n"
+    "# 原则\n"
+    "- 输出是给聊天助手隐性参考的陪伴提示，不是诊断、标签、人格判定或永久身份。\n"
+    "- 不要写心理疾病、人格类型、医学诊断、病理化判断，也不要把用户固定成某种人。\n"
+    "- 只能使用输入记忆已经表达的内容；可以抽象趋势，但不能编造具体事件。\n"
+    "- 语气温柔、克制、可修正：用“可能、似乎、近期更需要”这类表达。\n"
+    "- 保留对回应有帮助的照顾方式，例如先接住情绪、降低压力、给结构，而不是列隐私细节。\n"
+    "- 如果证据很少，明确降低 confidence，并保持概括很轻。\n\n"
+    "# 输出 JSON\n"
+    "只能输出 JSON："
+    "{\"state_summary\":\"一到两句温柔抽象\","
+    "\"emotional_weather\":\"一句话情绪天气\","
+    "\"core_needs\":[\"...\"],"
+    "\"friction_points\":[\"...\"],"
+    "\"care_suggestions\":[\"...\"],"
+    "\"avoid_suggestions\":[\"...\"],"
+    "\"confidence\":0.0到1.0,"
+    "\"rationale\":\"一句话说明依据\"}"
+)
+
+
+def build_user_recent_state_agent_user_prompt(
+    window_days: int,
+    memories: List[Dict[str, object]],
+    previous_state: Optional[Dict[str, object]] = None,
+) -> str:
+    compact_memories = []
+    for item in memories:
+        compact_memories.append(
+            {
+                "id": item.get("id"),
+                "label": item.get("importance_label") or item.get("label") or "",
+                "timeline": timeline_display_text(item),
+                "updated_at": item.get("updated_at", ""),
+                "content": item.get("content", ""),
+            }
+        )
+    return (
+        f"当前真实时间：{opening_time_text()}。\n"
+        f"请基于最近 {int(window_days)} 天的 diary/risk/event 记忆，更新用户近期状态。\n"
+        "这些内容会隐性加载给聊天助手，帮助它更温柔地理解用户；不要输出诊断或固定标签。\n\n"
+        f"上一版近期状态：{json.dumps(previous_state or {}, ensure_ascii=False)}\n\n"
+        f"候选记忆：\n{json.dumps(compact_memories, ensure_ascii=False, indent=2)}"
+    )
+
 IDLE_SERIES_PLANNER_SYSTEM_PROMPT = (
     "# 任务\n"
     "你是旺财成果小剧场的剧情规划 agent。你不写正文，只在 idle creative agent 写作前判断本轮是否要续写某个系列，并给出可执行的创作计划。\n\n"
