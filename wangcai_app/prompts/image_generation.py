@@ -66,6 +66,23 @@ ARTIFACT_IMAGE_PLAN_PROMPT = """根据成果正文规划配图。
 适合科研/计划/分析类成果的配图主题包括实验场景、结构图风格封面、研究笔记桌面、流程图式插画。
 """
 
+ARTIFACT_IMAGE_PROMPT_AGENT_SYSTEM_PROMPT = """你是成果配图 prompt 优化器，只负责把一个小剧场/成果的配图计划改写成适合图像生成模型的英文视觉 prompt。
+你的输入可能包含中文故事摘要、配图主题和固定角色视觉锚点。你必须只输出最终画面描述，不要复述成果标题、摘要、正文摘录、系统字段名或内部约束标题。
+不要把输入当作 professional prompt 原样返回；无论输入多长，都要压缩成一段清晰、可执行的英文生图 prompt。
+只保留与当前配图直接相关的人物、动作、道具、场景、构图、镜头、光线、材质和情绪。
+如果有 Fixed character visual anchors，必须保留角色的核心外观、体型、服饰、关键符号和负面约束；不要输出角色真名或别名，只使用 the masked man、the young woman、the yellow robot dog 等通用称呼。
+不要生成纯文字海报、标题卡、漫画分镜或信息图，除非配图主题明确要求。默认使用 photorealistic cinematic realism、真实材质、真实光线和清晰镜头语言。
+输出严格 JSON，不要 Markdown 代码块：
+{
+  "optimized_prompt": "...",
+  "negative_prompt": "...",
+  "aspect_ratio": "1:1",
+  "image_count": 1,
+  "style_tags": ["..."],
+  "short_caption": "..."
+}
+"""
+
 ARTIFACT_COMMENT_IMAGE_INTENT_PROMPT = """判断用户评论是否需要图片上下文。
 只输出 JSON：
 {

@@ -1539,14 +1539,44 @@ def artifact_image_character_names(profile: Dict[str, object]) -> List[str]:
     return unique
 
 
-def scrub_artifact_image_character_names(text: str, names: List[str]) -> str:
+ARTIFACT_IMAGE_BAD_PROMPT_MARKERS = (
+    "成果标题：",
+    "成果摘要：",
+    "成果正文摘录",
+    "配图主题：",
+    "固定角色视觉锚点",
+    "Artifact image request:",
+    "Character visual anchors",
+    "Fixed character visual anchors",
+)
+
+
+def artifact_image_generic_character_label(profile: Dict[str, object], index: int) -> str:
+    source = " ".join(
+        [
+            str(profile.get("visual_prompt") or ""),
+            str(profile.get("personality") or ""),
+            str(profile.get("background") or ""),
+        ]
+    ).lower()
+    if any(term in source for term in ("robot dog", "quadruped robot", "yellow robot", "antenna", "tail")):
+        return "the yellow robot dog"
+    if any(term in source for term in ("female", "woman", "girl", "student", "lolita", "dress")):
+        return "the young woman"
+    if any(term in source for term in ("male", "man", "superhero", "wrestling mask", "bodysuit", "masked")):
+        return "the masked man"
+    return f"mentioned character {index}"
+
+
+def scrub_artifact_image_character_names(text: str, names: List[str], replacement: str = "this character") -> str:
     cleaned = str(text or "")
+    replacement = str(replacement or "this character").strip() or "this character"
     for name in sorted({item.strip() for item in names if item and item.strip()}, key=len, reverse=True):
         escaped = re.escape(name)
         cleaned = re.sub(rf"\b(named|called)\s+{escaped}\b", "", cleaned, flags=re.I)
-        cleaned = re.sub(rf"\b{escaped}'s\b", "this character's", cleaned, flags=re.I)
-        cleaned = re.sub(escaped, "this character", cleaned, flags=re.I)
-    cleaned = re.sub(r"\bthis character\s+this character\b", "this character", cleaned, flags=re.I)
+        cleaned = re.sub(rf"\b{escaped}'s\b", f"{replacement}'s", cleaned, flags=re.I)
+        cleaned = re.sub(escaped, replacement, cleaned, flags=re.I)
+    cleaned = re.sub(r"\b(this character|mentioned character)\s+\1\b", r"\1", cleaned, flags=re.I)
     cleaned = re.sub(r"\s+([,.;:，。；：])", r"\1", cleaned)
     cleaned = re.sub(r"\s{2,}", " ", cleaned)
     cleaned = re.sub(r"\bwoman,\s+exuding\b", "woman exuding", cleaned, flags=re.I)
@@ -1575,66 +1605,205 @@ def artifact_image_mentioned_character_profiles(text: str, limit: int = 4) -> Li
     return matched
 
 
+def artifact_image_profiles_for_plan(summary: str, plan: Dict[str, str], limit: int = 4) -> List[Dict[str, object]]:
+    plan_text = "\n".join(
+        [
+            str(plan.get("title") or ""),
+            str(plan.get("brief") or ""),
+            str(plan.get("role") or ""),
+        ]
+    ).strip()
+    profiles = artifact_image_mentioned_character_profiles(plan_text, limit=limit)
+    if profiles:
+        return profiles
+    summary_text = compact_idle_artifact_content(str(summary or ""), 320)
+    return artifact_image_mentioned_character_profiles(summary_text, limit=min(2, max(1, int(limit))))
+
+
+def scrub_artifact_image_text_for_profiles(text: str, profiles: List[Dict[str, object]]) -> str:
+    cleaned = str(text or "")
+    for index, profile in enumerate(profiles[:4], start=1):
+        cleaned = scrub_artifact_image_character_names(
+            cleaned,
+            artifact_image_character_names(profile),
+            replacement=artifact_image_generic_character_label(profile, index),
+        )
+    return cleaned.strip()
+
+
 def artifact_image_character_visual_context(profiles: List[Dict[str, object]]) -> str:
     if not profiles:
         return ""
     lines = [
-        "固定角色视觉锚点（硬约束）：",
-        "以下角色名只用于系统匹配，最终 optimized_prompt 不要输出角色名或别名；用 the woman, the man, this character, mentioned character 等通用称呼。",
-        "画图时必须保留角色库里的族裔/地域、年龄、发型、额头/刘海、体型、面部结构、气质、关键道具和可见身份特征；本轮场景可以改变服装、妆容、姿态和环境，但不能把角色画成另一种人。",
+        "Character visual anchors for this image:",
+        "Use only generic labels in the final prompt. Do not output actual character names or aliases.",
+        "Preserve ethnicity/region, age, hairstyle, forehead/bangs, body shape, facial structure, temperament, key props, costumes, symbols, and visible identity traits.",
     ]
     for index, profile in enumerate(profiles[:4], start=1):
         names = artifact_image_character_names(profile)
+        label = artifact_image_generic_character_label(profile, index)
         visual_prompt = scrub_artifact_image_character_names(
             clean_character_text(profile.get("visual_prompt"), 1800),
             names,
+            replacement=label,
         )
         personality = scrub_artifact_image_character_names(
             clean_character_text(profile.get("personality"), 450),
             names,
+            replacement=label,
         )
         background = scrub_artifact_image_character_names(
             clean_character_text(profile.get("background"), 550),
             names,
+            replacement=label,
         )
         negative_prompt = scrub_artifact_image_character_names(
             clean_character_text(profile.get("negative_prompt"), 320),
             names,
+            replacement=label,
         )
-        lines.append(f"出场角色 {index}：")
+        lines.append(f"Character {index}: {label}")
         if visual_prompt:
-            lines.append(f"- 完整视觉参考：{visual_prompt}")
+            lines.append(f"- Visual reference: {visual_prompt}")
         if personality:
-            lines.append(f"- 气质/表情参考：{personality}")
+            lines.append(f"- Temperament/expression reference: {personality}")
         if background:
-            lines.append(f"- 身份/背景参考：{background}")
+            lines.append(f"- Identity/background reference: {background}")
         if negative_prompt:
-            lines.append(f"- 角色专属负面约束：{negative_prompt}")
+            lines.append(f"- Character-specific negative constraints: {negative_prompt}")
     return "\n".join(lines).strip()
 
 
 def artifact_image_prompt_source(title: str, summary: str, content: str, plan: Dict[str, str]) -> str:
-    raw_source = "\n".join(
-        [
-            f"成果标题：{title}",
-            f"成果摘要：{summary}",
-            f"配图标题：{plan.get('title', '配图')}",
-            f"配图角色：{plan.get('role', 'inline')}",
-            f"配图主题：{plan.get('brief', '')}",
-            "请根据配图主题生成一张与成果内容贴合的图片。不要复述正文文字，不要把画面做成纯文字海报。",
-            "成果正文摘录：",
-            compact_idle_artifact_content(content, 900),
-        ]
+    profiles = artifact_image_profiles_for_plan(summary, plan)
+    image_title = scrub_artifact_image_text_for_profiles(str(plan.get("title") or "cover image"), profiles)
+    visual_brief = scrub_artifact_image_text_for_profiles(str(plan.get("brief") or ""), profiles)
+    story_context = scrub_artifact_image_text_for_profiles(
+        compact_idle_artifact_content(str(summary or content or title or ""), 320),
+        profiles,
     )
-    profiles = artifact_image_mentioned_character_profiles(raw_source)
-    if not profiles:
-        return raw_source
-    all_names: List[str] = []
-    for profile in profiles:
-        all_names.extend(artifact_image_character_names(profile))
-    scrubbed_source = scrub_artifact_image_character_names(raw_source, all_names)
     character_context = artifact_image_character_visual_context(profiles)
-    return "\n\n".join([scrubbed_source, character_context]).strip()
+    sections = [
+        "Artifact image request:",
+        f"- image_title: {image_title}",
+        f"- image_role: {str(plan.get('role') or 'inline').strip() or 'inline'}",
+        f"- visual_brief: {visual_brief}",
+        f"- story_context: {story_context}",
+        "- requirement: Generate one image that matches the visual_brief and story_context. Do not make a text poster, title card, infographic, or page of text.",
+    ]
+    if character_context:
+        sections.extend(["", character_context])
+    return "\n".join(sections).strip()
+
+
+def artifact_image_negative_prompt(profiles: List[Dict[str, object]]) -> str:
+    parts = ["low quality, blurry, distorted face, extra limbs, bad anatomy, watermark, text, signature"]
+    for profile in profiles[:4]:
+        negative = clean_character_text(profile.get("negative_prompt"), 260)
+        if negative:
+            parts.append(negative)
+    return sanitize_image_negative_prompt(", ".join(parts))
+
+
+def fallback_artifact_image_prompt(prompt_source: str, profiles: List[Dict[str, object]]) -> str:
+    source = str(prompt_source or "")
+    brief_match = re.search(r"(?m)^-\s*visual_brief:\s*(.+)$", source)
+    context_match = re.search(r"(?m)^-\s*story_context:\s*(.+)$", source)
+    role_match = re.search(r"(?m)^-\s*image_role:\s*(.+)$", source)
+    brief = str(brief_match.group(1) if brief_match else "").strip()
+    context = str(context_match.group(1) if context_match else "").strip()
+    role = str(role_match.group(1) if role_match else "cover").strip() or "cover"
+    lines = [
+        f"Photorealistic cinematic {role} image, {brief or context or 'a story scene'}",
+        "not a text poster, no captions, no visible writing, realistic materials, detailed textures, natural cinematic lighting",
+    ]
+    if context and context not in brief:
+        lines.append(f"story atmosphere: {context}")
+    for index, profile in enumerate(profiles[:3], start=1):
+        label = artifact_image_generic_character_label(profile, index)
+        visual_prompt = scrub_artifact_image_character_names(
+            clean_character_text(profile.get("visual_prompt"), 700),
+            artifact_image_character_names(profile),
+            replacement=label,
+        )
+        if visual_prompt:
+            lines.append(f"{label}: {visual_prompt}")
+    return compact_idle_artifact_content(" ".join(item for item in lines if item), 1800)
+
+
+def artifact_image_prompt_is_bad(optimized_prompt: str, original_prompt: str) -> bool:
+    prompt = str(optimized_prompt or "").strip()
+    if not prompt:
+        return True
+    if prompt == str(original_prompt or "").strip():
+        return True
+    if any(marker in prompt for marker in ARTIFACT_IMAGE_BAD_PROMPT_MARKERS):
+        return True
+    if len(prompt) > 3500 and prompt_contains_cjk(prompt):
+        return True
+    return False
+
+
+def optimize_artifact_image_prompt(prompt_source: str, profiles: List[Dict[str, object]]) -> Dict[str, object]:
+    fallback_prompt = fallback_artifact_image_prompt(prompt_source, profiles)
+    fallback_negative = artifact_image_negative_prompt(profiles)
+    client, http_client, model_slot = openai_client_for_slot(MODEL_SLOT_BACKGROUND, timeout=IMAGE_PROMPT_TIMEOUT)
+    started = time.perf_counter()
+    try:
+        resp = client.chat.completions.create(
+            **model_completion_kwargs(model_slot),
+            messages=[
+                {"role": "system", "content": ARTIFACT_IMAGE_PROMPT_AGENT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt_source},
+            ],
+            temperature=0.35,
+            top_p=0.9,
+            max_tokens=1200,
+        )
+        _, answer = split_think_text(resp.choices[0].message.content or "")
+        decision = normalize_draw_prompt_decision(clean_image_model_json(answer), fallback_prompt)
+        if not str(decision.get("negative_prompt") or "").strip():
+            decision["negative_prompt"] = fallback_negative
+        if artifact_image_prompt_is_bad(str(decision.get("optimized_prompt") or ""), prompt_source):
+            record_event(
+                None,
+                "artifact_image_prompt_fallback",
+                "local",
+                {
+                    "reason": "bad_optimized_prompt",
+                    "source_chars": len(prompt_source),
+                    "optimized_chars": len(str(decision.get("optimized_prompt") or "")),
+                },
+            )
+            decision["optimized_prompt"] = fallback_prompt
+            decision["negative_prompt"] = fallback_negative
+        decision["image_count"] = 1
+        return decision
+    except Exception as exc:
+        record_event(
+            None,
+            "artifact_image_prompt_fallback",
+            "local",
+            {
+                "reason": "model_error",
+                "error": str(exc),
+                "source_chars": len(prompt_source),
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+            },
+        )
+        return normalize_draw_prompt_decision(
+            {
+                "optimized_prompt": fallback_prompt,
+                "negative_prompt": fallback_negative,
+                "aspect_ratio": "1:1",
+                "image_count": 1,
+                "style_tags": ["artifact", "cinematic realism"],
+                "short_caption": "",
+            },
+            fallback_prompt,
+        )
+    finally:
+        http_client.close()
 
 
 
@@ -1660,7 +1829,8 @@ def generate_artifact_theme_images(
     for position, plan in enumerate(plans):
         prompt_source = artifact_image_prompt_source(title, summary, content, plan)
         try:
-            decision = optimize_draw_prompt(prompt_source, context=ARTIFACT_IMAGE_PLAN_PROMPT)
+            profiles = artifact_image_profiles_for_plan(summary, plan)
+            decision = optimize_artifact_image_prompt(prompt_source, profiles)
             batch = generate_image_batch(
                 original_prompt=prompt_source,
                 decision=decision,
