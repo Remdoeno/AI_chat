@@ -598,13 +598,34 @@ def recent_device_identities_for_opening_cache(limit: int = IDLE_OPENING_CACHE_R
     return [str(row["visitor_ip"] or "") for row in rows if is_device_identity(str(row["visitor_ip"] or ""))]
 
 
+def opening_cache_fixed_refresh_slot(now: Optional[datetime] = None) -> str:
+    hours = tuple(IDLE_OPENING_CACHE_FIXED_REFRESH_HOURS)
+    if not hours:
+        return ""
+    tz = local_timezone()
+    current = now or datetime.now(tz)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=tz)
+    else:
+        current = current.astimezone(tz)
+
+    due_hours = [hour for hour in hours if current.hour >= hour]
+    slot_date = current.date()
+    slot_hour = due_hours[-1] if due_hours else hours[-1]
+    if not due_hours:
+        slot_date = (current - timedelta(days=1)).date()
+    return f"{slot_date.isoformat()}T{slot_hour:02d}:00{current.strftime('%z')}"
+
+
 def run_opening_cache_refresh_once(force: bool = False) -> Dict[str, object]:
     started_at = utc_now()
     started = time.perf_counter()
+    fixed_slot = opening_cache_fixed_refresh_slot()
+    fixed_due = bool(fixed_slot) and get_app_setting("idle_opening_cache_fixed_refresh_slot", "") != fixed_slot
     if not force:
         last = get_app_setting("idle_opening_cache_refresh_last_at", "")
         age = iso_seconds_ago(last) if last else None
-        if age is not None and age < IDLE_OPENING_CACHE_REFRESH_INTERVAL_SECONDS:
+        if not fixed_due and age is not None and age < IDLE_OPENING_CACHE_REFRESH_INTERVAL_SECONDS:
             return {"status": "skipped", "reason": "recent_prompt_cache", "started_at": started_at, "duration_ms": 0.0}
     try:
         devices = recent_device_identities_for_opening_cache()
@@ -613,12 +634,15 @@ def run_opening_cache_refresh_once(force: bool = False) -> Dict[str, object]:
             refresh_cached_opening_prompt(device_id)
             refreshed += 1
         set_app_setting("idle_opening_cache_refresh_last_at", utc_now())
+        if fixed_due:
+            set_app_setting("idle_opening_cache_fixed_refresh_slot", fixed_slot)
         duration_ms = round((time.perf_counter() - started) * 1000, 3)
         result = {
             "status": "completed" if refreshed else "skipped",
-            "reason": "refreshed" if refreshed else "no_devices",
+            "reason": "fixed_schedule_refreshed" if fixed_due and refreshed else ("refreshed" if refreshed else "no_devices"),
             "device_count": refreshed,
             "refreshed_devices": devices[:10],
+            "fixed_refresh_slot": fixed_slot if fixed_due else "",
             "started_at": started_at,
             "duration_ms": duration_ms,
         }

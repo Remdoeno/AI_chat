@@ -95,6 +95,19 @@ IDLE_WORKER_TICK_STALE_SECONDS = float(os.environ.get("WANGCAI_IDLE_WORKER_TICK_
 IDLE_WORKER_ARTIFACT_STALE_SECONDS = float(os.environ.get("WANGCAI_IDLE_WORKER_ARTIFACT_STALE_SECONDS", "21600"))
 IDLE_OPENING_CACHE_REFRESH_INTERVAL_SECONDS = float(os.environ.get("WANGCAI_IDLE_OPENING_CACHE_REFRESH_INTERVAL_SECONDS", "300"))
 IDLE_OPENING_CACHE_REFRESH_LIMIT = int(os.environ.get("WANGCAI_IDLE_OPENING_CACHE_REFRESH_LIMIT", "8"))
+IDLE_OPENING_CACHE_FIXED_REFRESH_HOURS = tuple(
+    sorted(
+        {
+            hour
+            for hour in (
+                int(part.strip())
+                for part in os.environ.get("WANGCAI_IDLE_OPENING_CACHE_FIXED_REFRESH_HOURS", "9,14,22").split(",")
+                if part.strip()
+            )
+            if 0 <= hour <= 23
+        }
+    )
+)
 IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS = float(os.environ.get("WANGCAI_IDLE_AGENT_MIN_RUN_INTERVAL_SECONDS", "300"))
 IDLE_AGENT_MAX_TOKENS = int(os.environ.get("WANGCAI_IDLE_AGENT_MAX_TOKENS", "24000"))
 IDLE_AGENT_TEMPERATURE = float(os.environ.get("WANGCAI_IDLE_AGENT_TEMPERATURE", "0.95"))
