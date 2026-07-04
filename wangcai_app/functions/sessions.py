@@ -389,6 +389,7 @@ def load_session_visible_messages(session_id: str) -> List[Dict[str, object]]:
             "metadata": {
                 "has_attachments": bool(attachments),
                 "has_draw": bool(draw),
+                "quoted_message": str(metadata.get("quoted_message") or ""),
             },
         })
     return messages

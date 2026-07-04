@@ -348,6 +348,44 @@ h1 {
   stroke-width: 2.1;
 }
 
+.message-quote-context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 0 9px;
+  border-left: 3px solid rgba(22, 119, 95, 0.42);
+  border-radius: 6px;
+  background: rgba(22, 119, 95, 0.06);
+  padding: 6px 8px;
+  color: var(--muted);
+}
+
+.message-quote-context-icon,
+.quote-preview-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.message-quote-context-icon svg,
+.quote-preview-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.message-quote-context-text {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .message-timestamp {
   color: rgba(102, 112, 133, 0.64);
   font-size: 11px;
@@ -620,8 +658,6 @@ h1 {
 
 .quote-preview-icon {
   color: var(--accent);
-  font-size: 16px;
-  font-weight: 900;
   line-height: 1;
 }
 
@@ -1736,8 +1772,15 @@ html[data-theme="dark"] .quote-preview {
   background: rgba(216, 168, 50, 0.10);
 }
 
+html[data-theme="dark"] .message-quote-context {
+  border-left-color: rgba(216, 168, 50, 0.56);
+  background: rgba(216, 168, 50, 0.10);
+}
+
 html[data-theme="dark"] .quote-preview-icon,
-html[data-theme="dark"] .quote-preview-text {
+html[data-theme="dark"] .quote-preview-text,
+html[data-theme="dark"] .message-quote-context-icon,
+html[data-theme="dark"] .message-quote-context-text {
   color: #f4ead2;
 }
 

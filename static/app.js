@@ -3,6 +3,7 @@ const chatForm = document.getElementById("chatForm");
 const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
 const quotePreview = document.getElementById("quotePreview");
+const quotePreviewIcon = document.getElementById("quotePreviewIcon");
 const quotePreviewText = document.getElementById("quotePreviewText");
 const clearQuoteButton = document.getElementById("clearQuoteButton");
 const attachImageButton = document.getElementById("attachImageButton");
@@ -1431,6 +1432,27 @@ function clearPendingQuote() {
   }
 }
 
+function createQuotedMessagePreview(text) {
+  const quote = truncateQuotePreview(text);
+  if (!quote) {
+    return null;
+  }
+  const preview = document.createElement("div");
+  preview.className = "message-quote-context";
+
+  const icon = document.createElement("span");
+  icon.className = "message-quote-context-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = MESSAGE_QUOTE_ICON;
+
+  const content = document.createElement("span");
+  content.className = "message-quote-context-text";
+  content.textContent = `引用了：${quote}`;
+
+  preview.append(icon, content);
+  return preview;
+}
+
 function setPendingQuote(text) {
   const quote = trimQuoteForRequest(text);
   if (!quote) {
@@ -1439,6 +1461,9 @@ function setPendingQuote(text) {
   }
   pendingQuotedMessage = quote;
   if (quotePreview && quotePreviewText) {
+    if (quotePreviewIcon) {
+      quotePreviewIcon.innerHTML = MESSAGE_QUOTE_ICON;
+    }
     quotePreviewText.textContent = truncateQuotePreview(quote);
     quotePreview.hidden = false;
   }
@@ -1501,6 +1526,13 @@ function createBubble(role, content = "", attachments = [], options = {}) {
 
   const body = document.createElement("div");
   body.className = "message-body";
+  if (role === "user") {
+    body.dataset.rawMarkdown = content || "";
+  }
+  const quotedPreview = createQuotedMessagePreview(options.quotedMessage || "");
+  if (quotedPreview) {
+    body.appendChild(quotedPreview);
+  }
   const timestamp = document.createElement("div");
   timestamp.className = "message-timestamp";
   timestamp.textContent = formatMessageTimestamp(options.createdAt);
@@ -1528,6 +1560,10 @@ function createBubble(role, content = "", attachments = [], options = {}) {
     body.appendChild(images);
   } else if (role === "assistant") {
     setRenderedMarkdown(body, content);
+  } else if (quotedPreview) {
+    const text = document.createElement("div");
+    text.textContent = content;
+    body.appendChild(text);
   } else {
     body.textContent = content;
   }
@@ -1738,6 +1774,7 @@ function prependHistoryMessages(messages) {
       prepend: true,
       scroll: false,
       createdAt: message.created_at,
+      quotedMessage: message.metadata && message.metadata.quoted_message ? message.metadata.quoted_message : "",
     });
     if (role === "assistant") {
       restoreHistoricalAssistantMedia(body, message);
@@ -2344,7 +2381,7 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
     drawMode = false,
   } = options;
   if (showUser) {
-    createBubble("user", text, attachments);
+    createBubble("user", text, attachments, { quotedMessage: options.quotedMessage || "" });
   }
   const assistantBody = createBubble("assistant", openingPlaceholder);
   let hasReceivedToken = false;

@@ -1429,7 +1429,10 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
         message,
         attachments=payload.attachments,
         hidden=bool(payload.hidden_user),
-        extra_metadata={"opening_turn": True} if cached_opening else None,
+        extra_metadata={
+            **({"opening_turn": True} if cached_opening else {}),
+            **({"quoted_message": quoted_message} if quoted_message and not payload.hidden_user and not cached_opening else {}),
+        } or None,
     )
     record_event(
         session_id,
