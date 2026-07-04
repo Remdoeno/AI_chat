@@ -634,6 +634,81 @@ function getRawMarkdown(element) {
   return element.dataset.rawMarkdown || element.textContent || "";
 }
 
+const ANALYSIS_MESSAGE_COPY_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></rect>
+    <path d="M4 15.5V6.5A2.5 2.5 0 0 1 6.5 4h9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
+  </svg>
+`;
+
+const ANALYSIS_MESSAGE_COPY_DONE_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></path>
+  </svg>
+`;
+
+function setAnalysisMessageCopyButtonState(button, copied = false) {
+  button.innerHTML = copied ? ANALYSIS_MESSAGE_COPY_DONE_ICON : ANALYSIS_MESSAGE_COPY_ICON;
+  button.classList.toggle("is-copied", copied);
+  button.setAttribute("aria-label", copied ? "已复制" : "复制消息");
+  button.title = copied ? "已复制" : "复制消息";
+}
+
+function fallbackCopyText(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  return fallbackCopyText(text);
+}
+
+function createAnalysisMessageActions(body) {
+  const actions = document.createElement("div");
+  actions.className = "analysis-message-actions";
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "analysis-message-action-button analysis-message-copy-button";
+  setAnalysisMessageCopyButtonState(copyButton, false);
+  copyButton.addEventListener("click", async () => {
+    const text = getRawMarkdown(body).trim();
+    if (!text) {
+      setStatus("没有可复制内容");
+      return;
+    }
+    try {
+      const copied = await copyTextToClipboard(text);
+      if (!copied) {
+        throw new Error("copy command failed");
+      }
+      setAnalysisMessageCopyButtonState(copyButton, true);
+      window.setTimeout(() => setAnalysisMessageCopyButtonState(copyButton, false), 1200);
+    } catch (_) {
+      copyButton.title = "复制失败";
+      setStatus("复制失败");
+    }
+  });
+  actions.append(copyButton);
+  return actions;
+}
+
 function scrollAnalysisChatToBottom() {
   if (analysisUsesMobileHistoryButton()) {
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" });
@@ -762,6 +837,9 @@ function appendMessage(role, text, attachments = [], options = {}) {
     body.append(images);
   }
   row.append(meta, body);
+  if (role === "assistant") {
+    row.append(createAnalysisMessageActions(body));
+  }
   if (options.prepend) {
     messagesEl.prepend(row);
   } else {

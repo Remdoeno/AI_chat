@@ -291,6 +291,55 @@ h1 {
   order: 1;
 }
 
+.message-actions {
+  grid-column: 1;
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  margin-top: 1px;
+}
+
+.message-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(102, 112, 133, 0.78);
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.message-action-button:hover,
+.message-action-button:focus-visible {
+  background: rgba(22, 119, 95, 0.08);
+  color: var(--accent);
+  outline: none;
+}
+
+.message-action-button:active {
+  transform: translateY(1px);
+}
+
+.message-action-button.is-copied {
+  color: var(--accent);
+}
+
+.message-action-button svg {
+  width: 21px;
+  height: 21px;
+  stroke-width: 2.1;
+}
+
 .message-timestamp {
   color: rgba(102, 112, 133, 0.64);
   font-size: 11px;
@@ -1598,6 +1647,16 @@ html[data-theme="dark"] .message-label {
 
 html[data-theme="dark"] .message-timestamp {
   color: #b9ad8b;
+}
+
+html[data-theme="dark"] .message-action-button {
+  color: rgba(244, 234, 210, 0.72);
+}
+
+html[data-theme="dark"] .message-action-button:hover,
+html[data-theme="dark"] .message-action-button:focus-visible {
+  background: rgba(216, 168, 50, 0.12);
+  color: #f0c85a;
 }
 
 html[data-theme="dark"] .eyebrow,
