@@ -301,6 +301,10 @@ h1 {
   margin-top: 1px;
 }
 
+.message.user .message-actions {
+  justify-content: flex-end;
+}
+
 .message-action-button {
   display: inline-flex;
   align-items: center;

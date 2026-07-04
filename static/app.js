@@ -1533,7 +1533,7 @@ function createBubble(role, content = "", attachments = [], options = {}) {
   }
 
   item.append(meta, body);
-  if (role === "assistant") {
+  if (role === "assistant" || role === "user") {
     item.append(createMessageActions(body));
   }
   if (options.prepend) {
