@@ -334,6 +334,10 @@ h1 {
   color: var(--accent);
 }
 
+.message-action-button.is-active {
+  color: var(--accent);
+}
+
 .message-action-button svg {
   width: 21px;
   height: 21px;
@@ -577,6 +581,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
+    "quote send"
     "input send"
     "preview send"
     "tools send";
@@ -587,6 +592,66 @@ h1 {
 
 .composer-main textarea {
   grid-area: input;
+}
+
+.quote-preview {
+  grid-area: quote;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  max-width: min(680px, 100%);
+  border: 1px solid rgba(22, 119, 95, 0.22);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(22, 119, 95, 0.06);
+  padding: 6px 8px;
+  color: var(--muted);
+}
+
+.quote-preview[hidden] {
+  display: none;
+}
+
+.quote-preview-icon {
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.quote-preview-text {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quote-preview-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.quote-preview-clear:hover,
+.quote-preview-clear:focus-visible {
+  background: rgba(180, 35, 24, 0.08);
+  color: var(--danger);
+  outline: none;
 }
 
 .composer-tools {
@@ -650,6 +715,7 @@ h1 {
 @media (min-width: 761px) {
   .composer-main {
     grid-template-areas:
+      "quote send"
       "input send"
       "preview ."
       "tools .";
@@ -1375,6 +1441,7 @@ select:disabled {
     grid-template-columns: minmax(0, 1fr) 74px;
     grid-template-areas:
       "tools tools"
+      "quote quote"
       "preview preview"
       "input send";
     gap: 8px;
@@ -1657,6 +1724,21 @@ html[data-theme="dark"] .message-action-button:hover,
 html[data-theme="dark"] .message-action-button:focus-visible {
   background: rgba(216, 168, 50, 0.12);
   color: #f0c85a;
+}
+
+html[data-theme="dark"] .quote-preview {
+  border-color: rgba(216, 168, 50, 0.28);
+  border-left-color: #f0c85a;
+  background: rgba(216, 168, 50, 0.10);
+}
+
+html[data-theme="dark"] .quote-preview-icon,
+html[data-theme="dark"] .quote-preview-text {
+  color: #f4ead2;
+}
+
+html[data-theme="dark"] .quote-preview-clear {
+  color: #b9ad8b;
 }
 
 html[data-theme="dark"] .eyebrow,

@@ -2,6 +2,9 @@ const messagesEl = document.getElementById("messages");
 const chatForm = document.getElementById("chatForm");
 const messageInput = document.getElementById("messageInput");
 const sendButton = document.getElementById("sendButton");
+const quotePreview = document.getElementById("quotePreview");
+const quotePreviewText = document.getElementById("quotePreviewText");
+const clearQuoteButton = document.getElementById("clearQuoteButton");
 const attachImageButton = document.getElementById("attachImageButton");
 const webSearchButton = document.getElementById("webSearchButton");
 const drawButton = document.getElementById("drawButton");
@@ -59,6 +62,7 @@ let warnLongPressTriggered = false;
 let memoryAdminLongPressTimer = 0;
 let memoryAdminLongPressTriggered = false;
 let localModelServicePollTimer = 0;
+let pendingQuotedMessage = "";
 const SAMPLING_STORAGE_KEY = "wangcai_sampling_settings";
 const DEVICE_STORAGE_KEY = "wangcai_device_id";
 const USER_MEMORY_BINDING_STORAGE_KEY = "wangcai_user_memory_binding";
@@ -1349,6 +1353,14 @@ const MESSAGE_COPY_DONE_ICON = `
   </svg>
 `;
 
+const MESSAGE_QUOTE_ICON = `
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"></circle>
+    <path d="M9.2 9.2c-1.1.9-1.7 1.9-1.7 3.2v2.2h3.4v-3.2H9.2c.1-.7.6-1.3 1.4-1.9L9.2 9.2Z" fill="currentColor"></path>
+    <path d="M15.2 9.2c-1.1.9-1.7 1.9-1.7 3.2v2.2h3.4v-3.2h-1.7c.1-.7.6-1.3 1.4-1.9L15.2 9.2Z" fill="currentColor"></path>
+  </svg>
+`;
+
 function setMessageCopyButtonState(button, copied = false) {
   button.innerHTML = copied ? MESSAGE_COPY_DONE_ICON : MESSAGE_COPY_ICON;
   button.classList.toggle("is-copied", copied);
@@ -1381,6 +1393,59 @@ async function copyTextToClipboard(text) {
   return fallbackCopyText(text);
 }
 
+function truncateQuotePreview(text) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  return normalized.length > 180 ? `${normalized.slice(0, 180)}...` : normalized;
+}
+
+function trimQuoteForRequest(text) {
+  const normalized = String(text || "").trim();
+  return normalized.length > 6000 ? `${normalized.slice(0, 6000)}\n[引用内容过长，已截断]` : normalized;
+}
+
+function nodeInsideElement(node, element) {
+  if (!node || !element) {
+    return false;
+  }
+  return element.contains(node.nodeType === Node.TEXT_NODE ? node.parentNode : node);
+}
+
+function selectedTextInsideElement(element) {
+  const selection = window.getSelection ? window.getSelection() : null;
+  if (!selection || selection.isCollapsed) {
+    return "";
+  }
+  if (!nodeInsideElement(selection.anchorNode, element) || !nodeInsideElement(selection.focusNode, element)) {
+    return "";
+  }
+  return selection.toString().trim();
+}
+
+function clearPendingQuote() {
+  pendingQuotedMessage = "";
+  if (quotePreview) {
+    quotePreview.hidden = true;
+  }
+  if (quotePreviewText) {
+    quotePreviewText.textContent = "";
+  }
+}
+
+function setPendingQuote(text) {
+  const quote = trimQuoteForRequest(text);
+  if (!quote) {
+    setStatus("没有可引用内容");
+    return;
+  }
+  pendingQuotedMessage = quote;
+  if (quotePreview && quotePreviewText) {
+    quotePreviewText.textContent = truncateQuotePreview(quote);
+    quotePreview.hidden = false;
+  }
+  setStatus("已引用，下一条消息会优先参考这段内容");
+  messageInput.focus();
+}
+
 function createMessageActions(body) {
   const actions = document.createElement("div");
   actions.className = "message-actions";
@@ -1408,6 +1473,21 @@ function createMessageActions(body) {
     }
   });
   actions.append(copyButton);
+
+  const quoteButton = document.createElement("button");
+  quoteButton.type = "button";
+  quoteButton.className = "message-action-button message-quote-button";
+  quoteButton.innerHTML = MESSAGE_QUOTE_ICON;
+  quoteButton.setAttribute("aria-label", "引用消息");
+  quoteButton.title = "引用消息";
+  quoteButton.addEventListener("click", () => {
+    const selected = selectedTextInsideElement(body);
+    const text = selected || getRawMarkdown(body).trim();
+    setPendingQuote(text);
+    quoteButton.classList.add("is-active");
+    window.setTimeout(() => quoteButton.classList.remove("is-active"), 900);
+  });
+  actions.append(quoteButton);
   return actions;
 }
 
@@ -2284,6 +2364,7 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
       body: JSON.stringify({
         session_id: sessionId,
         message: text,
+        quoted_message: options.quotedMessage || "",
         mode: drawMode ? "draw" : "chat",
         attachments,
         hidden_user: hiddenUser,
@@ -2593,6 +2674,7 @@ chatForm.addEventListener("submit", async (event) => {
   const attachments = pendingAttachments.map((attachment) => ({ ...attachment }));
   const useDraw = drawEnabled;
   const useWebSearch = useDraw ? false : webSearchEnabled;
+  const quotedMessage = useDraw ? "" : pendingQuotedMessage;
   if ((!text && !attachments.length) || activeController) {
     return;
   }
@@ -2601,8 +2683,14 @@ chatForm.addEventListener("submit", async (event) => {
   }
   messageInput.value = "";
   clearPendingAttachments();
-  await sendMessage(text, attachments, useWebSearch, { drawMode: useDraw });
+  clearPendingQuote();
+  await sendMessage(text, attachments, useWebSearch, { drawMode: useDraw, quotedMessage });
   setDrawEnabled(drawEnabled);
+});
+
+clearQuoteButton?.addEventListener("click", () => {
+  clearPendingQuote();
+  messageInput.focus();
 });
 
 sendButton.addEventListener("click", async (event) => {

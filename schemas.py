@@ -13,6 +13,7 @@ class ChatAttachment(BaseModel):
 class ChatPayload(BaseModel):
     session_id: str = Field(min_length=1)
     message: str = Field(min_length=1)
+    quoted_message: str = Field(default="", max_length=12000)
     mode: str = Field(default="chat")
     attachments: List[ChatAttachment] = Field(default_factory=list)
     hidden_user: bool = False

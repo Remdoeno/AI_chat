@@ -729,16 +729,28 @@ def load_model_messages_with_context(session_id: str) -> List[Dict[str, object]]
 def build_model_messages_for_request(
     session_id: str,
     current_message: str,
+    current_model_message: str = "",
     attachments: Optional[List[ChatAttachment]] = None,
     isolate_history: bool = False,
 ) -> List[Dict[str, object]]:
+    message_for_model = (current_model_message or current_message).strip()
     if not isolate_history:
-        return load_model_messages_with_context(session_id)
+        messages = load_model_messages_with_context(session_id)
+        if message_for_model and message_for_model != current_message.strip():
+            for item in reversed(messages):
+                if item.get("role") == "user":
+                    item["content"] = model_content_for_message(
+                        message_for_model,
+                        message_metadata_from_attachments(attachments or []),
+                        utc_now(),
+                    )
+                    break
+        return messages
     return [
         {
             "role": "user",
             "content": model_content_for_message(
-                current_message,
+                message_for_model,
                 message_metadata_from_attachments(attachments or []),
                 utc_now(),
             ),

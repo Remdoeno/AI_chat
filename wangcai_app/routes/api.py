@@ -1375,6 +1375,15 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
     session_id = payload.session_id
     message = payload.message.strip()
     cached_opening = bool(payload.cached_opening)
+    quoted_message = payload.quoted_message.strip()
+    model_message = message
+    if quoted_message and not payload.hidden_user and not cached_opening:
+        model_message = (
+            "用户这轮消息是在回应前文中被引用的内容。请优先围绕引用内容理解指代关系，"
+            "不要把引用误认为用户新说的话。\n\n"
+            f"【被引用内容】\n{quoted_message}\n\n"
+            f"【用户当前消息】\n{message}"
+        )
     if not message:
         raise HTTPException(status_code=400, detail="message is empty")
 
@@ -1409,6 +1418,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
             "analysis_mode": bool(payload.analysis_mode),
             "cached_opening": cached_opening,
             "hidden_user": bool(payload.hidden_user),
+            "quoted_chars": len(quoted_message),
             "client_timing": dict(payload.client_timing or {}),
         },
     )
@@ -1432,6 +1442,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
             "mode": payload.mode,
             "analysis_mode": bool(payload.analysis_mode),
             "cached_opening": cached_opening,
+            "quoted_chars": len(quoted_message),
         },
     )
     if analysis_trace_id:
@@ -1445,6 +1456,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                 "visitor_ip": ip,
                 "user_agent": user_agent(request),
                 "message": message,
+                "quoted_message": quoted_message[:2000],
                 "attachments": [
                     {
                         "name": attachment.name,
@@ -2028,7 +2040,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                         },
                     )
                     precomputed_memory_gate = resolve_memory_gate_decision(
-                        message,
+                        model_message,
                         session_id=session_id,
                         visitor_ip=ip,
                         analysis_trace_id=analysis_trace_id,
@@ -2077,7 +2089,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                     )
                 system_prompt = build_system_prompt(
                     session_id,
-                    message,
+                    model_message,
                     ip,
                     web_search_context=web_search_context,
                     analysis_trace_id=analysis_trace_id,
@@ -2105,6 +2117,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                 model_messages = [{"role": "system", "content": system_prompt}] + build_model_messages_for_request(
                     session_id=session_id,
                     current_message=message,
+                    current_model_message=model_message,
                     attachments=payload.attachments,
                     isolate_history=bool(payload.web_search),
                 )
