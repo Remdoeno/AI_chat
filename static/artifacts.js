@@ -1,10 +1,17 @@
 const typeFilter = document.getElementById("typeFilter");
+const fetch = (input, init = {}) => window.fetch(input, {
+  ...init,
+  headers: WangcaiDeviceIdentity.headers(init.headers || {}),
+});
 const keywordFilter = document.getElementById("keywordFilter");
 const seriesFilter = document.getElementById("seriesFilter");
 const sortSelect = document.getElementById("sortSelect");
 const orderSelect = document.getElementById("orderSelect");
 const refreshButton = document.getElementById("refreshButton");
 const shuffleButton = document.getElementById("shuffleButton");
+const myArtifactsTab = document.getElementById("myArtifactsTab");
+const publicArtifactsTab = document.getElementById("publicArtifactsTab");
+const artifactSectionTitle = document.getElementById("artifactSectionTitle");
 const idleToggleButton = document.getElementById("idleToggleButton");
 const idleStatusText = document.getElementById("idleStatusText");
 const idleFrequencyInput = document.getElementById("idleFrequencyInput");
@@ -25,6 +32,7 @@ const artifactDialogSummary = document.getElementById("artifactDialogSummary");
 const artifactDialogBody = document.getElementById("artifactDialogBody");
 const artifactDialogLike = document.getElementById("artifactDialogLike");
 const artifactDialogDelete = document.getElementById("artifactDialogDelete");
+const artifactDialogFeature = document.getElementById("artifactDialogFeature");
 const artifactDialogClose = document.getElementById("artifactDialogClose");
 const artifactCommentCount = document.getElementById("artifactCommentCount");
 const artifactComments = document.getElementById("artifactComments");
@@ -43,6 +51,7 @@ let likeClickTimer = null;
 let idlePaused = false;
 let idleFrequencyMinutes = 5;
 let activeArtifactComments = [];
+let artifactView = "mine";
 
 function setStatus(text) {
   statusText.textContent = text;
@@ -411,6 +420,29 @@ function renderDeleteButton(item, className = "delete-artifact-button") {
   return button;
 }
 
+function featureIconSvg() {
+  return iconSvg(
+    "artifact-feature-icon",
+    '<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />',
+  );
+}
+
+function renderFeatureButton(item, className = "feature-button") {
+  const button = document.createElement("button");
+  button.className = className;
+  button.type = "button";
+  button.dataset.artifactId = String(item.id);
+  button.dataset.public = item.is_public ? "true" : "false";
+  button.innerHTML = `${featureIconSvg()}<span>${item.is_public ? "已精选" : "精选"}</span>`;
+  button.title = item.is_public ? "从公共成果库撤下" : "公开到公共成果库";
+  button.setAttribute("aria-pressed", item.is_public ? "true" : "false");
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setArtifactPublic(item.id, !item.is_public).catch((error) => setStatus(`精选失败: ${error.message}`));
+  });
+  return button;
+}
+
 function handleLikeClick(event, artifactId) {
   window.clearTimeout(likeClickTimer);
   if (event.detail >= 2) {
@@ -632,10 +664,23 @@ function renderArtifactCard(item) {
 
   const footer = document.createElement("div");
   footer.className = "artifact-card-footer";
+  const ownerActions = document.createElement("div");
+  ownerActions.className = "artifact-owner-actions";
+  if (item.can_delete) {
+    ownerActions.appendChild(renderDeleteButton(item, "delete-artifact-button artifact-card-delete"));
+  }
+  if (item.can_publish) {
+    ownerActions.appendChild(renderFeatureButton(item));
+  }
   const footerActions = document.createElement("div");
   footerActions.className = "artifact-card-actions";
   footerActions.append(renderCommentButton(item), renderLikeButton(item));
-  footer.append(renderDeleteButton(item, "delete-artifact-button artifact-card-delete"), footerActions);
+  if (ownerActions.childElementCount) {
+    footer.append(ownerActions, footerActions);
+  } else {
+    footer.classList.add("viewer-only");
+    footer.append(footerActions);
+  }
 
   article.append(media, footer);
   return article;
@@ -733,6 +778,25 @@ async function deleteArtifact(artifactId) {
   setStatus("成果已删除");
 }
 
+async function setArtifactPublic(artifactId, isPublic) {
+  const response = await fetch(`/api/artifacts/${artifactId}/visibility`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_public: Boolean(isPublic) }),
+  });
+  if (!response.ok) throw new Error(`visibility ${response.status}`);
+  const payload = await response.json();
+  const item = artifactsById.get(Number(artifactId));
+  if (item) {
+    item.is_public = Boolean(payload.is_public);
+    item.published_at = payload.published_at || "";
+  }
+  if (artifactDialog.open) artifactDialog.close();
+  resetArtifactPaging();
+  await loadData();
+  setStatus(payload.is_public ? "已精选到公共成果库" : "已从公共成果库撤下");
+}
+
 function renderCommentDeleteButton(item) {
   const button = document.createElement("button");
   button.className = "comment-delete-button";
@@ -765,7 +829,8 @@ function renderCommentRow(item, { temporary = false } = {}) {
   const meta = document.createElement("span");
   meta.textContent = `${item.role === "assistant" ? "旺财" : item.author || "visitor"} · ${temporary ? "生成中" : formatTime(item.created_at)}`;
   head.appendChild(meta);
-  if (!temporary) {
+  const activeArtifact = artifactsById.get(Number(activeDialogArtifactId));
+  if (!temporary && activeArtifact && activeArtifact.is_owner) {
     head.appendChild(renderCommentDeleteButton(item));
   }
 
@@ -924,6 +989,15 @@ function openArtifactDialog(artifactId, options = {}) {
   artifactDialogLike.dataset.artifactId = String(item.id);
   artifactDialogLike.innerHTML = `${likeIconSvg()}<span class="like-count" data-artifact-id="${item.id}">${Number(item.likes || 0)}</span>`;
   artifactDialogDelete.dataset.artifactId = String(item.id);
+  artifactDialogDelete.hidden = !item.can_delete;
+  artifactDialogFeature.hidden = !item.can_publish;
+  if (item.can_publish) {
+    artifactDialogFeature.dataset.artifactId = String(item.id);
+    artifactDialogFeature.dataset.public = item.is_public ? "true" : "false";
+    artifactDialogFeature.innerHTML = `${featureIconSvg()}<span>${item.is_public ? "已精选" : "精选"}</span>`;
+    artifactDialogFeature.setAttribute("aria-pressed", item.is_public ? "true" : "false");
+    artifactDialogFeature.title = item.is_public ? "从公共成果库撤下" : "公开到公共成果库";
+  }
   artifactCommentInput.value = "";
   clearChildren(artifactComments);
   renderEmpty(artifactComments, "读取评论中");
@@ -989,6 +1063,22 @@ function resetArtifactPaging() {
   artifactTotal = 0;
 }
 
+function applyArtifactView() {
+  const isPublic = artifactView === "public";
+  document.body.classList.toggle("public-artifacts-view", isPublic);
+  myArtifactsTab.setAttribute("aria-selected", isPublic ? "false" : "true");
+  publicArtifactsTab.setAttribute("aria-selected", isPublic ? "true" : "false");
+  artifactSectionTitle.textContent = isPublic ? "公共作品" : "我的作品";
+}
+
+function switchArtifactView(nextView) {
+  if (nextView === artifactView) return;
+  artifactView = nextView === "public" ? "public" : "mine";
+  applyArtifactView();
+  resetArtifactPaging();
+  loadData().catch((error) => setStatus(`失败: ${error.message}`));
+}
+
 async function loadData({ append = false } = {}) {
   if (artifactLoading) return;
   artifactLoading = true;
@@ -1005,6 +1095,13 @@ async function loadData({ append = false } = {}) {
   updateLoadMoreButton();
 
   try {
+    if (artifactView === "public") {
+      const artifactsResp = await fetch(`/api/public/artifacts?${params.toString()}`);
+      if (!artifactsResp.ok) throw new Error(`public artifacts ${artifactsResp.status}`);
+      renderArtifacts(await artifactsResp.json(), append);
+      setStatus("公共成果已更新");
+      return;
+    }
     const [artifactsResp, runsResp, promptResp, idleStatusResp, idleFrequencyResp] = await Promise.all([
       fetch(`/api/artifacts?${params.toString()}`),
       fetch("/api/artifacts/runs?limit=3"),
@@ -1053,6 +1150,8 @@ sortSelect.addEventListener("change", () => {
   scheduleLoad();
 });
 orderSelect.addEventListener("change", scheduleLoad);
+myArtifactsTab.addEventListener("click", () => switchArtifactView("mine"));
+publicArtifactsTab.addEventListener("click", () => switchArtifactView("public"));
 refreshButton.addEventListener("click", () => {
   resetArtifactPaging();
   loadData().catch((error) => setStatus(`失败: ${error.message}`));
@@ -1113,6 +1212,13 @@ artifactDialogDelete.addEventListener("click", (event) => {
     deleteArtifact(activeDialogArtifactId).catch((error) => setStatus(`删除失败: ${error.message}`));
   }
 });
+artifactDialogFeature.addEventListener("click", (event) => {
+  event.stopPropagation();
+  if (activeDialogArtifactId == null) return;
+  const item = artifactsById.get(Number(activeDialogArtifactId));
+  if (!item || !item.can_publish) return;
+  setArtifactPublic(activeDialogArtifactId, !item.is_public).catch((error) => setStatus(`精选失败: ${error.message}`));
+});
 artifactDialog.addEventListener("close", () => {
   activeDialogArtifactId = null;
   activeArtifactComments = [];
@@ -1170,4 +1276,5 @@ savePromptButton.addEventListener("click", async () => {
   }
 });
 
+applyArtifactView();
 loadData().catch((error) => setStatus(`失败: ${error.message}`));

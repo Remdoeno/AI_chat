@@ -15,6 +15,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   min-height: 100%;
@@ -57,6 +61,36 @@ a {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.artifact-view-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.artifact-view-tabs button {
+  min-width: 0;
+  height: 38px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.artifact-view-tabs button[aria-selected="true"] {
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.public-artifacts-view .owner-only {
+  display: none !important;
 }
 
 .back-link {
@@ -478,6 +512,16 @@ textarea:focus {
   padding: 14px 24px 16px;
 }
 
+.artifact-card-footer.viewer-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.artifact-owner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .artifact-card-meta {
   font-size: 11px;
   line-height: 1.35;
@@ -494,7 +538,8 @@ textarea:focus {
 }
 
 .like-button,
-.comment-count-button {
+.comment-count-button,
+.feature-button {
   min-width: 66px;
   height: 34px;
   border: 1px solid rgba(22, 119, 95, 0.24);
@@ -505,10 +550,36 @@ textarea:focus {
   font-weight: 800;
 }
 
+.feature-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 72px;
+  border-color: rgba(175, 128, 22, 0.42);
+  color: #8b6411;
+  background: rgba(213, 166, 48, 0.1);
+}
+
+.feature-button[aria-pressed="true"] {
+  color: #ffffff;
+  background: #9a7422;
+}
+
+.artifact-feature-icon {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-linejoin: round;
+}
+
 .like-button:hover,
 .like-button:focus-visible,
 .comment-count-button:hover,
-.comment-count-button:focus-visible {
+.comment-count-button:focus-visible,
+.feature-button:hover,
+.feature-button:focus-visible {
   border-color: rgba(22, 119, 95, 0.5);
   background: rgba(22, 119, 95, 0.12);
   outline: none;
@@ -1053,6 +1124,16 @@ textarea:focus {
 
   .artifact-card-media {
     min-height: 168px;
+  }
+
+  .artifact-card-footer {
+    grid-template-columns: 1fr;
+    padding: 12px 14px 14px;
+  }
+
+  .artifact-owner-actions,
+  .artifact-card-actions {
+    justify-content: space-between;
   }
 
   .artifact-head,

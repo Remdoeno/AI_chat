@@ -15,24 +15,44 @@
   `;
 
   function bindPasswordInput(input) {
-    if (!(input instanceof HTMLInputElement) || input.dataset.passwordVisibilityBound === "true") {
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    let wrapper = input.parentElement;
+    if (!wrapper || !wrapper.classList.contains("password-input-wrap")) {
+      wrapper = document.createElement("span");
+      wrapper.className = "password-input-wrap";
+      input.parentNode.insertBefore(wrapper, input);
+      wrapper.appendChild(input);
+    }
+
+    const existingButtons = Array.from(wrapper.querySelectorAll(":scope > .password-visibility-toggle"));
+    const existingButton = existingButtons.shift();
+    existingButtons.forEach((button) => button.remove());
+    if (input.dataset.passwordVisibilityBound === "true" && existingButton) {
+      wrapper.hidden = input.hidden;
       return;
     }
     input.dataset.passwordVisibilityBound = "true";
 
-    const wrapper = document.createElement("span");
-    wrapper.className = "password-input-wrap";
-    input.parentNode.insertBefore(wrapper, input);
-    wrapper.appendChild(input);
-
-    const button = document.createElement("button");
+    const button = existingButton || document.createElement("button");
     button.type = "button";
     button.className = "password-visibility-toggle";
     button.setAttribute("aria-label", "显示密码");
     button.setAttribute("aria-pressed", "false");
     button.title = "显示密码";
     button.innerHTML = EYE_ICON;
-    wrapper.appendChild(button);
+    if (!existingButton) wrapper.appendChild(button);
+
+    const syncWrapperVisibility = () => {
+      wrapper.hidden = input.hidden;
+    };
+    syncWrapperVisibility();
+    new MutationObserver(syncWrapperVisibility).observe(input, {
+      attributes: true,
+      attributeFilter: ["hidden"],
+    });
 
     button.addEventListener("click", () => {
       const revealing = input.type === "password";

@@ -27,6 +27,8 @@ const memoryAdminCancelButton = document.getElementById("memoryAdminCancelButton
 const userMemoryBindingDialog = document.getElementById("userMemoryBindingDialog");
 const userMemoryBindingForm = document.getElementById("userMemoryBindingForm");
 const userMemoryBindingInput = document.getElementById("userMemoryBindingInput");
+const userMemoryBindingPassword = document.getElementById("userMemoryBindingPassword");
+const userMemoryBindingPasswordConfirm = document.getElementById("userMemoryBindingPasswordConfirm");
 const shareChatHistoryCheckbox = document.getElementById("shareChatHistoryCheckbox");
 const hostDeviceCheckbox = document.getElementById("hostDeviceCheckbox");
 const inheritAssistantProfileCheckbox = document.getElementById("inheritAssistantProfileCheckbox");
@@ -67,7 +69,7 @@ let pendingQuotedMessage = "";
 const SAMPLING_STORAGE_KEY = "wangcai_sampling_settings";
 const DEVICE_STORAGE_KEY = "wangcai_device_id";
 const USER_MEMORY_BINDING_STORAGE_KEY = "wangcai_user_memory_binding";
-const OPENING_PROMPT_STORAGE_KEY = "wangcai_opening_prompt";
+const OPENING_PROMPT_STORAGE_KEY = "wangcai_opening_prompt_v2";
 const LEGACY_SAMPLING_STORAGE_KEY = "qwen_sampling_settings";
 const LEGACY_DEVICE_STORAGE_KEY = "qwen_device_id";
 const LEGACY_USER_MEMORY_BINDING_STORAGE_KEY = "qwen_user_memory_binding";
@@ -689,6 +691,8 @@ function syncUserMemoryBindingForm() {
   shareChatHistoryCheckbox.checked = Boolean(binding.share_chat_history);
   hostDeviceCheckbox.checked = Boolean(binding.is_host);
   inheritAssistantProfileCheckbox.checked = Boolean(binding.inherit_assistant_profile);
+  userMemoryBindingPassword.value = "";
+  userMemoryBindingPasswordConfirm.value = "";
 }
 
 function setUserMemoryBindingInfoVisible(visible) {
@@ -759,7 +763,10 @@ function ensureDeviceId() {
 }
 
 function deviceIdentityHeaders() {
-  return { "X-Wangcai-Device-Id": ensureDeviceId() };
+  const headers = { "X-Wangcai-Device-Id": ensureDeviceId() };
+  const tutorialId = String(localStorage.getItem("wangcai_tutorial_active_id") || "").trim();
+  if (isUsableDeviceId(tutorialId)) headers["X-Wangcai-Tutorial-Id"] = tutorialId;
+  return headers;
 }
 
 function jsonHeaders() {
@@ -2164,6 +2171,46 @@ async function addImageFiles(files) {
   }
 }
 
+function clipboardImageFiles(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) {
+    return [];
+  }
+  const files = [];
+  const items = Array.from(clipboard.items || []);
+  for (const item of items) {
+    if (item.kind !== "file" || !String(item.type || "").startsWith("image/")) {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file) {
+      files.push(file);
+    }
+  }
+  if (!files.length) {
+    for (const file of Array.from(clipboard.files || [])) {
+      if (isLikelyImageFile(file)) {
+        files.push(file);
+      }
+    }
+  }
+  return files;
+}
+
+async function handleImagePaste(event) {
+  const files = clipboardImageFiles(event);
+  if (!files.length) {
+    return;
+  }
+  event.preventDefault();
+  try {
+    await addImageFiles(files);
+    messageInput.focus();
+  } catch (error) {
+    setStatus(`图片读取失败：${error.message}`);
+  }
+}
+
 async function createSession(options = {}) {
   const { openingPrompt = true, clearExisting = true } = options;
   const sessionStartMs = performance.now();
@@ -2406,6 +2453,8 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
         attachments,
         hidden_user: hiddenUser,
         cached_opening: Boolean(options.cachedOpening),
+        tutorial_mode: Boolean(window.WangcaiTutorial && window.WangcaiTutorial.isActive()),
+        tutorial_id: window.WangcaiTutorial ? window.WangcaiTutorial.activeId() : "",
         client_timing: options.clientTiming || {},
         web_search: drawMode ? false : webSearch,
         web_search_proxy: samplingSettings.web_search_proxy,
@@ -2660,6 +2709,8 @@ async function saveUserMemoryBinding(event) {
     share_chat_history: sharedUserId ? Boolean(shareChatHistoryCheckbox.checked) : false,
     is_host: sharedUserId ? Boolean(hostDeviceCheckbox.checked) : false,
     inherit_assistant_profile: sharedUserId ? Boolean(inheritAssistantProfileCheckbox.checked) : false,
+    password: userMemoryBindingPassword.value,
+    confirm_password: userMemoryBindingPasswordConfirm.value,
   };
   userMemoryBindingStatus.textContent = "保存中";
   try {
@@ -2669,7 +2720,13 @@ async function saveUserMemoryBinding(event) {
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
-      throw new Error(await response.text());
+      const errorPayload = await response.json().catch(() => ({}));
+      const detail = errorPayload && errorPayload.detail ? String(errorPayload.detail) : "保存失败";
+      const messages = {
+        "shared user password is invalid": "共享用户密码错误",
+        "password confirmation does not match": "首次创建共享用户时，两次密码必须一致",
+      };
+      throw new Error(messages[detail] || detail);
     }
     const result = await response.json();
     applyUserMemoryBindingState(result);
@@ -2744,6 +2801,7 @@ messageInput.addEventListener("keydown", (event) => {
     chatForm.requestSubmit();
   }
 });
+messageInput.addEventListener("paste", handleImagePaste);
 
 messageInput.addEventListener("compositionstart", () => {
   isMessageComposing = true;
@@ -2903,6 +2961,10 @@ if (modelSettingsForm) {
 if (modelSettingsCancelButton) {
   modelSettingsCancelButton.addEventListener("click", closeModelSettingsDialog);
 }
+window.WangcaiApp = {
+  openModelSettingsDialog,
+  stopActiveGeneration,
+};
 document.querySelectorAll("[data-model-field=\"provider\"]").forEach((input) => {
   input.addEventListener("change", () => applyProviderPreset(input.dataset.modelSlot));
 });
@@ -2934,4 +2996,4 @@ function bootChatSession() {
   });
 }
 
-bootChatSession();
+Promise.resolve(window.__wangcaiTutorialReady).finally(bootChatSession);

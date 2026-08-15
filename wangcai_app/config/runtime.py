@@ -43,7 +43,9 @@ from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from schemas import (
     AdminLoginPayload,
+    AnalysisLoginPayload,
     ArtifactCommentPayload,
+    ArtifactVisibilityPayload,
     CharacterChatPayload,
     AuthPasswordPayload,
     ChatAttachment,
@@ -54,6 +56,8 @@ from schemas import (
     MemoryAdminPayload,
     ModelSettingsPayload,
     OpeningStreamPayload,
+    TutorialArtifactPayload,
+    TutorialCleanupPayload,
     UserMemoryBindingPayload,
 )
 from streaming_utils import ThinkStripper, format_sse, split_think_text

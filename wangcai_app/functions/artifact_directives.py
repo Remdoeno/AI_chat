@@ -171,39 +171,53 @@ def row_to_artifact_directive(row: sqlite3.Row) -> Dict[str, object]:
         if "normalize_character_image_ids" in globals()
         else [],
         "source_visitor_ip": str(row["source_visitor_ip"] or ""),
+        "owner_shared_user_id": str(row["owner_shared_user_id"] or ""),
         "revision_count": int(row["revision_count"] or 1),
         "created_at": str(row["created_at"] or ""),
         "updated_at": str(row["updated_at"] or ""),
     }
 
 
-def list_active_artifact_directives(limit: int = 50) -> List[Dict[str, object]]:
+def list_active_artifact_directives(
+    limit: int = 50,
+    owner_shared_user_id: str = "",
+) -> List[Dict[str, object]]:
     max_rows = max(1, min(int(limit), 200))
+    owner = clean_shared_user_id(owner_shared_user_id)
+    if not owner:
+        return []
     with connect_db() as conn:
         rows = conn.execute(
             """
             SELECT *
             FROM hidden_artifact_directives
-            WHERE status = 'active'
+            WHERE status = 'active' AND owner_shared_user_id = ?
             ORDER BY priority DESC, datetime(updated_at) DESC, id DESC
             LIMIT ?
             """,
-            (max_rows,),
+            (owner, max_rows),
         ).fetchall()
     return [row_to_artifact_directive(row) for row in rows]
 
 
-def recent_artifact_directive_mentions(limit: int = 12) -> str:
+def recent_artifact_directive_mentions(
+    limit: int = 12,
+    owner_shared_user_id: str = "",
+) -> str:
     max_rows = max(1, min(int(limit), 30))
+    owner = clean_shared_user_id(owner_shared_user_id)
+    if not owner:
+        return ""
     with connect_db() as conn:
         rows = conn.execute(
             """
             SELECT title, summary, content
             FROM idle_agent_artifacts
+            WHERE owner_shared_user_id = ?
             ORDER BY id DESC
             LIMIT ?
             """,
-            (max_rows,),
+            (owner, max_rows),
         ).fetchall()
     return "\n".join(f"{row['title'] or ''}\n{row['summary'] or ''}\n{row['content'] or ''}" for row in rows)
 
@@ -235,7 +249,11 @@ def upsert_hidden_artifact_directive(
     session_id: str,
     visitor_ip: str,
     source_message_ids: List[int],
+    owner_shared_user_id: str = "",
 ) -> Dict[str, object]:
+    owner = clean_shared_user_id(owner_shared_user_id) or shared_user_id_for_device(visitor_ip)
+    if not owner:
+        return {"status": "skipped", "reason": "shared_user_binding_required"}
     directive = decision.get("directive") if isinstance(decision.get("directive"), dict) else {}
     directive_type = normalize_directive_type(directive.get("directive_type"))
     subject = clean_artifact_directive_text(directive.get("subject"), 160)
@@ -243,15 +261,21 @@ def upsert_hidden_artifact_directive(
     directive_text = clean_artifact_directive_text(directive.get("directive"), 1400)
     if not directive_text:
         return {"status": "skipped", "reason": "missing_directive"}
-    key = artifact_directive_key(directive_type, subject or directive_text[:80], series_title)
+    raw_key = artifact_directive_key(directive_type, subject or directive_text[:80], series_title)
+    owner_key = hashlib.sha256(owner.encode("utf-8")).hexdigest()[:12]
+    key = f"{owner_key}:{raw_key}"
     characters = normalize_directive_characters(directive.get("characters"))
     message_ids = sorted(set(int(item) for item in source_message_ids if int(item) > 0))
     message_ids_json = json.dumps(message_ids, ensure_ascii=False)
     now = utc_now()
     with connect_db() as conn:
         existing = conn.execute(
-            "SELECT * FROM hidden_artifact_directives WHERE directive_key = ? LIMIT 1",
-            (key,),
+            """
+            SELECT * FROM hidden_artifact_directives
+            WHERE directive_key = ? AND owner_shared_user_id = ?
+            LIMIT 1
+            """,
+            (key, owner),
         ).fetchone()
         if existing:
             directive_id = int(existing["id"])
@@ -262,7 +286,7 @@ def upsert_hidden_artifact_directive(
                     characters_json = ?, series_title = ?, scope = ?,
                     status = 'active', priority = ?, confidence = ?,
                     source_session_id = ?, source_message_ids_json = ?,
-                    source_visitor_ip = ?, revision_count = revision_count + 1,
+                    source_visitor_ip = ?, owner_shared_user_id = ?, revision_count = revision_count + 1,
                     updated_at = ?
                 WHERE id = ?
                 """,
@@ -278,6 +302,7 @@ def upsert_hidden_artifact_directive(
                     session_id or "",
                     message_ids_json,
                     normalize_visitor_ip(visitor_ip),
+                    owner,
                     now,
                     directive_id,
                 ),
@@ -290,9 +315,9 @@ def upsert_hidden_artifact_directive(
                     directive_key, directive_type, subject, directive,
                     characters_json, series_title, scope, status, priority,
                     confidence, source_session_id, source_message_ids_json,
-                    source_visitor_ip, revision_count, created_at, updated_at
+                    source_visitor_ip, owner_shared_user_id, revision_count, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
                     key,
@@ -307,6 +332,7 @@ def upsert_hidden_artifact_directive(
                     session_id or "",
                     message_ids_json,
                     normalize_visitor_ip(visitor_ip),
+                    owner,
                     now,
                     now,
                 ),
@@ -373,7 +399,11 @@ def load_recent_artifact_directive_messages(
     ]
 
 
-def format_artifact_directive_agent_context(session_id: str, user_message: str) -> str:
+def format_artifact_directive_agent_context(
+    session_id: str,
+    user_message: str,
+    owner_shared_user_id: str,
+) -> str:
     lines = [
         ARTIFACT_THEATER_CONTEXT,
         "",
@@ -387,7 +417,10 @@ def format_artifact_directive_agent_context(session_id: str, user_message: str) 
         lines.append(f"[message id={item['id']} role={role} time={item['created_at']}]")
         lines.append(clean_artifact_directive_text(item["content"], 1000))
         lines.append("")
-    active = list_active_artifact_directives(limit=20)
+    active = list_active_artifact_directives(
+        limit=20,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     if active:
         lines.append("已有成果小剧场导演指令：")
         for item in active:
@@ -440,7 +473,10 @@ def run_artifact_directive_agent(
 ) -> Dict[str, object]:
     if not should_run_artifact_directive_agent(user_message):
         return {"status": "skipped", "reason": "not_triggered"}
-    context = format_artifact_directive_agent_context(session_id, user_message)
+    owner = shared_user_id_for_device(visitor_ip)
+    if not owner:
+        return {"status": "skipped", "reason": "shared_user_binding_required"}
+    context = format_artifact_directive_agent_context(session_id, user_message, owner)
     if analysis_trace_id:
         record_analysis_trace(
             session_id=session_id,
@@ -483,6 +519,7 @@ def run_artifact_directive_agent(
         session_id=session_id,
         visitor_ip=visitor_ip,
         source_message_ids=source_message_ids,
+        owner_shared_user_id=owner,
     )
     record_event(session_id, "hidden_artifact_directive_upserted", visitor_ip, {"result": result})
     if analysis_trace_id:
@@ -533,10 +570,16 @@ def maybe_start_artifact_directive_agent_job(
     return True
 
 
-def format_artifact_theater_context_for_chat(user_message: str) -> str:
+def format_artifact_theater_context_for_chat(
+    user_message: str,
+    owner_shared_user_id: str = "",
+) -> str:
     if not should_include_artifact_theater_context(user_message):
         return ""
-    directives = list_active_artifact_directives(limit=HIDDEN_ARTIFACT_DIRECTIVE_CHAT_CONTEXT_LIMIT)
+    directives = list_active_artifact_directives(
+        limit=HIDDEN_ARTIFACT_DIRECTIVE_CHAT_CONTEXT_LIMIT,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     lines = [
         ARTIFACT_THEATER_CONTEXT,
         "如果用户本轮是在给成果小剧场下指令，应自然确认会记录/用于后续成果，不要把“成果故事”误解为用户现实科研成果。",
@@ -594,8 +637,12 @@ def format_hidden_artifact_directives_for_artifacts(
     limit: int = HIDDEN_ARTIFACT_DIRECTIVE_ARTIFACT_CONTEXT_LIMIT,
     focus_text: str = "",
     series_title: str = "",
+    owner_shared_user_id: str = "",
 ) -> str:
-    directives = list_active_artifact_directives(limit=limit)
+    directives = list_active_artifact_directives(
+        limit=limit,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     if not directives:
         return ""
     directives = [
@@ -605,7 +652,9 @@ def format_hidden_artifact_directives_for_artifacts(
     ]
     if not directives:
         return ""
-    recent_text = recent_artifact_directive_mentions()
+    recent_text = recent_artifact_directive_mentions(
+        owner_shared_user_id=owner_shared_user_id,
+    )
     elevated = [item for item in directives if should_inject_artifact_directive(item, recent_text)]
     reference = [item for item in directives if item not in elevated]
     lines = [ARTIFACT_DIRECTIVE_CONTEXT_HEADER, ""]

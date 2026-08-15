@@ -327,7 +327,10 @@ function ensureDeviceId() {
 }
 
 function deviceIdentityHeaders() {
-  return { "X-Wangcai-Device-Id": ensureDeviceId() };
+  const headers = { "X-Wangcai-Device-Id": ensureDeviceId() };
+  const tutorialId = String(localStorage.getItem("wangcai_tutorial_active_id") || "").trim();
+  if (isUsableDeviceId(tutorialId)) headers["X-Wangcai-Tutorial-Id"] = tutorialId;
+  return headers;
 }
 
 function jsonHeaders() {
@@ -804,6 +807,42 @@ async function handleImageFiles(files) {
   } finally {
     analysisImageInput.value = "";
   }
+}
+
+function clipboardImageFiles(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) {
+    return [];
+  }
+  const files = [];
+  const items = Array.from(clipboard.items || []);
+  for (const item of items) {
+    if (item.kind !== "file" || !String(item.type || "").startsWith("image/")) {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file) {
+      files.push(file);
+    }
+  }
+  if (!files.length) {
+    for (const file of Array.from(clipboard.files || [])) {
+      if (attachmentMime(file)) {
+        files.push(file);
+      }
+    }
+  }
+  return files;
+}
+
+async function handleImagePaste(event) {
+  const files = clipboardImageFiles(event);
+  if (!files.length) {
+    return;
+  }
+  event.preventDefault();
+  await handleImageFiles(files);
+  messageInput.focus();
 }
 
 function appendMessage(role, text, attachments = [], options = {}) {
@@ -1806,9 +1845,9 @@ async function refreshTraces() {
     return;
   }
   const url = `/api/analysis/traces?session_id=${encodeURIComponent(sessionId)}&limit=500`;
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: deviceIdentityHeaders() });
   if (response.status === 401) {
-    window.location.href = "/analysis";
+    window.location.href = "/analysis-login";
     return;
   }
   if (!response.ok) {
@@ -2382,9 +2421,10 @@ async function refreshBackground(options = {}) {
   try {
     const response = await fetch(
       `/api/analysis/background?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`,
+      { headers: deviceIdentityHeaders() },
     );
     if (response.status === 401) {
-      window.location.href = "/analysis";
+      window.location.href = "/analysis-login";
       return;
     }
     if (!response.ok) {
@@ -2439,6 +2479,10 @@ async function stopActiveGeneration() {
   setStatus("已停止");
 }
 
+window.WangcaiAnalysis = {
+  stopActiveGeneration,
+};
+
 async function sendMessage(text, options = {}) {
   const {
     hiddenUser = false,
@@ -2479,6 +2523,8 @@ async function sendMessage(text, options = {}) {
         top_p: sampling.top_p,
         max_tokens: maxTokens,
         analysis_mode: true,
+        tutorial_mode: Boolean(window.WangcaiTutorial && window.WangcaiTutorial.isActive()),
+        tutorial_id: window.WangcaiTutorial ? window.WangcaiTutorial.activeId() : "",
       }),
     });
     if (response.status === 429) {
@@ -2604,6 +2650,7 @@ messageInput.addEventListener("keydown", (event) => {
     chatForm.requestSubmit();
   }
 });
+messageInput.addEventListener("paste", handleImagePaste);
 
 messageInput.addEventListener("compositionstart", () => {
   isMessageComposing = true;

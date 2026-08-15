@@ -12,14 +12,16 @@ def auth_page() -> FileResponse:
 
 
 @app.get("/memory", include_in_schema=False)
-def memory_dashboard() -> FileResponse:
+def memory_dashboard(request: Request) -> FileResponse:
+    if not is_analysis_authenticated(request):
+        return html_response("analysis_login.html")
     return html_response("memory.html")
 
 
 @app.get("/memory-admin", include_in_schema=False)
 def memory_admin_dashboard(request: Request) -> FileResponse:
-    if not is_admin_authenticated(request):
-        return html_response("memory_admin_login.html")
+    if not is_analysis_authenticated(request):
+        return html_response("analysis_login.html")
     return html_response("memory_admin.html")
 
 
@@ -45,10 +47,15 @@ def analysis_dashboard(request: Request) -> FileResponse:
     return html_response("analysis.html")
 
 
+@app.get("/analysis-login", include_in_schema=False)
+def analysis_login_page() -> FileResponse:
+    return html_response("analysis_login.html")
+
+
 @app.get("/background", include_in_schema=False)
 def background_dashboard(request: Request) -> FileResponse:
-    if not is_analysis_authenticated(request):
-        return html_response("analysis_login.html")
+    if not is_admin_authenticated(request):
+        return html_response("background_login.html")
     return html_response("background.html")
 
 

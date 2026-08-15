@@ -1,4 +1,8 @@
 const statusText = document.getElementById("characterStatus");
+const fetch = (input, init = {}) => window.fetch(input, {
+  ...init,
+  headers: WangcaiDeviceIdentity.headers(init.headers || {}),
+});
 const characterSticker = document.getElementById("characterSticker");
 const characterChatPanel = document.querySelector(".character-chat-panel");
 const loadPreviousCharacterButton = document.getElementById("loadPreviousCharacterButton");
@@ -253,7 +257,7 @@ function handleCharacterPreviousSessionTouchMove(event) {
 }
 
 function jsonHeaders() {
-  return { "Content-Type": "application/json" };
+  return WangcaiDeviceIdentity.jsonHeaders();
 }
 
 function appendMessage(role, text = "", attachments = [], options = {}) {

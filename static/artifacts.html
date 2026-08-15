@@ -6,7 +6,8 @@
     <title>旺财成果库</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
-    <link rel="stylesheet" href="/static/artifacts.css?v=20260621_artifact_prompt_dark" />
+    <link rel="stylesheet" href="/static/artifacts.css?v=20260816_wangcai_2_4" />
+    <link rel="stylesheet" href="/static/tutorial.css?v=20260816_wangcai_2_4" />
   </head>
   <body>
     <main class="page-shell">
@@ -20,6 +21,11 @@
         <a class="character-library-link" href="/characters" aria-label="进入角色库">
           <span>角色库</span>
         </a>
+
+        <div class="artifact-view-tabs" role="tablist" aria-label="成果库范围">
+          <button id="myArtifactsTab" type="button" role="tab" aria-selected="true">我的成果</button>
+          <button id="publicArtifactsTab" type="button" role="tab" aria-selected="false">公共成果</button>
+        </div>
 
         <label class="field">
           <span>类型</span>
@@ -67,7 +73,7 @@
 
         <button id="refreshButton" class="button" type="button">刷新</button>
         <button id="shuffleButton" class="button secondary-action" type="button">打乱顺序</button>
-        <section class="idle-control" aria-label="空闲生成控制">
+        <section class="idle-control owner-only" aria-label="空闲生成控制">
           <div class="idle-control-head">
             <strong>后台创作</strong>
             <span id="idleStatusText">读取中</span>
@@ -81,7 +87,7 @@
         </section>
         <p id="statusText" class="status">读取中</p>
 
-        <section class="prompt-panel" aria-label="空闲创作 prompt">
+        <section class="prompt-panel owner-only" aria-label="空闲创作 prompt">
           <h2>创作 Prompt</h2>
           <label class="field">
             <span>空闲时写什么</span>
@@ -93,18 +99,18 @@
 
       <section class="content">
         <div class="section-head">
-          <h2>作品</h2>
+          <h2 id="artifactSectionTitle">我的作品</h2>
           <span id="artifactCount">0</span>
         </div>
         <div id="artifactList" class="artifact-list"></div>
         <button id="loadMoreButton" class="button load-more" type="button" hidden>加载更多</button>
 
-        <div class="section-head">
+        <div class="section-head owner-only">
           <h2>后台运行</h2>
           <span id="runCount">0</span>
         </div>
-        <div id="idleProgress" class="idle-progress" aria-label="后台创作进度"></div>
-        <div id="runList" class="run-list"></div>
+        <div id="idleProgress" class="idle-progress owner-only" aria-label="后台创作进度"></div>
+        <div id="runList" class="run-list owner-only"></div>
       </section>
     </main>
     <dialog id="artifactDialog" class="artifact-dialog" aria-labelledby="artifactDialogTitle">
@@ -135,11 +141,14 @@
         </section>
         <div class="artifact-dialog-actions">
           <button id="artifactDialogDelete" class="delete-artifact-button dialog-delete-button" type="button">delete</button>
+          <button id="artifactDialogFeature" class="feature-button" type="button">精选</button>
           <button id="artifactDialogLike" class="like-button" type="button">赞 <span>0</span></button>
         </div>
       </div>
     </dialog>
-    <script src="/static/artifacts.js?v=20260621_artifact_prompt_dark"></script>
+    <script src="/static/device_identity.js?v=20260816_wangcai_2_4"></script>
+    <script src="/static/tutorial.js?v=20260816_wangcai_2_4"></script>
+    <script src="/static/artifacts.js?v=20260816_wangcai_2_4"></script>
     <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
   </body>
 </html>

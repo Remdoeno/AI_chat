@@ -38,6 +38,15 @@ def character_name_key(name: str) -> str:
     return text[:120]
 
 
+def scoped_character_name_key(owner_shared_user_id: str, name: str) -> str:
+    owner = clean_shared_user_id(owner_shared_user_id)
+    base_key = character_name_key(name)
+    if not owner or not base_key:
+        return base_key
+    owner_key = hashlib.sha256(owner.encode("utf-8")).hexdigest()[:12]
+    return f"{owner_key}:{base_key}"
+
+
 def archived_character_name_key(name_key: str, character_id: int) -> str:
     key = str(name_key or "").strip() or "character"
     return f"{key}__archived__{int(character_id)}"
@@ -124,10 +133,17 @@ def character_profile_mentioned_in_text(profile: Dict[str, object], text: str) -
     return False
 
 
-def character_profiles_mentioned_in_text(text: str, limit: int = 12) -> List[Dict[str, object]]:
+def character_profiles_mentioned_in_text(
+    text: str,
+    limit: int = 12,
+    owner_shared_user_id: str = "",
+) -> List[Dict[str, object]]:
     matches: List[Dict[str, object]] = []
     seen_ids = set()
-    for profile in list_active_character_profiles(limit=200):
+    for profile in list_active_character_profiles(
+        limit=200,
+        owner_shared_user_id=owner_shared_user_id,
+    ):
         profile_id = int(profile.get("id") or 0)
         if profile_id <= 0 or profile_id in seen_ids:
             continue
@@ -229,6 +245,7 @@ def row_to_character_profile(row: sqlite3.Row) -> Dict[str, object]:
         "source_session_id": str(row["source_session_id"] or ""),
         "source_message_ids": normalize_character_image_ids(json_list(row["source_message_ids_json"])),
         "source_visitor_ip": str(row["source_visitor_ip"] or ""),
+        "owner_shared_user_id": str(row["owner_shared_user_id"] or ""),
         "scope": str(row["scope"] or "artifact_public"),
         "status": str(row["status"] or "active"),
         "confidence": float(row["confidence"] or 0.7),
@@ -238,18 +255,24 @@ def row_to_character_profile(row: sqlite3.Row) -> Dict[str, object]:
     }
 
 
-def list_active_character_profiles(limit: int = 80) -> List[Dict[str, object]]:
+def list_active_character_profiles(
+    limit: int = 80,
+    owner_shared_user_id: str = "",
+) -> List[Dict[str, object]]:
     max_rows = max(1, min(int(limit), 200))
+    owner = clean_shared_user_id(owner_shared_user_id)
+    if not owner:
+        return []
     with connect_db() as conn:
         rows = conn.execute(
             """
             SELECT *
             FROM hidden_character_profiles
-            WHERE status = 'active'
+            WHERE status = 'active' AND owner_shared_user_id = ?
             ORDER BY datetime(updated_at) DESC, id DESC
             LIMIT ?
             """,
-            (max_rows,),
+            (owner, max_rows),
         ).fetchall()
     return [row_to_character_profile(row) for row in rows]
 
@@ -304,7 +327,10 @@ def character_public_payload(profile: Dict[str, object], include_full: bool = Fa
         }
         profile_names.discard("")
         directives = []
-        for directive in compact_character_library_directives(limit=120):
+        for directive in compact_character_library_directives(
+            limit=120,
+            owner_shared_user_id=str(profile.get("owner_shared_user_id") or ""),
+        ):
             directive_names = {character_name_key(str(directive.get("subject") or ""))}
             directive_names.update(character_name_key(str(item)) for item in directive.get("characters", []) or [])
             directive_names.discard("")
@@ -355,21 +381,19 @@ def format_character_global_memory_text(profile: Dict[str, object]) -> str:
     return "\n".join(parts).strip()
 
 
-def sync_character_global_memory(character_id: int) -> Dict[str, object]:
+def sync_character_global_memory(character_id: int, owner_shared_user_id: str = "") -> Dict[str, object]:
+    owner = clean_shared_user_id(owner_shared_user_id)
     try:
-        profile = character_profile_by_id(int(character_id))
+        profile = character_profile_by_id(int(character_id), owner)
     except Exception as exc:
         return {"status": "missing_character", "error": str(exc)}
-    content = format_character_global_memory_text(profile)
-    if not content:
-        return {"status": "empty"}
     try:
-        memory_id = upsert_global_character_memory(
-            int(character_id),
-            content,
-            confidence=float(profile.get("confidence") or 0.85),
-        )
-        return {"status": "synced", "memory_id": int(memory_id), "character_id": int(character_id)}
+        deleted = delete_global_character_memory(int(character_id))
+        return {
+            "status": "library_scoped",
+            "deleted_legacy_memories": int(deleted),
+            "character_id": int(character_id),
+        }
     except Exception as exc:
         record_event(
             None,
@@ -394,8 +418,14 @@ def delete_character_global_memory(character_id: int) -> Dict[str, object]:
         return {"status": "error", "error": str(exc)}
 
 
-def list_character_library_profiles(limit: int = 200) -> Dict[str, object]:
-    profiles = list_active_character_profiles(limit=limit)
+def list_character_library_profiles(
+    limit: int = 200,
+    owner_shared_user_id: str = "",
+) -> Dict[str, object]:
+    profiles = list_active_character_profiles(
+        limit=limit,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     items = [character_public_payload(profile) for profile in profiles]
     avatar_candidates = [
         item.get("avatar_image") or item.get("main_image")
@@ -412,11 +442,16 @@ def list_character_library_profiles(limit: int = 200) -> Dict[str, object]:
     }
 
 
-def get_character_library_profile(character_id: int) -> Dict[str, object]:
+def get_character_library_profile(character_id: int, owner_shared_user_id: str = "") -> Dict[str, object]:
+    owner = clean_shared_user_id(owner_shared_user_id)
     with connect_db() as conn:
         row = conn.execute(
-            "SELECT * FROM hidden_character_profiles WHERE id = ? AND status = 'active' LIMIT 1",
-            (int(character_id),),
+            """
+            SELECT * FROM hidden_character_profiles
+            WHERE id = ? AND status = 'active' AND owner_shared_user_id = ?
+            LIMIT 1
+            """,
+            (int(character_id), owner),
         ).fetchone()
     if not row:
         raise KeyError("character not found")
@@ -474,7 +509,9 @@ def sync_character_card_artifact_directives(
     canonical_name: str,
     raw_directives: object,
     now: str,
+    owner_shared_user_id: str,
 ) -> List[Dict[str, object]]:
+    owner = clean_shared_user_id(owner_shared_user_id)
     directives = normalize_character_card_artifact_directives(raw_directives, canonical_name)
     results: List[Dict[str, object]] = []
     for directive in directives:
@@ -483,8 +520,12 @@ def sync_character_card_artifact_directives(
         if directive_id > 0:
             with connect_db() as conn:
                 row = conn.execute(
-                    "SELECT * FROM hidden_artifact_directives WHERE id = ? LIMIT 1",
-                    (directive_id,),
+                    """
+                    SELECT * FROM hidden_artifact_directives
+                    WHERE id = ? AND owner_shared_user_id = ?
+                    LIMIT 1
+                    """,
+                    (directive_id, owner),
                 ).fetchone()
                 if not row:
                     results.append({"id": directive_id, "status": "not_found"})
@@ -563,17 +604,27 @@ def sync_character_card_artifact_directives(
             session_id="",
             visitor_ip="character_library_ui",
             source_message_ids=[],
+            owner_shared_user_id=owner,
         )
         results.append(result)
     return results
 
 
-def update_hidden_character_profile_fields(character_id: int, payload: Dict[str, object]) -> Dict[str, object]:
+def update_hidden_character_profile_fields(
+    character_id: int,
+    payload: Dict[str, object],
+    owner_shared_user_id: str,
+) -> Dict[str, object]:
+    owner = clean_shared_user_id(owner_shared_user_id)
     now = utc_now()
     with connect_db() as conn:
         row = conn.execute(
-            "SELECT * FROM hidden_character_profiles WHERE id = ? AND status = 'active' LIMIT 1",
-            (int(character_id),),
+            """
+            SELECT * FROM hidden_character_profiles
+            WHERE id = ? AND status = 'active' AND owner_shared_user_id = ?
+            LIMIT 1
+            """,
+            (int(character_id), owner),
         ).fetchone()
         if not row:
             raise KeyError("character not found")
@@ -602,6 +653,7 @@ def update_hidden_character_profile_fields(character_id: int, payload: Dict[str,
                 canonical_name,
                 payload.get("artifact_directives"),
                 now,
+                owner,
             )
             patch["artifact_directives"] = directive_results
         conn.execute(
@@ -615,7 +667,7 @@ def update_hidden_character_profile_fields(character_id: int, payload: Dict[str,
             """,
             (
                 canonical_name,
-                character_name_key(canonical_name),
+                scoped_character_name_key(owner, canonical_name),
                 json.dumps(aliases, ensure_ascii=False),
                 visual_prompt,
                 negative_prompt,
@@ -636,17 +688,27 @@ def update_hidden_character_profile_fields(character_id: int, payload: Dict[str,
             """,
             (int(character_id), json.dumps(patch, ensure_ascii=False), now),
         )
-    result = get_character_library_profile(int(character_id))
-    sync_character_global_memory(int(character_id))
+    result = get_character_library_profile(int(character_id), owner)
+    sync_character_global_memory(int(character_id), owner)
     return result
 
 
-def delete_hidden_character_profile(character_id: int, session_id: str, reason: str = "") -> bool:
+def delete_hidden_character_profile(
+    character_id: int,
+    session_id: str,
+    reason: str = "",
+    owner_shared_user_id: str = "",
+) -> bool:
+    owner = clean_shared_user_id(owner_shared_user_id)
     now = utc_now()
     with connect_db() as conn:
         row = conn.execute(
-            "SELECT * FROM hidden_character_profiles WHERE id = ? AND status = 'active' LIMIT 1",
-            (int(character_id),),
+            """
+            SELECT * FROM hidden_character_profiles
+            WHERE id = ? AND status = 'active' AND owner_shared_user_id = ?
+            LIMIT 1
+            """,
+            (int(character_id), owner),
         ).fetchone()
         if not row:
             return False
@@ -711,21 +773,26 @@ def find_character_profile_for_patch(
     conn: sqlite3.Connection,
     canonical_name: str,
     aliases: List[str],
+    owner_shared_user_id: str,
 ) -> Optional[Dict[str, object]]:
-    keys = {character_name_key(canonical_name)}
-    keys.update(character_name_key(alias) for alias in aliases)
-    keys.discard("")
-    if not keys:
+    owner = clean_shared_user_id(owner_shared_user_id)
+    scoped_keys = {scoped_character_name_key(owner, canonical_name)}
+    scoped_keys.update(scoped_character_name_key(owner, alias) for alias in aliases)
+    scoped_keys.discard("")
+    plain_keys = {character_name_key(canonical_name)}
+    plain_keys.update(character_name_key(alias) for alias in aliases)
+    plain_keys.discard("")
+    if not scoped_keys:
         return None
     direct = conn.execute(
         """
         SELECT *
         FROM hidden_character_profiles
-        WHERE status = 'active' AND name_key IN ({})
+        WHERE status = 'active' AND owner_shared_user_id = ? AND name_key IN ({})
         ORDER BY datetime(updated_at) DESC, id DESC
         LIMIT 1
-        """.format(",".join("?" for _ in keys)),
-        tuple(keys),
+        """.format(",".join("?" for _ in scoped_keys)),
+        (owner, *tuple(scoped_keys)),
     ).fetchone()
     if direct:
         return row_to_character_profile(direct)
@@ -733,16 +800,17 @@ def find_character_profile_for_patch(
         """
         SELECT *
         FROM hidden_character_profiles
-        WHERE status = 'active'
+        WHERE status = 'active' AND owner_shared_user_id = ?
         ORDER BY datetime(updated_at) DESC, id DESC
         LIMIT 200
-        """
+        """,
+        (owner,),
     ).fetchall()
     for row in rows:
         profile = row_to_character_profile(row)
         profile_keys = {character_name_key(str(profile.get("canonical_name") or ""))}
         profile_keys.update(character_name_key(alias) for alias in profile.get("aliases", []))
-        if keys.intersection(profile_keys):
+        if plain_keys.intersection(profile_keys):
             return profile
     return None
 
@@ -750,6 +818,7 @@ def find_character_profile_for_patch(
 def find_active_character_profile_by_id_for_patch(
     conn: sqlite3.Connection,
     character_id: object,
+    owner_shared_user_id: str,
 ) -> Optional[Dict[str, object]]:
     try:
         normalized_id = int(character_id or 0)
@@ -761,15 +830,19 @@ def find_active_character_profile_by_id_for_patch(
         """
         SELECT *
         FROM hidden_character_profiles
-        WHERE id = ? AND status = 'active'
+        WHERE id = ? AND status = 'active' AND owner_shared_user_id = ?
         LIMIT 1
         """,
-        (normalized_id,),
+        (normalized_id, clean_shared_user_id(owner_shared_user_id)),
     ).fetchone()
     return row_to_character_profile(row) if row else None
 
 
-def find_archived_character_profile_for_name_key(conn: sqlite3.Connection, name_key: str) -> Optional[Dict[str, object]]:
+def find_archived_character_profile_for_name_key(
+    conn: sqlite3.Connection,
+    name_key: str,
+    owner_shared_user_id: str,
+) -> Optional[Dict[str, object]]:
     key = str(name_key or "").strip()
     if not key:
         return None
@@ -777,11 +850,11 @@ def find_archived_character_profile_for_name_key(conn: sqlite3.Connection, name_
         """
         SELECT *
         FROM hidden_character_profiles
-        WHERE status != 'active' AND name_key = ?
+        WHERE status != 'active' AND name_key = ? AND owner_shared_user_id = ?
         ORDER BY datetime(updated_at) DESC, id DESC
         LIMIT 1
         """,
-        (key,),
+        (key, clean_shared_user_id(owner_shared_user_id)),
     ).fetchone()
     return row_to_character_profile(row) if row else None
 
@@ -804,7 +877,11 @@ def upsert_hidden_character_profile(
     visitor_ip: str,
     source_message_ids: List[int],
     source_type: str,
+    owner_shared_user_id: str = "",
 ) -> Dict[str, object]:
+    owner = clean_shared_user_id(owner_shared_user_id) or shared_user_id_for_device(visitor_ip)
+    if not owner:
+        return {"status": "skipped", "reason": "shared_user_binding_required"}
     character = decision.get("character") if isinstance(decision.get("character"), dict) else {}
     # Character image ownership is managed by explicit upload/generation/delete
     # flows. Do not trust model-emitted image id arrays during text upserts:
@@ -814,7 +891,7 @@ def upsert_hidden_character_profile(
     allow_character_image_patch = bool(decision.get("allow_image_patch"))
     canonical_name = clean_character_text(character.get("canonical_name"), 120)
     aliases = normalize_character_aliases(character.get("aliases"), canonical_name)
-    name_key = character_name_key(canonical_name or (aliases[0] if aliases else ""))
+    name_key = scoped_character_name_key(owner, canonical_name or (aliases[0] if aliases else ""))
     if not canonical_name or not name_key:
         return {"status": "skipped", "reason": "missing_name"}
 
@@ -822,12 +899,16 @@ def upsert_hidden_character_profile(
     patch_json = json.dumps(character, ensure_ascii=False)
     message_ids_json = json.dumps(sorted(set(int(item) for item in source_message_ids if int(item) > 0)), ensure_ascii=False)
     with connect_db() as conn:
-        existing = find_active_character_profile_by_id_for_patch(conn, decision.get("target_character_id"))
+        existing = find_active_character_profile_by_id_for_patch(
+            conn,
+            decision.get("target_character_id"),
+            owner,
+        )
         if not existing:
-            existing = find_character_profile_for_patch(conn, canonical_name, aliases)
+            existing = find_character_profile_for_patch(conn, canonical_name, aliases, owner)
         restoring_archived = False
         if not existing:
-            existing = find_archived_character_profile_for_name_key(conn, name_key)
+            existing = find_archived_character_profile_for_name_key(conn, name_key, owner)
             restoring_archived = existing is not None
         if existing:
             character_id = int(existing["id"])
@@ -886,7 +967,7 @@ def upsert_hidden_character_profile(
                     relationships_json = ?, reference_image_ids_json = ?,
                     avatar_image_ids_json = ?,
                     source_session_id = ?, source_message_ids_json = ?,
-                    source_visitor_ip = ?, confidence = ?, revision_count = revision_count + 1,
+                    source_visitor_ip = ?, owner_shared_user_id = ?, confidence = ?, revision_count = revision_count + 1,
                     status = 'active', updated_at = ?
                 WHERE id = ?
                 """,
@@ -904,6 +985,7 @@ def upsert_hidden_character_profile(
                     updates["source_session_id"],
                     updates["source_message_ids_json"],
                     updates["source_visitor_ip"],
+                    owner,
                     updates["confidence"],
                     updates["updated_at"],
                     character_id,
@@ -917,10 +999,10 @@ def upsert_hidden_character_profile(
                     canonical_name, name_key, aliases_json, visual_prompt,
                     negative_prompt, personality, background, relationships_json,
                     reference_image_ids_json, avatar_image_ids_json, source_session_id, source_message_ids_json,
-                    source_visitor_ip, scope, status, confidence, revision_count,
+                    source_visitor_ip, owner_shared_user_id, scope, status, confidence, revision_count,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'artifact_public', 'active', ?, 1, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'artifact_public', 'active', ?, 1, ?, ?)
                 """,
                 (
                     canonical_name,
@@ -936,6 +1018,7 @@ def upsert_hidden_character_profile(
                     session_id or "",
                     message_ids_json,
                     normalize_visitor_ip(visitor_ip),
+                    owner,
                     float(character.get("confidence") or 0.7),
                     now,
                     now,
@@ -962,7 +1045,7 @@ def upsert_hidden_character_profile(
                 now,
             ),
         )
-    sync_character_global_memory(int(character_id))
+    sync_character_global_memory(int(character_id), owner)
     return {
         "status": event_type,
         "character_id": character_id,
@@ -1044,10 +1127,14 @@ def format_hidden_character_agent_context(
     session_id: str,
     user_message: str,
     draw_batch: Optional[Dict[str, object]] = None,
+    owner_shared_user_id: str = "",
 ) -> str:
     messages = load_recent_character_messages(session_id)
     images = load_recent_character_images(session_id)
-    active_profiles = list_active_character_profiles(limit=40)
+    active_profiles = list_active_character_profiles(
+        limit=40,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     lines = [
         "当前用户输入：",
         clean_character_text(user_message, 1600),
@@ -1163,7 +1250,15 @@ def run_hidden_character_agent(
     ):
         return {"status": "skipped", "reason": "not_triggered"}
     started = time.perf_counter()
-    context = format_hidden_character_agent_context(session_id, user_message, draw_batch=draw_batch)
+    owner = shared_user_id_for_device(visitor_ip)
+    if not owner:
+        return {"status": "skipped", "reason": "shared_user_binding_required"}
+    context = format_hidden_character_agent_context(
+        session_id,
+        user_message,
+        draw_batch=draw_batch,
+        owner_shared_user_id=owner,
+    )
     if analysis_trace_id:
         record_analysis_trace(
             session_id=session_id,
@@ -1208,6 +1303,7 @@ def run_hidden_character_agent(
         visitor_ip=visitor_ip,
         source_message_ids=source_message_ids,
         source_type=source_type,
+        owner_shared_user_id=owner,
     )
     record_event(
         session_id,
@@ -1393,7 +1489,11 @@ def character_library_session_has_loadable_messages(conn: sqlite3.Connection, se
 def previous_character_library_context_candidate(
     conn: sqlite3.Connection,
     current_session_id: str,
+    owner_shared_user_id: str,
 ) -> Optional[sqlite3.Row]:
+    owner_devices = shared_user_device_ids(owner_shared_user_id)
+    if not owner_devices:
+        return None
     current = conn.execute(
         "SELECT id FROM sessions WHERE id = ?",
         (current_session_id,),
@@ -1413,6 +1513,7 @@ def previous_character_library_context_candidate(
 
     excluded = [current_session_id] + linked_ids
     placeholders = ",".join("?" for _ in excluded)
+    owner_placeholders = ",".join("?" for _ in owner_devices)
     rows = conn.execute(
         f"""
         SELECT s.id, s.visitor_ip, s.user_agent, s.started_at, s.ended_at, s.end_reason,
@@ -1422,6 +1523,7 @@ def previous_character_library_context_candidate(
           ON e.session_id = s.id
          AND e.event_type = 'session_start'
         WHERE s.id NOT IN ({placeholders})
+          AND s.visitor_ip IN ({owner_placeholders})
           AND e.id < ?
           AND EXISTS (
               SELECT 1
@@ -1434,7 +1536,7 @@ def previous_character_library_context_candidate(
         ORDER BY e.id DESC
         LIMIT 30
         """,
-        [*excluded, boundary_event_id],
+        [*excluded, *owner_devices, boundary_event_id],
     ).fetchall()
     for row in rows:
         if character_library_session_has_loadable_messages(conn, str(row["id"])):
@@ -1442,15 +1544,26 @@ def previous_character_library_context_candidate(
     return None
 
 
-def has_previous_character_library_context_session(session_id: str) -> bool:
+def has_previous_character_library_context_session(session_id: str, owner_shared_user_id: str) -> bool:
     with connect_db() as conn:
-        return previous_character_library_context_candidate(conn, session_id) is not None
+        return previous_character_library_context_candidate(
+            conn,
+            session_id,
+            owner_shared_user_id,
+        ) is not None
 
 
-def load_previous_character_library_context(session_id: str) -> Dict[str, object]:
+def load_previous_character_library_context(
+    session_id: str,
+    owner_shared_user_id: str,
+) -> Dict[str, object]:
     now = utc_now()
     with connect_db() as conn:
-        candidate = previous_character_library_context_candidate(conn, session_id)
+        candidate = previous_character_library_context_candidate(
+            conn,
+            session_id,
+            owner_shared_user_id,
+        )
         if candidate is None:
             return {"loaded": False, "session": None, "messages": [], "has_more": False}
         source_session_id = str(candidate["id"])
@@ -1469,7 +1582,11 @@ def load_previous_character_library_context(session_id: str) -> Dict[str, object
             (session_id, source_session_id, next_order, now),
         )
         source_start_event_id = int(candidate["start_event_id"])
-        next_candidate = previous_character_library_context_candidate(conn, session_id)
+        next_candidate = previous_character_library_context_candidate(
+            conn,
+            session_id,
+            owner_shared_user_id,
+        )
         has_more = bool(next_candidate is not None and int(next_candidate["start_event_id"]) < source_start_event_id)
     return {
         "loaded": True,
@@ -1484,9 +1601,15 @@ def load_previous_character_library_context(session_id: str) -> Dict[str, object
     }
 
 
-def compact_character_library_directives(limit: int = 50) -> List[Dict[str, object]]:
+def compact_character_library_directives(
+    limit: int = 50,
+    owner_shared_user_id: str = "",
+) -> List[Dict[str, object]]:
     try:
-        directives = list_active_artifact_directives(limit=limit)
+        directives = list_active_artifact_directives(
+            limit=limit,
+            owner_shared_user_id=owner_shared_user_id,
+        )
     except Exception:
         return []
     return [
@@ -1509,9 +1632,17 @@ def format_character_library_agent_context(
     attachments: List[ChatAttachment],
     uploaded_images: Optional[List[Dict[str, object]]] = None,
     draw_batch: Optional[Dict[str, object]] = None,
+    owner_shared_user_id: str = "",
 ) -> str:
-    all_profiles = list_active_character_profiles(limit=200)
-    mentioned_profiles = character_profiles_mentioned_in_text(user_message, limit=30)
+    all_profiles = list_active_character_profiles(
+        limit=200,
+        owner_shared_user_id=owner_shared_user_id,
+    )
+    mentioned_profiles = character_profiles_mentioned_in_text(
+        user_message,
+        limit=30,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     profiles = merge_character_profile_order(mentioned_profiles, all_profiles)
     recent_messages = load_recent_character_library_messages(session_id)
     lines = [
@@ -1604,7 +1735,9 @@ def format_character_library_agent_context(
             )
         )
     lines.append("")
-    directives = compact_character_library_directives()
+    directives = compact_character_library_directives(
+        owner_shared_user_id=owner_shared_user_id,
+    )
     lines.append("现有成果小剧场/成果写作指令：")
     lines.append(json.dumps(directives, ensure_ascii=False)[:5000] if directives else "[]")
     lines.append("")
@@ -1649,12 +1782,15 @@ def apply_character_library_agent_decision(
     source_message_ids: List[int],
     allowed_image_ids: Optional[List[int]] = None,
 ) -> Dict[str, object]:
+    owner = shared_user_id_for_device(visitor_ip)
+    if not owner:
+        raise HTTPException(status_code=409, detail="shared user binding required")
     action = str(decision.get("action") or "noop")
     result: Dict[str, object] = {"action": action, "character": None, "directive": None}
     target_id = decision.get("target_character_id")
     if action == "delete_character" and target_id:
         try:
-            profile = get_character_library_profile(int(target_id))
+            profile = get_character_library_profile(int(target_id), owner)
             result["character"] = {
                 "status": "delete_confirmation_required",
                 "id": int(target_id),
@@ -1685,7 +1821,7 @@ def apply_character_library_agent_decision(
             }
         if target_id and not character.get("canonical_name"):
             try:
-                existing = get_character_library_profile(int(target_id))
+                existing = get_character_library_profile(int(target_id), owner)
                 character["canonical_name"] = existing.get("canonical_name", "")
                 character["aliases"] = existing.get("aliases", [])
             except Exception:
@@ -1703,6 +1839,7 @@ def apply_character_library_agent_decision(
             visitor_ip=visitor_ip,
             source_message_ids=source_message_ids,
             source_type="character_library",
+            owner_shared_user_id=owner,
         )
         maybe_start_character_avatar_job(result["character"], visitor_ip)
         maybe_start_character_image_tasks(result["character"], decision.get("image_tasks"), visitor_ip)
@@ -1719,6 +1856,7 @@ def apply_character_library_agent_decision(
             session_id=session_id,
             visitor_ip=visitor_ip,
             source_message_ids=source_message_ids,
+            owner_shared_user_id=owner,
         )
     maybe_record_character_operation_memory(decision, result, visitor_ip, session_id=session_id)
     return result
@@ -1761,7 +1899,8 @@ def maybe_start_character_photo_job_if_missing(character_result: object, visitor
 
     def worker() -> None:
         try:
-            profile = character_profile_by_id(character_id)
+            owner = shared_user_id_for_device(visitor_ip)
+            profile = character_profile_by_id(character_id, owner)
             if normalize_character_image_ids(profile.get("reference_image_ids") or []):
                 return
             if not clean_character_text(profile.get("visual_prompt"), 500):
@@ -1779,11 +1918,21 @@ def maybe_start_character_photo_job_if_missing(character_result: object, visitor
     thread.start()
 
 
-def character_profile_by_id(character_id: int) -> Dict[str, object]:
+def character_profile_by_id(
+    character_id: int,
+    owner_shared_user_id: str = "",
+) -> Dict[str, object]:
+    owner = clean_shared_user_id(owner_shared_user_id)
+    if not owner:
+        raise KeyError("character not found")
     with connect_db() as conn:
         row = conn.execute(
-            "SELECT * FROM hidden_character_profiles WHERE id = ? AND status = 'active' LIMIT 1",
-            (int(character_id),),
+            """
+            SELECT * FROM hidden_character_profiles
+            WHERE id = ? AND status = 'active' AND owner_shared_user_id = ?
+            LIMIT 1
+            """,
+            (int(character_id), owner),
         ).fetchone()
     if not row:
         raise KeyError("character not found")
@@ -1797,11 +1946,13 @@ def append_character_image_ids(
     source_session_id: str = "",
     source_message_ids: Optional[List[int]] = None,
     reason: str = "manual or automatic character image generation",
+    owner_shared_user_id: str = "",
 ) -> Dict[str, object]:
     ids = normalize_character_image_ids(image_ids)
     if not ids:
         return {"status": "skipped", "reason": "no_image_ids"}
-    profile = character_profile_by_id(int(character_id))
+    owner = clean_shared_user_id(owner_shared_user_id)
+    profile = character_profile_by_id(int(character_id), owner)
     field = "avatar_image_ids_json" if kind == "avatar" else "reference_image_ids_json"
     existing_key = "avatar_image_ids" if kind == "avatar" else "reference_image_ids"
     merged = merge_character_lists(
@@ -1815,9 +1966,9 @@ def append_character_image_ids(
             f"""
             UPDATE hidden_character_profiles
             SET {field} = ?, updated_at = ?
-            WHERE id = ? AND status = 'active'
+            WHERE id = ? AND status = 'active' AND owner_shared_user_id = ?
             """,
-            (json.dumps(merged, ensure_ascii=False), now, int(character_id)),
+            (json.dumps(merged, ensure_ascii=False), now, int(character_id), owner),
         )
         conn.execute(
             """
@@ -1837,7 +1988,7 @@ def append_character_image_ids(
                 now,
             ),
         )
-    sync_character_global_memory(int(character_id))
+    sync_character_global_memory(int(character_id), owner)
     return {"status": "updated", "character_id": int(character_id), "kind": kind, "image_ids": ids}
 
 
@@ -1848,13 +1999,20 @@ def attach_character_scene_images(
     visitor_ip: str,
     source_message_ids: Optional[List[int]] = None,
 ) -> Dict[str, object]:
+    owner = shared_user_id_for_device(visitor_ip)
+    if not owner:
+        return {"status": "skipped", "reason": "shared_user_binding_required", "characters": [], "image_ids": []}
     images = draw_batch.get("images") if isinstance(draw_batch.get("images"), list) else []
     image_ids = normalize_character_image_ids([image.get("id") for image in images if isinstance(image, dict)])
     if not image_ids:
         return {"status": "skipped", "reason": "no_image_ids", "characters": [], "image_ids": []}
     optimized_prompt = clean_character_text(draw_batch.get("optimized_prompt"), 4000)
     search_text = "\n".join([str(prompt_text or ""), optimized_prompt])
-    profiles = character_profiles_mentioned_in_text(search_text, limit=16)
+    profiles = character_profiles_mentioned_in_text(
+        search_text,
+        limit=16,
+        owner_shared_user_id=owner,
+    )
     if not profiles:
         record_event(
             session_id,
@@ -1875,6 +2033,7 @@ def attach_character_scene_images(
             source_session_id=session_id,
             source_message_ids=source_message_ids or [],
             reason="character scene image generated from character library chat",
+            owner_shared_user_id=owner,
         )
         linked.append(
             {
@@ -1895,7 +2054,7 @@ def attach_character_scene_images(
     )
     for item in linked:
         try:
-            sync_character_global_memory(int(item.get("id") or 0))
+            sync_character_global_memory(int(item.get("id") or 0), owner)
         except Exception:
             pass
     return {"status": "updated", "characters": linked, "image_ids": image_ids}
@@ -1939,7 +2098,8 @@ def character_image_prompt(profile: Dict[str, object], kind: str, prompt_hint: s
 
 def generate_character_image(character_id: int, kind: str, visitor_ip: str, prompt_hint: str = "") -> Dict[str, object]:
     normalized_kind = "avatar" if str(kind or "").strip().lower() == "avatar" else "photo"
-    profile = character_profile_by_id(int(character_id))
+    owner = shared_user_id_for_device(visitor_ip)
+    profile = character_profile_by_id(int(character_id), owner)
     status = public_image_model_status()
     if not status.get("available"):
         raise RuntimeError("图像生成模型未配置或不可用，无法生成图片")
@@ -1985,7 +2145,12 @@ def generate_character_image(character_id: int, kind: str, visitor_ip: str, prom
     )
     images = batch.get("images") if isinstance(batch.get("images"), list) else []
     image_ids = normalize_character_image_ids([image.get("id") for image in images if isinstance(image, dict)])
-    append_result = append_character_image_ids(int(character_id), image_ids, normalized_kind)
+    append_result = append_character_image_ids(
+        int(character_id),
+        image_ids,
+        normalized_kind,
+        owner_shared_user_id=owner,
+    )
     record_event(
         None,
         "character_image_generated",
@@ -2002,7 +2167,7 @@ def generate_character_image(character_id: int, kind: str, visitor_ip: str, prom
         "kind": normalized_kind,
         "batch": batch,
         "image_ids": image_ids,
-        "character": get_character_library_profile(int(character_id)),
+        "character": get_character_library_profile(int(character_id), owner),
     }
 
 
@@ -2043,7 +2208,8 @@ def maybe_start_character_image_tasks(character_result: object, image_tasks: obj
 
 
 def delete_character_image(character_id: int, image_id: int, visitor_ip: str) -> Dict[str, object]:
-    profile = character_profile_by_id(int(character_id))
+    owner = shared_user_id_for_device(visitor_ip)
+    profile = character_profile_by_id(int(character_id), owner)
     avatar_ids = normalize_character_image_ids(profile.get("avatar_image_ids") or [])
     reference_ids = normalize_character_image_ids(profile.get("reference_image_ids") or [])
     target_id = int(image_id)
@@ -2061,13 +2227,14 @@ def delete_character_image(character_id: int, image_id: int, visitor_ip: str) ->
             UPDATE hidden_character_profiles
             SET avatar_image_ids_json = ?, reference_image_ids_json = ?,
                 revision_count = revision_count + 1, updated_at = ?
-            WHERE id = ? AND status = 'active'
+            WHERE id = ? AND status = 'active' AND owner_shared_user_id = ?
             """,
             (
                 json.dumps(new_avatar_ids, ensure_ascii=False),
                 json.dumps(new_reference_ids, ensure_ascii=False),
                 now,
                 int(character_id),
+                owner,
             ),
         )
         conn.execute(
@@ -2090,13 +2257,14 @@ def delete_character_image(character_id: int, image_id: int, visitor_ip: str) ->
         visitor_ip,
         {"character_id": int(character_id), "image_id": target_id},
     )
-    sync_character_global_memory(int(character_id))
-    return {"ok": True, "character": get_character_library_profile(int(character_id))}
+    sync_character_global_memory(int(character_id), owner)
+    return {"ok": True, "character": get_character_library_profile(int(character_id), owner)}
 
 
 def ensure_character_avatar_image(character_id: int, visitor_ip: str) -> Dict[str, object]:
+    owner = shared_user_id_for_device(visitor_ip)
     try:
-        profile = character_profile_by_id(int(character_id))
+        profile = character_profile_by_id(int(character_id), owner)
     except KeyError:
         return {"status": "not_found"}
     if normalize_character_image_ids(profile.get("avatar_image_ids") or []):
@@ -2123,7 +2291,10 @@ def maybe_record_character_operation_memory(
     name = str(character_result.get("canonical_name") or "").strip()
     if not name and character_result.get("id"):
         try:
-            profile = get_character_library_profile(int(character_result["id"]))
+            profile = get_character_library_profile(
+                int(character_result["id"]),
+                shared_user_id_for_device(visitor_ip),
+            )
             name = str(profile.get("canonical_name") or "").strip()
         except Exception:
             name = f"#{character_result.get('id')}"
@@ -2258,9 +2429,16 @@ def compact_character_profile(profile: Dict[str, object], max_prompt_chars: int 
     return "\n".join(lines)
 
 
-def format_hidden_character_context_for_chat(user_message: str, limit: int = HIDDEN_CHARACTER_CHAT_CONTEXT_LIMIT) -> str:
+def format_hidden_character_context_for_chat(
+    user_message: str,
+    limit: int = HIDDEN_CHARACTER_CHAT_CONTEXT_LIMIT,
+    owner_shared_user_id: str = "",
+) -> str:
     matched: List[Dict[str, object]] = []
-    active_profiles = list_active_character_profiles(limit=80)
+    active_profiles = list_active_character_profiles(
+        limit=80,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     for profile in active_profiles:
         if character_profile_matches_message(profile, user_message):
             matched.append(profile)
@@ -2284,9 +2462,14 @@ def format_hidden_character_context_for_chat(user_message: str, limit: int = HID
 def format_hidden_character_context_for_artifacts(
     limit: int = HIDDEN_CHARACTER_ARTIFACT_CONTEXT_LIMIT,
     focus_text: str = "",
+    owner_shared_user_id: str = "",
 ) -> str:
     max_rows = max(1, int(limit))
-    profiles = list_active_character_profiles(limit=max(80, max_rows))
+    owner = clean_shared_user_id(owner_shared_user_id)
+    profiles = list_active_character_profiles(
+        limit=max(80, max_rows),
+        owner_shared_user_id=owner,
+    )
     if not profiles:
         return ""
     with connect_db() as conn:
@@ -2294,9 +2477,11 @@ def format_hidden_character_context_for_artifacts(
             """
             SELECT title, summary, content
             FROM idle_agent_artifacts
+            WHERE owner_shared_user_id = ?
             ORDER BY id DESC
             LIMIT 12
-            """
+            """,
+            (owner,),
         ).fetchall()
     recent_text = "\n".join(
         f"{row['title'] or ''}\n{row['summary'] or ''}\n{row['content'] or ''}" for row in rows

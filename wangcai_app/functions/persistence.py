@@ -108,6 +108,23 @@ def _init_db_unlocked() -> None:
                 end_reason TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS tutorial_sessions (
+                session_id TEXT PRIMARY KEY,
+                tutorial_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS tutorial_artifact_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tutorial_id TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -166,6 +183,10 @@ def _init_db_unlocked() -> None:
                 ON analysis_trace_events(trace_id, id);
             CREATE INDEX IF NOT EXISTS idx_sessions_started
                 ON sessions(started_at);
+            CREATE INDEX IF NOT EXISTS idx_tutorial_sessions_tutorial
+                ON tutorial_sessions(tutorial_id, device_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_tutorial_artifact_runs_scope
+                ON tutorial_artifact_runs(tutorial_id, device_id, created_at);
 
             CREATE TABLE IF NOT EXISTS memory_compression_cache (
                 cache_key TEXT PRIMARY KEY,
@@ -221,6 +242,16 @@ def _init_db_unlocked() -> None:
                 host_updated_at TEXT,
                 inherit_assistant_profile INTEGER NOT NULL DEFAULT 0,
                 profile_owner_updated_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS shared_user_credentials (
+                shared_user_id TEXT PRIMARY KEY,
+                algorithm TEXT NOT NULL DEFAULT 'pbkdf2_sha256',
+                iterations INTEGER NOT NULL,
+                salt TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS curated_memory_vectors (
@@ -285,6 +316,8 @@ def _init_db_unlocked() -> None:
                 title TEXT NOT NULL,
                 artifact_type TEXT NOT NULL,
                 content TEXT NOT NULL,
+                is_public INTEGER NOT NULL DEFAULT 0,
+                published_at TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(run_id) REFERENCES idle_agent_runs(id) ON DELETE CASCADE
             );
@@ -472,6 +505,10 @@ def _init_db_unlocked() -> None:
         ensure_column(conn, "idle_agent_artifacts", "episode_index", "INTEGER")
         ensure_column(conn, "idle_agent_artifacts", "summary", "TEXT")
         ensure_column(conn, "idle_agent_artifacts", "likes", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "idle_agent_artifacts", "owner_shared_user_id", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "idle_agent_artifacts", "is_public", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "idle_agent_artifacts", "published_at", "TEXT")
+        ensure_column(conn, "idle_agent_runs", "owner_shared_user_id", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "generated_images", "batch_id", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "generated_images", "source_type", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "generated_images", "source_id", "TEXT NOT NULL DEFAULT ''")
@@ -490,8 +527,10 @@ def _init_db_unlocked() -> None:
         ensure_column(conn, "hidden_character_profiles", "scope", "TEXT NOT NULL DEFAULT 'artifact_public'")
         ensure_column(conn, "hidden_character_profiles", "status", "TEXT NOT NULL DEFAULT 'active'")
         ensure_column(conn, "hidden_character_profiles", "revision_count", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "hidden_character_profiles", "owner_shared_user_id", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "hidden_artifact_directives", "source_visitor_ip", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "hidden_artifact_directives", "revision_count", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "hidden_artifact_directives", "owner_shared_user_id", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "shared_user_bindings", "shared_user_id", "TEXT NOT NULL DEFAULT ''")
         ensure_column(conn, "shared_user_bindings", "share_chat_history", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "shared_user_bindings", "is_host", "INTEGER NOT NULL DEFAULT 0")
@@ -505,6 +544,21 @@ def _init_db_unlocked() -> None:
             CREATE INDEX IF NOT EXISTS idx_shared_user_bindings_profile_owner
                 ON shared_user_bindings(shared_user_id, inherit_assistant_profile, profile_owner_updated_at, updated_at)
             """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_idle_agent_artifacts_owner ON idle_agent_artifacts(owner_shared_user_id, id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_idle_agent_artifacts_public ON idle_agent_artifacts(is_public, published_at, id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_idle_agent_runs_owner ON idle_agent_runs(owner_shared_user_id, id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_hidden_character_profiles_owner ON hidden_character_profiles(owner_shared_user_id, status, updated_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_hidden_artifact_directives_owner ON hidden_artifact_directives(owner_shared_user_id, status, priority, updated_at)"
         )
         conn.execute(
             """
@@ -550,8 +604,9 @@ def _init_db_unlocked() -> None:
         conn.execute(
             """
             DELETE FROM curated_memories
-            WHERE importance_label = 'artifact'
+            WHERE importance_label IN ('artifact', 'characters')
                OR source_session_id LIKE 'artifact-%'
+               OR source_session_id LIKE 'character-profile-%'
             """
         )
         if IDLE_AGENT_CUSTOM_PROMPT_DEFAULT:

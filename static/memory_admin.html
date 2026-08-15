@@ -6,7 +6,7 @@
     <title>旺财记忆库</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
     <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
-    <link rel="stylesheet" href="/static/memory_admin.css?v=20260617_character_memory_global" />
+    <link rel="stylesheet" href="/static/memory_admin.css?v=20260814_shared_user_memory_auth" />
   </head>
   <body>
     <main class="admin-shell">
@@ -30,7 +30,6 @@
             <option value="identity">identity</option>
             <option value="rule">rule</option>
             <option value="persona">persona</option>
-            <option value="artifact">artifact</option>
             <option value="risk">risk</option>
             <option value="diary">diary</option>
             <option value="event">event</option>
@@ -56,7 +55,6 @@
               <option value="identity">identity</option>
               <option value="rule">rule</option>
               <option value="persona">persona</option>
-              <option value="artifact">artifact</option>
               <option value="risk">risk</option>
               <option value="diary">diary</option>
               <option value="event">event</option>
@@ -66,7 +64,7 @@
           </label>
           <label class="field" for="newIp">
             <span>关联设备身份</span>
-            <input id="newIp" type="text" autocomplete="off" placeholder="留空为全局，例如 device:..." />
+            <input id="newIp" type="text" autocomplete="off" placeholder="留空则关联当前共享用户的主机设备" />
           </label>
           <label class="field" for="newTimeline">
             <span>Timeline</span>
@@ -88,7 +86,8 @@
         <div id="memoryList" class="memory-list"></div>
       </section>
     </main>
-    <script src="/static/memory_admin.js?v=20260617_device_identity_only"></script>
+    <script src="/static/device_identity.js?v=20260816_wangcai_2_4"></script>
+    <script src="/static/memory_admin.js?v=20260816_wangcai_2_4"></script>
     <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
   </body>
 </html>

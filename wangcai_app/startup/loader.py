@@ -17,6 +17,7 @@ SOURCE_FILES = (
     "wangcai_app/functions/web_search.py",
     "wangcai_app/startup/app_setup.py",
     "wangcai_app/functions/persistence.py",
+    "wangcai_app/functions/shared_user_auth.py",
     "wangcai_app/functions/sessions.py",
     "wangcai_app/functions/memory.py",
     "wangcai_app/functions/recent_state.py",
@@ -28,6 +29,7 @@ SOURCE_FILES = (
     "wangcai_app/functions/workers.py",
     "wangcai_app/functions/background_dashboard.py",
     "wangcai_app/functions/chat.py",
+    "wangcai_app/functions/tutorial.py",
     "wangcai_app/routes/pages.py",
     "wangcai_app/routes/api.py",
 )

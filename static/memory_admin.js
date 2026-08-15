@@ -10,8 +10,12 @@ const newIp = document.getElementById("newIp");
 const newTimeline = document.getElementById("newTimeline");
 const newContent = document.getElementById("newContent");
 const createButton = document.getElementById("createButton");
+const fetch = (input, init = {}) => window.fetch(input, {
+  ...init,
+  headers: WangcaiDeviceIdentity.headers(init.headers || {}),
+});
 
-const LABELS = ["preference", "identity", "rule", "persona", "characters", "artifact", "risk", "diary", "event", "fact", "other"];
+const LABELS = ["preference", "identity", "rule", "persona", "risk", "diary", "event", "fact", "other"];
 let refreshTimer = null;
 
 function setStatus(text) {
@@ -184,7 +188,7 @@ function renderMemories(payload) {
     const deviceInput = document.createElement("input");
     deviceInput.type = "text";
     deviceInput.value = item.device_id || item.visitor_ip || "";
-    deviceInput.placeholder = "留空为全局，例如 device:...";
+    deviceInput.placeholder = "仅可选择当前共享用户已绑定的设备";
     deviceField.append(deviceTitle, deviceInput);
 
     const contentField = document.createElement("label");
@@ -236,7 +240,7 @@ function buildQuery() {
 
 async function ensureOk(response) {
   if (response.status === 401) {
-    window.location.href = "/memory-admin";
+    window.location.href = "/analysis-login?next=/memory-admin";
     throw new Error("需要重新登录");
   }
   if (!response.ok) {

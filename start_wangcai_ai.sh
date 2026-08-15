@@ -8,7 +8,11 @@ WEB_PORT=${WEB_PORT:-7777}
 PYTHON=${PYTHON:-/opt/conda/bin/python3}
 LOG_DIR=${LOG_DIR:-logs}
 PID_FILE=${PID_FILE:-wangcai_ai.pid}
+WATCHDOG_SCRIPT=${WANGCAI_BACKGROUND_WATCHDOG_SCRIPT:-$PWD/background_process_watchdog.sh}
+WATCHDOG_PID_FILE=${WANGCAI_BACKGROUND_WATCHDOG_PID_FILE:-wangcai_background_watchdog.pid}
+WATCHDOG_LOCK_DIR=${WANGCAI_BACKGROUND_WATCHDOG_LOCK_DIR:-/tmp/wangcai_background_process_watchdog.lock}
 LOG_FILE="$LOG_DIR/wangcai_ai_${WEB_PORT}_$(date +%Y%m%d_%H%M%S).log"
+WATCHDOG_LOG_FILE="$LOG_DIR/background_watchdog_$(date +%Y%m%d_%H%M%S).log"
 
 mkdir -p "$LOG_DIR" data
 
@@ -52,3 +56,41 @@ if ! kill -0 "$PID" >/dev/null 2>&1; then
 fi
 
 echo "wangcai_ai started with PID $PID"
+
+if [ -x "$WATCHDOG_SCRIPT" ]; then
+  if [ -f "$WATCHDOG_PID_FILE" ]; then
+    OLD_WATCHDOG_PID=$(cat "$WATCHDOG_PID_FILE" 2>/dev/null || true)
+    if [ -n "$OLD_WATCHDOG_PID" ] && kill -0 "$OLD_WATCHDOG_PID" >/dev/null 2>&1; then
+      kill "$OLD_WATCHDOG_PID" >/dev/null 2>&1 || true
+      for _ in $(seq 1 20); do
+        if ! kill -0 "$OLD_WATCHDOG_PID" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 0.1
+      done
+    fi
+    rm -f "$WATCHDOG_PID_FILE"
+  fi
+  if [ -d "$WATCHDOG_LOCK_DIR" ]; then
+    LOCK_PID=$(cat "$WATCHDOG_LOCK_DIR/pid" 2>/dev/null || true)
+    if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" >/dev/null 2>&1; then
+      echo "ERROR: background process watchdog lock belongs to live PID $LOCK_PID"
+      exit 1
+    fi
+    rm -f "$WATCHDOG_LOCK_DIR/pid"
+    rmdir "$WATCHDOG_LOCK_DIR" 2>/dev/null || true
+  fi
+  nohup env WANGCAI_PID_FILE="$PID_FILE" "$WATCHDOG_SCRIPT" \
+    > "$WATCHDOG_LOG_FILE" 2>&1 &
+  WATCHDOG_PID=$!
+  echo "$WATCHDOG_PID" > "$WATCHDOG_PID_FILE"
+  sleep 0.5
+  if ! kill -0 "$WATCHDOG_PID" >/dev/null 2>&1; then
+    echo "ERROR: background process watchdog failed to start. Last log lines:"
+    tail -n 40 "$WATCHDOG_LOG_FILE" || true
+    rm -f "$WATCHDOG_PID_FILE"
+    exit 1
+  fi
+  echo "Background process watchdog started with PID $WATCHDOG_PID"
+  echo "Watchdog log file: $WATCHDOG_LOG_FILE"
+fi

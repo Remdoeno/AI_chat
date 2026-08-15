@@ -1,0 +1,189 @@
+.wangcai-tutorial-root {
+  display: contents;
+}
+
+.wangcai-tutorial-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  background: rgba(5, 8, 12, 0.7);
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.wangcai-tutorial-root[hidden] {
+  display: none;
+}
+
+.wangcai-tutorial-root.is-dialog-paused .wangcai-tutorial-backdrop,
+.wangcai-tutorial-root.is-dialog-paused .wangcai-tutorial-card {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.wangcai-tutorial-highlight {
+  position: relative !important;
+  z-index: 2147483001 !important;
+  isolation: isolate;
+  box-shadow: 0 0 0 4px #55d4b2, 0 0 0 10px rgba(85, 212, 178, 0.25) !important;
+}
+
+.wangcai-tutorial-card {
+  position: fixed;
+  z-index: 2147483002;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(700px, calc(100vh - 28px));
+  overflow: auto;
+  pointer-events: auto;
+  color: #f6f0df;
+  background: #151b21;
+  border: 1px solid #3c4a50;
+  border-top: 4px solid #55d4b2;
+  border-radius: 8px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.48);
+  padding: 20px;
+}
+
+.wangcai-tutorial-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: -8px -8px 8px;
+  padding: 8px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.wangcai-tutorial-drag-handle:active {
+  cursor: grabbing;
+}
+
+.wangcai-tutorial-drag-handle .wangcai-tutorial-kicker,
+.wangcai-tutorial-drag-handle .wangcai-tutorial-step {
+  margin: 0;
+}
+
+.wangcai-tutorial-kicker,
+.wangcai-tutorial-step {
+  margin: 0;
+  color: #55d4b2;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.wangcai-tutorial-card h2 {
+  margin: 8px 0 10px;
+  font-size: 23px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.wangcai-tutorial-card p {
+  margin: 0 0 12px;
+  color: #c9d2d8;
+  line-height: 1.65;
+}
+
+.wangcai-tutorial-sandbox {
+  padding: 9px 11px;
+  color: #f7d771 !important;
+  background: #292619;
+  border-left: 3px solid #f7c948;
+  font-size: 13px;
+}
+
+.wangcai-tutorial-actions,
+.wangcai-tutorial-nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.wangcai-tutorial-actions {
+  margin: 14px 0;
+}
+
+.wangcai-tutorial-nav {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #303b43;
+}
+
+.wangcai-tutorial-card button {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #46545c;
+  border-radius: 6px;
+  color: #f6f0df;
+  background: #222b31;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wangcai-tutorial-card button:hover {
+  border-color: #55d4b2;
+}
+
+.wangcai-tutorial-card button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.wangcai-tutorial-card .tutorial-primary {
+  margin-left: auto;
+  color: #07110e;
+  background: #55d4b2;
+  border-color: #55d4b2;
+}
+
+.wangcai-tutorial-card .tutorial-skip {
+  color: #aeb8c0;
+  background: transparent;
+  border-color: transparent;
+}
+
+.wangcai-tutorial-demo {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.wangcai-tutorial-demo textarea {
+  width: 100%;
+  min-height: 82px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 10px;
+  color: #f6f0df;
+  background: #0d1216;
+  border: 1px solid #46545c;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.wangcai-tutorial-result {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.wangcai-tutorial-result img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #090d10;
+}
+
+.wangcai-tutorial-result h3,
+.wangcai-tutorial-result p {
+  margin: 0;
+}

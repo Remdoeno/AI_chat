@@ -22,7 +22,7 @@ async function loadAuthStatus() {
   oldPasswordField.hidden = !configured;
   oldPassword.required = configured;
   authHint.textContent = configured
-    ? "输入旧管理员密码后可修改 memory 和 analysis mode 共用的管理员密码。"
+    ? "输入旧管理员密码后可修改记忆后台、告警和后台观测共用的管理员密码。"
     : "首次启动需要先设置管理员密码，之后才能进入聊天主页。";
   setAuthStatus(configured ? "等待修改" : "等待首次设置");
 }

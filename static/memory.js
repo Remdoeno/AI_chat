@@ -19,7 +19,7 @@ const memoryList = document.getElementById("memoryList");
 const retrievalList = document.getElementById("retrievalList");
 const operationList = document.getElementById("operationList");
 
-const LABELS = ["preference", "identity", "rule", "persona", "characters", "artifact", "risk", "diary", "event", "fact", "other"];
+const LABELS = ["preference", "identity", "rule", "persona", "risk", "diary", "event", "fact", "other"];
 
 const DEVICE_STORAGE_KEY = "wangcai_device_id";
 const LEGACY_DEVICE_STORAGE_KEY = "qwen_device_id";
@@ -48,9 +48,12 @@ function ensureDeviceId() {
 }
 
 function deviceIdentityHeaders() {
-  return {
+  const headers = {
     "X-Wangcai-Device-Id": ensureDeviceId(),
   };
+  const tutorialId = String(localStorage.getItem("wangcai_tutorial_active_id") || "").trim();
+  if (/^[A-Za-z0-9_-]{12,96}$/.test(tutorialId)) headers["X-Wangcai-Tutorial-Id"] = tutorialId;
+  return headers;
 }
 
 function formatTime(value) {
@@ -196,6 +199,10 @@ async function fetchJson(url, options = {}) {
     ...options,
     headers: deviceIdentityHeaders(),
   });
+  if (response.status === 401) {
+    window.location.href = "/analysis-login?next=/memory";
+    throw new Error("需要共享用户密码");
+  }
   if (!response.ok) {
     throw new Error(await response.text());
   }
@@ -208,6 +215,10 @@ async function sendJson(url, method, payload) {
     headers: jsonHeaders(),
     body: JSON.stringify(payload),
   });
+  if (response.status === 401) {
+    window.location.href = "/analysis-login?next=/memory";
+    throw new Error("需要共享用户密码");
+  }
   if (!response.ok) {
     throw new Error(await response.text());
   }

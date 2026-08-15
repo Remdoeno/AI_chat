@@ -211,18 +211,133 @@ def idle_agent_decision_needs_repair(decision: Dict[str, object]) -> bool:
     return False
 
 
-def create_idle_agent_run(task_type: str, title: str, prompt_summary: str, status: str = "running") -> int:
+def idle_writer_owner_shared_user_id() -> str:
+    configured = clean_shared_user_id(get_app_setting("idle_writer_owner_shared_user_id", ""))
+    if configured:
+        return configured
+    with connect_db() as conn:
+        row = conn.execute(
+            """
+            SELECT owner_shared_user_id
+            FROM idle_agent_artifacts
+            WHERE TRIM(owner_shared_user_id) != ''
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    return clean_shared_user_id(str(row["owner_shared_user_id"] or "")) if row else ""
+
+
+def user_controls_idle_writer(shared_user_id: str) -> bool:
+    owner = clean_shared_user_id(shared_user_id)
+    if not owner:
+        return False
+    configured = idle_writer_owner_shared_user_id()
+    if not configured:
+        set_app_setting("idle_writer_owner_shared_user_id", owner)
+        return True
+    return hmac.compare_digest(configured, owner)
+
+
+def artifact_belongs_to_shared_user(artifact_id: int, shared_user_id: str) -> bool:
+    owner = clean_shared_user_id(shared_user_id)
+    if not owner:
+        return False
+    with connect_db() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM idle_agent_artifacts WHERE id = ? AND owner_shared_user_id = ? LIMIT 1",
+            (int(artifact_id), owner),
+        ).fetchone()
+    return row is not None
+
+
+def artifact_visible_to_shared_user(artifact_id: int, shared_user_id: str) -> bool:
+    viewer = clean_shared_user_id(shared_user_id)
+    if not viewer:
+        return False
+    with connect_db() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM idle_agent_artifacts
+            WHERE id = ?
+              AND (owner_shared_user_id = ? OR is_public = 1)
+            LIMIT 1
+            """,
+            (int(artifact_id), viewer),
+        ).fetchone()
+    return row is not None
+
+
+def set_artifact_public(artifact_id: int, shared_user_id: str, is_public: bool) -> Dict[str, object]:
+    owner = clean_shared_user_id(shared_user_id)
+    if not owner:
+        raise KeyError(f"artifact {artifact_id} not found")
+    now = utc_now()
+    with connect_db() as conn:
+        row = conn.execute(
+            """
+            UPDATE idle_agent_artifacts
+            SET is_public = ?,
+                published_at = CASE WHEN ? = 1 THEN COALESCE(published_at, ?) ELSE NULL END
+            WHERE id = ? AND owner_shared_user_id = ?
+            RETURNING id, is_public, published_at
+            """,
+            (int(bool(is_public)), int(bool(is_public)), now, int(artifact_id), owner),
+        ).fetchone()
+    if row is None:
+        raise KeyError(f"artifact {artifact_id} not found")
+    return {
+        "id": int(row["id"]),
+        "is_public": bool(row["is_public"]),
+        "published_at": str(row["published_at"] or ""),
+    }
+
+
+def artifact_comment_belongs_to_shared_user(comment_id: int, shared_user_id: str) -> bool:
+    owner = clean_shared_user_id(shared_user_id)
+    if not owner:
+        return False
+    with connect_db() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM idle_artifact_comments c
+            JOIN idle_agent_artifacts a ON a.id = c.artifact_id
+            WHERE c.id = ? AND a.owner_shared_user_id = ?
+            LIMIT 1
+            """,
+            (int(comment_id), owner),
+        ).fetchone()
+    return row is not None
+
+
+def create_idle_agent_run(
+    task_type: str,
+    title: str,
+    prompt_summary: str,
+    status: str = "running",
+    owner_shared_user_id: str = "",
+) -> int:
     now = utc_now()
     with connect_db() as conn:
         cur = conn.execute(
             """
             INSERT INTO idle_agent_runs (
                 task_type, title, prompt_summary, status,
-                started_at, updated_at
+                started_at, updated_at, owner_shared_user_id
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (task_type or "other", title or "未命名任务", prompt_summary, status, now, now),
+            (
+                task_type or "other",
+                title or "未命名任务",
+                prompt_summary,
+                status,
+                now,
+                now,
+                clean_shared_user_id(owner_shared_user_id),
+            ),
         )
         return int(cur.lastrowid)
 
@@ -822,6 +937,7 @@ def save_idle_agent_artifact(
     series_title: str = "",
     episode_index: Optional[int] = None,
     summary: str = "",
+    owner_shared_user_id: str = "",
 ) -> int:
     clean_title = normalize_idle_artifact_terms(title)
     clean_series = normalize_idle_artifact_terms(series_title)
@@ -844,9 +960,10 @@ def save_idle_agent_artifact(
             """
             INSERT INTO idle_agent_artifacts (
                 run_id, title, artifact_type, content,
-                series_title, episode_index, summary, created_at
+                series_title, episode_index, summary, created_at,
+                owner_shared_user_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 int(run_id),
@@ -857,6 +974,7 @@ def save_idle_agent_artifact(
                 episode_value,
                 summary_value,
                 utc_now(),
+                clean_shared_user_id(owner_shared_user_id),
             ),
         )
         artifact_id = int(cur.lastrowid)
@@ -1066,8 +1184,11 @@ def upsert_idle_artifact_vector(
         )
 
 
-def retrieve_idle_artifacts(query_vector: object) -> List[Dict[str, object]]:
+def retrieve_idle_artifacts(query_vector: object, owner_shared_user_id: str = "") -> List[Dict[str, object]]:
     query = vector_memory.normalize_vector(query_vector)
+    owner = clean_shared_user_id(owner_shared_user_id)
+    if not owner:
+        return []
     with connect_db() as conn:
         rows = conn.execute(
             """
@@ -1076,8 +1197,10 @@ def retrieve_idle_artifacts(query_vector: object) -> List[Dict[str, object]]:
                    v.dim, v.vector, v.model_name
             FROM idle_agent_artifacts a
             JOIN idle_artifact_vectors v ON v.artifact_id = a.id
+            WHERE a.owner_shared_user_id = ?
             ORDER BY a.id ASC
-            """
+            """,
+            (owner,),
         ).fetchall()
 
     scored: List[Dict[str, object]] = []
@@ -1159,6 +1282,9 @@ def load_idle_series_context(
 ) -> List[Dict[str, object]]:
     series_limit = min(max(int(max_series), 1), 12)
     episode_limit = min(max(int(max_episodes), 1), 8)
+    owner = idle_writer_owner_shared_user_id()
+    if not owner:
+        return []
     with connect_db() as conn:
         series_rows = conn.execute(
             """
@@ -1169,11 +1295,12 @@ def load_idle_series_context(
             FROM idle_agent_artifacts
             WHERE series_title IS NOT NULL
               AND TRIM(series_title) != ''
+              AND owner_shared_user_id = ?
             GROUP BY series_title
             ORDER BY newest_id DESC
             LIMIT ?
             """,
-            (series_limit,),
+            (owner, series_limit),
         ).fetchall()
         contexts: List[Dict[str, object]] = []
         for row in series_rows:
@@ -1182,14 +1309,14 @@ def load_idle_series_context(
                 """
                 SELECT id, title, episode_index, summary, content, created_at
                 FROM idle_agent_artifacts
-                WHERE series_title = ?
+                WHERE series_title = ? AND owner_shared_user_id = ?
                 ORDER BY
                     CASE WHEN episode_index IS NULL THEN 1 ELSE 0 END,
                     episode_index DESC,
                     id DESC
                 LIMIT ?
                 """,
-                (series_title, episode_limit),
+                (series_title, owner, episode_limit),
             ).fetchall()
             episode_items = [row_to_dict(item) for item in episode_rows]
             episode_items.sort(
@@ -1212,6 +1339,9 @@ def load_idle_series_context(
 
 def load_idle_series_catalog(limit: int = IDLE_SERIES_PLANNER_MAX_CATALOG) -> List[Dict[str, object]]:
     max_rows = max(1, min(int(limit), 200))
+    owner = idle_writer_owner_shared_user_id()
+    if not owner:
+        return []
     with connect_db() as conn:
         series_rows = conn.execute(
             """
@@ -1222,11 +1352,12 @@ def load_idle_series_catalog(limit: int = IDLE_SERIES_PLANNER_MAX_CATALOG) -> Li
             FROM idle_agent_artifacts
             WHERE series_title IS NOT NULL
               AND TRIM(series_title) != ''
+              AND owner_shared_user_id = ?
             GROUP BY series_title
             ORDER BY newest_id DESC
             LIMIT ?
             """,
-            (max_rows,),
+            (owner, max_rows),
         ).fetchall()
         catalog: List[Dict[str, object]] = []
         for row in series_rows:
@@ -1235,11 +1366,11 @@ def load_idle_series_catalog(limit: int = IDLE_SERIES_PLANNER_MAX_CATALOG) -> Li
                 """
                 SELECT id, title, summary, created_at
                 FROM idle_agent_artifacts
-                WHERE series_title = ?
+                WHERE series_title = ? AND owner_shared_user_id = ?
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (title,),
+                (title, owner),
             ).fetchone()
             catalog.append(
                 {
@@ -1602,15 +1733,19 @@ def format_idle_series_context(series_context: List[Dict[str, object]]) -> str:
 
 def recent_idle_artifact_repetition_context(limit: int = 10) -> str:
     max_rows = max(1, min(int(limit), 20))
+    owner = idle_writer_owner_shared_user_id()
+    if not owner:
+        return ""
     with connect_db() as conn:
         rows = conn.execute(
             """
             SELECT id, title, artifact_type, series_title, episode_index, summary, content, created_at
             FROM idle_agent_artifacts
+            WHERE owner_shared_user_id = ?
             ORDER BY id DESC
             LIMIT ?
             """,
-            (max_rows,),
+            (owner, max_rows),
         ).fetchall()
     if not rows:
         return ""
@@ -1653,30 +1788,38 @@ def idle_recent_repetition_flags_from_rows(rows: List[sqlite3.Row]) -> List[str]
 
 def idle_recent_repetition_flags(limit: int = 10) -> List[str]:
     max_rows = max(1, min(int(limit), 20))
+    owner = idle_writer_owner_shared_user_id()
+    if not owner:
+        return []
     with connect_db() as conn:
         rows = conn.execute(
             """
             SELECT title, summary, content
             FROM idle_agent_artifacts
+            WHERE owner_shared_user_id = ?
             ORDER BY id DESC
             LIMIT ?
             """,
-            (max_rows,),
+            (owner, max_rows),
         ).fetchall()
     return idle_recent_repetition_flags_from_rows(rows)
 
 
 def idle_story_pattern_variation_context(limit: int = 10) -> str:
     max_rows = max(1, min(int(limit), 20))
+    owner = idle_writer_owner_shared_user_id()
+    if not owner:
+        return ""
     with connect_db() as conn:
         rows = conn.execute(
             """
             SELECT id, title, summary
             FROM idle_agent_artifacts
+            WHERE owner_shared_user_id = ?
             ORDER BY id DESC
             LIMIT ?
             """,
-            (max_rows,),
+            (owner, max_rows),
         ).fetchall()
     if not rows:
         return ""
@@ -1714,21 +1857,25 @@ def idle_final_quality_gate_context() -> str:
     )
 
 
-def recent_curated_memory_summaries(limit: int = 12) -> List[Dict[str, object]]:
+def recent_curated_memory_summaries(
+    limit: int = 12,
+    owner_shared_user_id: str = "",
+) -> List[Dict[str, object]]:
+    scoped_devices = shared_user_device_ids(owner_shared_user_id)
+    if not scoped_devices:
+        return []
+    in_clause, params = sql_in_clause_params(scoped_devices)
     with connect_db() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT id, content, importance_label, updated_at
             FROM curated_memories
-            WHERE (
-                visitor_ip LIKE 'device:%'
-                OR (visitor_ip IS NULL AND importance_label = 'characters')
-              )
+            WHERE visitor_ip IN {in_clause}
               AND importance_label NOT IN ('identity', 'persona', 'preference', 'rule', 'characters', 'artifact')
             ORDER BY id DESC
             LIMIT ?
             """,
-            (int(limit),),
+            (*params, int(limit)),
         ).fetchall()
     return [
         {
@@ -1757,10 +1904,7 @@ def build_active_recall_context(
             f"""
             SELECT id, content, importance_label, visitor_ip, timeline_at, supersedes_id, confidence, updated_at
             FROM curated_memories
-            WHERE (
-                visitor_ip IN {in_clause}
-                OR (visitor_ip IS NULL AND importance_label = 'characters')
-            )
+            WHERE visitor_ip IN {in_clause}
             ORDER BY
               CASE WHEN visitor_ip = ? THEN 0 ELSE 1 END,
               CASE importance_label
@@ -1781,9 +1925,11 @@ def build_active_recall_context(
             """
             SELECT id, title, artifact_type, series_title, episode_index, summary, created_at
             FROM idle_agent_artifacts
+            WHERE owner_shared_user_id = ?
             ORDER BY id DESC
             LIMIT 6
-            """
+            """,
+            (clean_shared_user_id(str(scope.get("shared_user_id") or "")),),
         ).fetchall()
 
     if not memory_rows and not artifact_rows:
@@ -1825,7 +1971,10 @@ def build_active_recall_context(
 
 
 def build_idle_agent_prompt() -> Tuple[str, str, Dict[str, object]]:
-    memories = recent_curated_memory_summaries()
+    owner_shared_user_id = idle_writer_owner_shared_user_id()
+    memories = recent_curated_memory_summaries(
+        owner_shared_user_id=owner_shared_user_id,
+    )
     stored_custom_prompt = get_idle_agent_custom_prompt()
     custom_prompt = effective_idle_agent_custom_prompt(stored_custom_prompt)
     story_seeds = load_idle_story_seeds()
@@ -1874,6 +2023,7 @@ def build_idle_agent_prompt() -> Tuple[str, str, Dict[str, object]]:
         artifact_directive_context = format_hidden_artifact_directives_for_artifacts(
             focus_text=custom_prompt,
             series_title=planned_series_title,
+            owner_shared_user_id=owner_shared_user_id,
         )
     except Exception as exc:
         artifact_directive_context = ""
@@ -1882,7 +2032,10 @@ def build_idle_agent_prompt() -> Tuple[str, str, Dict[str, object]]:
         lines.append("")
         lines.append(artifact_directive_context)
     try:
-        character_context = format_hidden_character_context_for_artifacts(focus_text=custom_prompt)
+        character_context = format_hidden_character_context_for_artifacts(
+            focus_text=custom_prompt,
+            owner_shared_user_id=owner_shared_user_id,
+        )
     except Exception as exc:
         character_context = ""
         record_event(None, "hidden_character_artifact_context_error", "local", {"error": str(exc)})

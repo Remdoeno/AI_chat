@@ -6,7 +6,7 @@ async def health() -> Dict[str, object]:
 
 @app.get("/api/background/overview")
 async def background_overview_endpoint(request: Request) -> Dict[str, object]:
-    require_analysis_admin(request)
+    require_admin(request)
     return await asyncio.to_thread(build_background_overview)
 
 
@@ -68,6 +68,37 @@ def model_settings_endpoint() -> Dict[str, object]:
     return public_model_settings()
 
 
+@app.get("/api/tutorial/status")
+def tutorial_status_endpoint(request: Request) -> Dict[str, object]:
+    init_db()
+    return tutorial_status_for_device(visitor_ip(request))
+
+
+@app.post("/api/tutorial/artifact")
+def tutorial_artifact_endpoint(payload: TutorialArtifactPayload, request: Request) -> Dict[str, object]:
+    init_db()
+    requested_id = tutorial_request_id(request)
+    payload_id = normalize_tutorial_id(payload.tutorial_id)
+    if not requested_id or requested_id != payload_id:
+        raise HTTPException(status_code=403, detail="tutorial identity does not match")
+    try:
+        return generate_tutorial_artifact(payload_id, visitor_ip(request), payload.prompt)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@app.post("/api/tutorial/complete")
+def tutorial_complete_endpoint(payload: TutorialCleanupPayload, request: Request) -> Dict[str, object]:
+    init_db()
+    requested_id = tutorial_request_id(request)
+    payload_id = normalize_tutorial_id(payload.tutorial_id)
+    if not requested_id or requested_id != payload_id:
+        raise HTTPException(status_code=403, detail="tutorial identity does not match")
+    return {"ok": True, **cleanup_tutorial_data(payload_id, visitor_ip(request))}
+
+
 @app.put("/api/model-settings")
 def update_model_settings_endpoint(payload: ModelSettingsPayload) -> Dict[str, object]:
     init_db()
@@ -123,13 +154,6 @@ def auth_password_endpoint(payload: AuthPasswordPayload, request: Request) -> JS
         samesite="lax",
         path="/",
     )
-    response.set_cookie(
-        ANALYSIS_COOKIE_NAME,
-        analysis_auth_token(),
-        httponly=True,
-        samesite="lax",
-        path="/",
-    )
     record_event(None, "admin_password_changed", visitor_ip(request), {"initial_setup": not configured})
     return response
 
@@ -142,20 +166,21 @@ def memory_dashboard_memories(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Dict[str, object]:
     init_db()
+    shared_user_id = require_analysis_user(request)
     return list_memory_dashboard_memories(
         keyword=keyword,
         label=label,
         limit=limit,
-        device_ids=memory_dashboard_scope_device_ids(request),
+        device_ids=shared_user_device_ids(shared_user_id),
     )
 
 
 @app.post("/api/memory/memories")
 def memory_dashboard_create_memory(payload: MemoryAdminPayload, request: Request) -> Dict[str, object]:
     init_db()
-    current_device = normalize_visitor_ip(visitor_ip(request))
-    if not is_device_identity(current_device):
-        raise HTTPException(status_code=403, detail="device identity required")
+    reject_tutorial_persistence(request, "memory")
+    shared_user_id = require_analysis_user(request)
+    current_device = shared_user_memory_device_id(shared_user_id, visitor_ip(request))
     memory_id = create_admin_memory(
         payload.content,
         payload.importance_label,
@@ -176,7 +201,8 @@ def memory_dashboard_update_memory(
     request: Request,
 ) -> Dict[str, object]:
     init_db()
-    device_ids = memory_dashboard_scope_device_ids(request)
+    reject_tutorial_persistence(request, "memory")
+    device_ids = shared_user_device_ids(require_analysis_user(request))
     if not memory_id_in_device_scope(memory_id, device_ids):
         raise HTTPException(status_code=404, detail="memory not found")
     updated = update_admin_memory(
@@ -197,7 +223,8 @@ def memory_dashboard_update_memory(
 @app.delete("/api/memory/memories/{memory_id}")
 def memory_dashboard_delete_memory(memory_id: int, request: Request) -> Dict[str, object]:
     init_db()
-    device_ids = memory_dashboard_scope_device_ids(request)
+    reject_tutorial_persistence(request, "memory")
+    device_ids = shared_user_device_ids(require_analysis_user(request))
     if not memory_id_in_device_scope(memory_id, device_ids):
         raise HTTPException(status_code=404, detail="memory not found")
     deleted = delete_admin_memory(memory_id)
@@ -214,10 +241,11 @@ def memory_dashboard_retrievals(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> Dict[str, object]:
     init_db()
+    shared_user_id = require_analysis_user(request)
     return list_memory_dashboard_retrievals(
         memory_id=memory_id,
         limit=limit,
-        device_ids=memory_dashboard_scope_device_ids(request),
+        device_ids=shared_user_device_ids(shared_user_id),
     )
 
 
@@ -230,12 +258,13 @@ def memory_dashboard_operations(
     limit: int = Query(default=120, ge=1, le=500),
 ) -> Dict[str, object]:
     init_db()
+    shared_user_id = require_analysis_user(request)
     return list_memory_dashboard_operations(
         kind=kind,
         status=status,
         event_type=event_type,
         limit=limit,
-        device_ids=memory_dashboard_scope_device_ids(request),
+        device_ids=shared_user_device_ids(shared_user_id),
     )
 
 
@@ -267,20 +296,43 @@ def admin_login_endpoint(payload: AdminLoginPayload, request: Request) -> JSONRe
     return response
 
 
+@app.get("/api/analysis/auth/status")
+def analysis_auth_status_endpoint(request: Request) -> Dict[str, object]:
+    init_db()
+    return analysis_auth_status(request)
+
+
 @app.post("/api/analysis/login")
-def analysis_login_endpoint(payload: AdminLoginPayload, request: Request) -> JSONResponse:
-    if not verify_admin_password(payload.password):
-        record_event(None, "analysis_login_failed", visitor_ip(request), {})
-        raise HTTPException(status_code=401, detail="invalid password")
+def analysis_login_endpoint(payload: AnalysisLoginPayload, request: Request) -> JSONResponse:
+    init_db()
+    device_id = visitor_ip(request)
+    shared_user_id = shared_user_id_for_device(device_id)
+    if not shared_user_id:
+        record_event(None, "analysis_login_failed", device_id, {"reason": "shared_user_binding_required"})
+        raise HTTPException(status_code=409, detail="shared user binding required")
+    try:
+        initialized = initialize_or_verify_shared_user_password(
+            shared_user_id,
+            payload.password,
+            payload.confirm_password,
+        )
+    except HTTPException as exc:
+        record_event(None, "analysis_login_failed", device_id, {"reason": str(exc.detail)})
+        raise
     response = JSONResponse({"ok": True})
     response.set_cookie(
         ANALYSIS_COOKIE_NAME,
-        analysis_auth_token(),
+        analysis_auth_token(shared_user_id),
         httponly=True,
         samesite="lax",
         path="/",
     )
-    record_event(None, "analysis_login_ok", visitor_ip(request), {})
+    record_event(
+        None,
+        "analysis_login_ok",
+        device_id,
+        {"shared_user_id": shared_user_id, "initial_setup": initialized},
+    )
     return response
 
 
@@ -293,24 +345,34 @@ def admin_memories_endpoint(
     device_id_filter: str = "",
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> Dict[str, object]:
-    require_admin(request)
     init_db()
+    shared_user_id = require_analysis_user(request)
+    devices = shared_user_device_ids(shared_user_id)
+    requested_filter = device_id_filter or visitor_ip_filter
+    if requested_filter:
+        shared_user_memory_device_id(shared_user_id, requested_filter)
     return list_admin_memories(
         keyword=keyword,
         label=label,
-        visitor_ip_filter=device_id_filter or visitor_ip_filter,
+        visitor_ip_filter=requested_filter,
         limit=limit,
+        device_ids=devices,
     )
 
 
 @app.post("/api/admin/memories")
 def admin_create_memory_endpoint(payload: MemoryAdminPayload, request: Request) -> Dict[str, object]:
-    require_admin(request)
     init_db()
+    reject_tutorial_persistence(request, "memory")
+    shared_user_id = require_analysis_user(request)
+    target_device = shared_user_memory_device_id(
+        shared_user_id,
+        payload.device_id or payload.visitor_ip or "",
+    )
     memory_id = create_admin_memory(
         payload.content,
         payload.importance_label,
-        payload.device_id or payload.visitor_ip or "",
+        target_device,
         payload.timeline_at or "",
         payload.timeline_start_at or "",
         payload.timeline_end_at or "",
@@ -326,8 +388,18 @@ def admin_update_memory_endpoint(
     payload: MemoryAdminPayload,
     request: Request,
 ) -> Dict[str, object]:
-    require_admin(request)
     init_db()
+    reject_tutorial_persistence(request, "memory")
+    shared_user_id = require_analysis_user(request)
+    devices = shared_user_device_ids(shared_user_id)
+    if not memory_id_in_device_scope(memory_id, devices):
+        raise HTTPException(status_code=404, detail="memory not found")
+    target_device = None
+    if payload.device_id is not None or payload.visitor_ip is not None:
+        target_device = shared_user_memory_device_id(
+            shared_user_id,
+            payload.device_id if payload.device_id is not None else payload.visitor_ip or "",
+        )
     updated = update_admin_memory(
         memory_id,
         payload.content,
@@ -336,7 +408,7 @@ def admin_update_memory_endpoint(
         payload.timeline_start_at,
         payload.timeline_end_at,
         payload.timeline_kind,
-        payload.device_id if payload.device_id is not None else payload.visitor_ip,
+        target_device,
     )
     if not updated:
         raise HTTPException(status_code=404, detail="memory not found")
@@ -346,8 +418,11 @@ def admin_update_memory_endpoint(
 
 @app.delete("/api/admin/memories/{memory_id}")
 def admin_delete_memory_endpoint(memory_id: int, request: Request) -> Dict[str, object]:
-    require_admin(request)
     init_db()
+    reject_tutorial_persistence(request, "memory")
+    devices = shared_user_device_ids(require_analysis_user(request))
+    if not memory_id_in_device_scope(memory_id, devices):
+        raise HTTPException(status_code=404, detail="memory not found")
     deleted = delete_admin_memory(memory_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="memory not found")
@@ -357,6 +432,7 @@ def admin_delete_memory_endpoint(memory_id: int, request: Request) -> Dict[str, 
 
 @app.get("/api/artifacts")
 def artifacts_endpoint(
+    request: Request,
     artifact_type: str = "",
     keyword: str = "",
     series_title: str = "",
@@ -367,6 +443,7 @@ def artifacts_endpoint(
     sort_seed: int = Query(default=0),
 ) -> Dict[str, object]:
     init_db()
+    owner_shared_user_id = require_shared_user_for_request(request)
     return list_idle_agent_artifacts(
         artifact_type=artifact_type,
         keyword=keyword,
@@ -376,29 +453,75 @@ def artifacts_endpoint(
         sort=sort,
         order=order,
         sort_seed=sort_seed,
+        owner_shared_user_id=owner_shared_user_id,
+    )
+
+
+@app.get("/api/public/artifacts")
+def public_artifacts_endpoint(
+    request: Request,
+    artifact_type: str = "",
+    keyword: str = "",
+    series_title: str = "",
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0, le=100000),
+    sort: str = Query(default="created"),
+    order: str = Query(default="desc"),
+    sort_seed: int = Query(default=0),
+) -> Dict[str, object]:
+    init_db()
+    viewer_shared_user_id = require_shared_user_for_request(request)
+    return list_idle_agent_artifacts(
+        artifact_type=artifact_type,
+        keyword=keyword,
+        series_title=series_title,
+        limit=limit,
+        offset=offset,
+        sort=sort,
+        order=order,
+        sort_seed=sort_seed,
+        public_only=True,
+        viewer_shared_user_id=viewer_shared_user_id,
     )
 
 
 @app.get("/api/artifacts/runs")
 def artifacts_runs_endpoint(
+    request: Request,
     status: str = "",
     limit: int = Query(default=3, ge=1, le=500),
 ) -> Dict[str, object]:
     init_db()
-    runs = list_idle_agent_runs(status=status, limit=limit)
-    runs["progress"] = current_idle_write_progress()
+    owner_shared_user_id = require_shared_user_for_request(request)
+    runs = list_idle_agent_runs(
+        status=status,
+        limit=limit,
+        owner_shared_user_id=owner_shared_user_id,
+    )
+    runs["progress"] = (
+        current_idle_write_progress()
+        if user_controls_idle_writer(owner_shared_user_id)
+        else {"stage": "disabled", "label": "该用户未启用后台创作", "percent": 0}
+    )
     return runs
 
 
 @app.get("/api/artifacts/prompt")
-def artifacts_prompt_endpoint() -> Dict[str, object]:
+def artifacts_prompt_endpoint(request: Request) -> Dict[str, object]:
     init_db()
-    return {"prompt": get_idle_agent_custom_prompt()}
+    owner_shared_user_id = require_shared_user_for_request(request)
+    if not user_controls_idle_writer(owner_shared_user_id):
+        return {"prompt": "", "writer_enabled": False}
+    return {"prompt": get_idle_agent_custom_prompt(), "writer_enabled": True}
 
 
 @app.put("/api/artifacts/prompt")
 def update_artifacts_prompt_endpoint(payload: IdlePromptPayload, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifact settings")
+    owner_shared_user_id = require_shared_user_for_request(request)
+    if not user_controls_idle_writer(owner_shared_user_id):
+        raise HTTPException(status_code=403, detail="idle writer is not enabled for this shared user")
     prompt = payload.prompt.strip()
     set_idle_agent_custom_prompt(prompt)
     record_event(None, "idle_agent_prompt_update", visitor_ip(request), {"chars": len(prompt)})
@@ -406,29 +529,41 @@ def update_artifacts_prompt_endpoint(payload: IdlePromptPayload, request: Reques
 
 
 @app.get("/api/artifacts/idle-status")
-def artifacts_idle_status_endpoint() -> Dict[str, object]:
+def artifacts_idle_status_endpoint(request: Request) -> Dict[str, object]:
     init_db()
-    return {"paused": is_idle_agent_paused()}
+    owner_shared_user_id = require_shared_user_for_request(request)
+    enabled = user_controls_idle_writer(owner_shared_user_id)
+    return {"paused": is_idle_agent_paused() if enabled else True, "writer_enabled": enabled}
 
 
 @app.put("/api/artifacts/idle-status")
 def update_artifacts_idle_status_endpoint(payload: IdleStatusPayload, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifact settings")
+    owner_shared_user_id = require_shared_user_for_request(request)
+    if not user_controls_idle_writer(owner_shared_user_id):
+        raise HTTPException(status_code=403, detail="idle writer is not enabled for this shared user")
     paused = set_idle_agent_paused(payload.paused)
     record_event(None, "idle_agent_pause_update", visitor_ip(request), {"paused": paused})
     return {"paused": paused}
 
 
 @app.get("/api/artifacts/idle-frequency")
-def artifacts_idle_frequency_endpoint() -> Dict[str, object]:
+def artifacts_idle_frequency_endpoint(request: Request) -> Dict[str, object]:
     init_db()
+    owner_shared_user_id = require_shared_user_for_request(request)
+    enabled = user_controls_idle_writer(owner_shared_user_id)
     minutes = get_idle_agent_frequency_minutes()
-    return {"minutes": minutes, "seconds": minutes * 60}
+    return {"minutes": minutes, "seconds": minutes * 60, "writer_enabled": enabled}
 
 
 @app.put("/api/artifacts/idle-frequency")
 def update_artifacts_idle_frequency_endpoint(payload: IdleFrequencyPayload, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifact settings")
+    owner_shared_user_id = require_shared_user_for_request(request)
+    if not user_controls_idle_writer(owner_shared_user_id):
+        raise HTTPException(status_code=403, detail="idle writer is not enabled for this shared user")
     minutes = set_idle_agent_frequency_minutes(payload.minutes)
     record_event(None, "idle_agent_frequency_update", visitor_ip(request), {"minutes": minutes})
     return {"minutes": minutes, "seconds": minutes * 60}
@@ -437,15 +572,44 @@ def update_artifacts_idle_frequency_endpoint(payload: IdleFrequencyPayload, requ
 @app.delete("/api/artifacts/{artifact_id}")
 def delete_artifact_endpoint(artifact_id: int, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifacts")
+    owner_shared_user_id = require_shared_user_for_request(request)
+    if not artifact_belongs_to_shared_user(artifact_id, owner_shared_user_id):
+        raise HTTPException(status_code=404, detail="artifact not found")
     if not delete_idle_agent_artifact(artifact_id):
         raise HTTPException(status_code=404, detail="artifact not found")
     record_event(None, "idle_agent_artifact_delete", visitor_ip(request), {"artifact_id": artifact_id})
     return {"id": artifact_id, "ok": True}
 
 
-@app.post("/api/artifacts/{artifact_id}/like")
-def like_artifact_endpoint(artifact_id: int) -> Dict[str, object]:
+@app.put("/api/artifacts/{artifact_id}/visibility")
+def update_artifact_visibility_endpoint(
+    artifact_id: int,
+    payload: ArtifactVisibilityPayload,
+    request: Request,
+) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifacts")
+    owner_shared_user_id = require_shared_user_for_request(request)
+    try:
+        result = set_artifact_public(artifact_id, owner_shared_user_id, payload.is_public)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="artifact not found")
+    record_event(
+        None,
+        "idle_agent_artifact_visibility_update",
+        visitor_ip(request),
+        {"artifact_id": artifact_id, "is_public": bool(payload.is_public)},
+    )
+    return result
+
+
+@app.post("/api/artifacts/{artifact_id}/like")
+def like_artifact_endpoint(artifact_id: int, request: Request) -> Dict[str, object]:
+    init_db()
+    reject_tutorial_persistence(request, "artifact reactions")
+    if not artifact_visible_to_shared_user(artifact_id, require_shared_user_for_request(request)):
+        raise HTTPException(status_code=404, detail="artifact not found")
     try:
         return like_idle_agent_artifact(artifact_id)
     except KeyError:
@@ -453,8 +617,11 @@ def like_artifact_endpoint(artifact_id: int) -> Dict[str, object]:
 
 
 @app.delete("/api/artifacts/{artifact_id}/like")
-def dislike_artifact_endpoint(artifact_id: int) -> Dict[str, object]:
+def dislike_artifact_endpoint(artifact_id: int, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifact reactions")
+    if not artifact_visible_to_shared_user(artifact_id, require_shared_user_for_request(request)):
+        raise HTTPException(status_code=404, detail="artifact not found")
     try:
         return dislike_idle_agent_artifact(artifact_id)
     except KeyError:
@@ -464,9 +631,13 @@ def dislike_artifact_endpoint(artifact_id: int) -> Dict[str, object]:
 @app.get("/api/artifacts/{artifact_id}/comments")
 def artifact_comments_endpoint(
     artifact_id: int,
+    request: Request,
     limit: int = Query(default=300, ge=1, le=1000),
 ) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifact comments")
+    if not artifact_visible_to_shared_user(artifact_id, require_shared_user_for_request(request)):
+        raise HTTPException(status_code=404, detail="artifact not found")
     try:
         return list_artifact_comments(artifact_id, limit=limit)
     except KeyError:
@@ -480,6 +651,8 @@ def create_artifact_comment_endpoint(
     request: Request,
 ) -> Dict[str, object]:
     init_db()
+    if not artifact_visible_to_shared_user(artifact_id, require_shared_user_for_request(request)):
+        raise HTTPException(status_code=404, detail="artifact not found")
     try:
         result = create_artifact_comment_with_ai_reply(
             artifact_id,
@@ -511,7 +684,10 @@ def stream_artifact_comment_endpoint(
     request: Request,
 ) -> StreamingResponse:
     init_db()
+    reject_tutorial_persistence(request, "artifact comments")
     request_ip = visitor_ip(request)
+    if not artifact_visible_to_shared_user(artifact_id, require_shared_user_for_request(request)):
+        raise HTTPException(status_code=404, detail="artifact not found")
 
     def generate() -> Iterable[str]:
         http_client: Optional[httpx.Client] = None
@@ -590,6 +766,9 @@ def stream_artifact_comment_endpoint(
 @app.delete("/api/artifact-comments/{comment_id}")
 def delete_artifact_comment_endpoint(comment_id: int, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "artifact comments")
+    if not artifact_comment_belongs_to_shared_user(comment_id, require_shared_user_for_request(request)):
+        raise HTTPException(status_code=404, detail="comment not found")
     result = delete_artifact_comment(comment_id)
     if not result["ok"]:
         raise HTTPException(status_code=404, detail="comment not found")
@@ -600,30 +779,46 @@ def delete_artifact_comment_endpoint(comment_id: int, request: Request) -> Dict[
 @app.post("/api/characters/session")
 def create_character_library_session_endpoint(request: Request) -> Dict[str, object]:
     init_db()
+    owner_shared_user_id = require_shared_user_for_request(request)
     current_visitor = visitor_ip(request)
     session_id = create_session(current_visitor, user_agent(request))
+    current_tutorial_id = tutorial_request_id(request)
+    if current_tutorial_id:
+        register_tutorial_session(current_tutorial_id, session_id, current_visitor)
     record_event(session_id, "character_library_session_created", current_visitor, {})
     return {
         "session_id": session_id,
         "greeting": "今天又来创建或修改角色了嘛~",
-        "has_previous": has_previous_character_library_context_session(session_id),
+        "has_previous": has_previous_character_library_context_session(
+            session_id,
+            owner_shared_user_id,
+        ),
     }
 
 
 @app.get("/api/characters")
 def character_library_profiles_endpoint(
+    request: Request,
     limit: int = Query(default=200, ge=1, le=500),
 ) -> Dict[str, object]:
     init_db()
-    return list_character_library_profiles(limit=limit)
+    return list_character_library_profiles(
+        limit=limit,
+        owner_shared_user_id=require_shared_user_for_request(request),
+    )
 
 
 @app.get("/api/characters/sessions/{session_id}/previous-context")
 def previous_character_library_context_endpoint(session_id: str, request: Request) -> Dict[str, object]:
     init_db()
     ensure_active_session(session_id)
+    owner_shared_user_id = require_shared_user_session(request, session_id)
     with connect_db() as conn:
-        candidate = previous_character_library_context_candidate(conn, session_id)
+        candidate = previous_character_library_context_candidate(
+            conn,
+            session_id,
+            owner_shared_user_id,
+        )
     return {
         "has_previous": candidate is not None,
         "session": None if candidate is None else {
@@ -639,8 +834,9 @@ def previous_character_library_context_endpoint(session_id: str, request: Reques
 def load_previous_character_library_context_endpoint(session_id: str, request: Request) -> Dict[str, object]:
     init_db()
     ensure_active_session(session_id)
+    owner_shared_user_id = require_shared_user_session(request, session_id)
     current_visitor = visitor_ip(request)
-    result = load_previous_character_library_context(session_id)
+    result = load_previous_character_library_context(session_id, owner_shared_user_id)
     record_event(
         session_id,
         "character_library_context_load_previous",
@@ -656,10 +852,13 @@ def load_previous_character_library_context_endpoint(session_id: str, request: R
 
 
 @app.get("/api/characters/{character_id}")
-def character_library_profile_endpoint(character_id: int) -> Dict[str, object]:
+def character_library_profile_endpoint(character_id: int, request: Request) -> Dict[str, object]:
     init_db()
     try:
-        return get_character_library_profile(character_id)
+        return get_character_library_profile(
+            character_id,
+            require_shared_user_for_request(request),
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="character not found")
 
@@ -671,9 +870,15 @@ def update_character_library_profile_endpoint(
     request: Request,
 ) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "character library")
     ip = visitor_ip(request)
+    owner_shared_user_id = require_shared_user_for_request(request)
     try:
-        item = update_hidden_character_profile_fields(character_id, payload)
+        item = update_hidden_character_profile_fields(
+            character_id,
+            payload,
+            owner_shared_user_id,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="character not found")
     record_event(None, "character_library_manual_update", ip, {"character_id": character_id})
@@ -687,7 +892,9 @@ def generate_character_library_image_endpoint(
     request: Request,
 ) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "character library")
     ip = visitor_ip(request)
+    require_shared_user_for_request(request)
     kind = str(payload.get("kind") or "photo").strip().lower()
     if kind not in {"avatar", "photo"}:
         raise HTTPException(status_code=400, detail="kind must be avatar or photo")
@@ -707,6 +914,8 @@ def generate_character_library_image_endpoint(
 @app.delete("/api/characters/{character_id}/images/{image_id}")
 def delete_character_library_image_endpoint(character_id: int, image_id: int, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "character library")
+    require_shared_user_for_request(request)
     try:
         return delete_character_image(character_id, image_id, visitor_ip(request))
     except KeyError:
@@ -718,8 +927,15 @@ def delete_character_library_image_endpoint(character_id: int, image_id: int, re
 @app.delete("/api/characters/{character_id}")
 def delete_character_library_profile_endpoint(character_id: int, request: Request) -> Dict[str, object]:
     init_db()
+    reject_tutorial_persistence(request, "character library")
     ip = visitor_ip(request)
-    deleted = delete_hidden_character_profile(character_id, "", reason="manual delete from character library")
+    owner_shared_user_id = require_shared_user_for_request(request)
+    deleted = delete_hidden_character_profile(
+        character_id,
+        "",
+        reason="manual delete from character library",
+        owner_shared_user_id=owner_shared_user_id,
+    )
     if not deleted:
         raise HTTPException(status_code=404, detail="character not found")
     record_event(None, "character_library_delete", ip, {"character_id": character_id})
@@ -729,11 +945,13 @@ def delete_character_library_profile_endpoint(character_id: int, request: Reques
 @app.post("/api/characters/chat/stream")
 def character_library_chat_stream(payload: CharacterChatPayload, request: Request) -> StreamingResponse:
     init_db()
+    reject_tutorial_persistence(request, "character library")
     session_id = payload.session_id
     message = payload.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="message is empty")
     ensure_active_session(session_id)
+    owner_shared_user_id = require_shared_user_session(request, session_id)
     ip = visitor_ip(request)
     refresh_session_visitor_ip(session_id, ip, user_agent(request))
     generation_token = acquire_generation_token(session_id)
@@ -785,7 +1003,11 @@ def character_library_chat_stream(payload: CharacterChatPayload, request: Reques
                     yield format_sse("done", {"message_id": assistant_id, "content": message_text})
                     return
                 yield format_sse("draw_status", {"stage": "prompt", "message": "画图 prompt 优化中"})
-                scene_profiles = character_profiles_mentioned_in_text(message, limit=8)
+                scene_profiles = character_profiles_mentioned_in_text(
+                    message,
+                    limit=8,
+                    owner_shared_user_id=owner_shared_user_id,
+                )
                 scene_profile_lines: List[str] = []
                 for profile in scene_profiles:
                     scene_profile_lines.append(
@@ -925,6 +1147,7 @@ def character_library_chat_stream(payload: CharacterChatPayload, request: Reques
                 attachments=payload.attachments,
                 uploaded_images=uploaded_images,
                 draw_batch=draw_batch,
+                owner_shared_user_id=owner_shared_user_id,
             )
             started = time.perf_counter()
             decision = call_character_library_agent_model(context)
@@ -1000,9 +1223,16 @@ def analysis_traces_endpoint(
     trace_id: str = "",
     limit: int = Query(default=300, ge=1, le=1000),
 ) -> Dict[str, object]:
-    require_analysis_admin(request)
+    owner_shared_user_id = require_analysis_user(request)
     init_db()
-    traces = list_analysis_traces(session_id=session_id, trace_id=trace_id, limit=limit)
+    if session_id and not shared_user_owns_session(owner_shared_user_id, session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    traces = list_analysis_traces(
+        session_id=session_id,
+        trace_id=trace_id,
+        limit=limit,
+        visitor_ips=shared_user_device_ids(owner_shared_user_id),
+    )
     return {"items": traces, "count": len(traces)}
 
 
@@ -1012,12 +1242,22 @@ def analysis_background_endpoint(
     limit: int = Query(default=20, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> Dict[str, object]:
-    require_analysis_admin(request)
+    owner_shared_user_id = require_analysis_user(request)
     init_db()
-    activities = list_idle_worker_activity(limit=limit + 1, offset=offset)
+    writer_owner = idle_writer_owner_shared_user_id()
+    activities = (
+        list_idle_worker_activity(limit=limit + 1, offset=offset)
+        if owner_shared_user_id == writer_owner
+        else []
+    )
     has_more = len(activities) > limit
     return {
-        "progress": current_idle_agent_progress(),
+        "progress": current_idle_agent_progress() if owner_shared_user_id == writer_owner else {
+            "stage": "idle",
+            "label": "当前用户没有后台成果任务",
+            "percent": 0,
+            "task": "idle_worker",
+        },
         "activities": activities[:limit],
         "count": min(len(activities), limit),
         "limit": limit,
@@ -1041,6 +1281,12 @@ def update_user_memory_binding_endpoint(
 ) -> Dict[str, object]:
     init_db()
     current_visitor = visitor_ip(request)
+    auth_result = authorize_user_memory_binding_change(
+        current_visitor,
+        payload.shared_user_id,
+        payload.password,
+        payload.confirm_password,
+    )
     result = upsert_user_memory_binding(
         current_visitor,
         payload.shared_user_id,
@@ -1059,6 +1305,7 @@ def update_user_memory_binding_endpoint(
             "inherit_assistant_profile": bool(result.get("inherit_assistant_profile")),
             "profile_owner_device_id": result.get("profile_owner_device_id", ""),
             "left_previous_shared_user": bool(result.get("left_previous_shared_user")),
+            "password_initialized": bool(auth_result.get("password_initialized")),
         },
     )
     return result
@@ -1073,6 +1320,9 @@ def create_session_endpoint(request: Request) -> Dict[str, object]:
     known_before_session = is_known_device_identity(current_visitor)
     known_done = time.perf_counter()
     session_id = create_session(current_visitor, user_agent(request))
+    current_tutorial_id = tutorial_request_id(request)
+    if current_tutorial_id:
+        register_tutorial_session(current_tutorial_id, session_id, current_visitor)
     session_done = time.perf_counter()
     opening = prepared_opening_prompt(current_visitor, known_before_session)
     opening_done = time.perf_counter()
@@ -1157,6 +1407,9 @@ def reset_session_endpoint(session_id: str, request: Request) -> Dict[str, objec
     current_visitor = visitor_ip(request)
     known_before_session = is_known_device_identity(current_visitor)
     new_session_id = reset_session(session_id, current_visitor, user_agent(request))
+    current_tutorial_id = tutorial_request_id(request)
+    if current_tutorial_id:
+        register_tutorial_session(current_tutorial_id, new_session_id, current_visitor)
     opening = prepared_opening_prompt(current_visitor, known_before_session)
     return {
         "session_id": new_session_id,
@@ -1388,8 +1641,19 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="message is empty")
 
     ensure_active_session(session_id)
+    request_tutorial_id = tutorial_request_id(request)
+    payload_tutorial_id = normalize_tutorial_id(payload.tutorial_id) if payload.tutorial_mode else ""
+    if payload.tutorial_mode:
+        if (
+            not request_tutorial_id
+            or request_tutorial_id != payload_tutorial_id
+            or not tutorial_session_matches(payload_tutorial_id, session_id, visitor_ip(request))
+        ):
+            raise HTTPException(status_code=403, detail="tutorial session does not match")
     if payload.analysis_mode:
-        require_analysis_admin(request)
+        analysis_user_id = require_analysis_user(request)
+        if not shared_user_owns_session(analysis_user_id, session_id):
+            raise HTTPException(status_code=404, detail="session not found")
 
     ip = visitor_ip(request)
     refresh_session_visitor_ip(session_id, ip, user_agent(request))
@@ -1416,6 +1680,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
             "web_search": bool(payload.web_search),
             "mode": payload.mode,
             "analysis_mode": bool(payload.analysis_mode),
+            "tutorial_mode": bool(payload.tutorial_mode),
             "cached_opening": cached_opening,
             "hidden_user": bool(payload.hidden_user),
             "quoted_chars": len(quoted_message),
@@ -1478,7 +1743,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
         )
 
     tomorrow_clarification = ""
-    if not payload.hidden_user:
+    if not payload.hidden_user and not payload.tutorial_mode:
         tomorrow_clarification = late_night_tomorrow_clarification(
             message,
             already_prompted=session_has_late_night_tomorrow_clarification(session_id),
@@ -2333,7 +2598,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                 )
             record_event(session_id, "message_assistant", ip, {"chars": len(answer)})
             try:
-                if payload.hidden_user:
+                if payload.hidden_user or payload.tutorial_mode:
                     yield format_sse("done", {"message_id": assistant_id, "content": answer})
                     return
                 try:

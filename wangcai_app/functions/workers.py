@@ -764,6 +764,30 @@ def recent_idle_agent_run_exists() -> bool:
     return (datetime.now(timezone.utc) - updated).total_seconds() < get_idle_agent_min_run_interval_seconds()
 
 
+IDLE_CONTEXT_LIMIT_BACKOFF_UNTIL = 0.0
+
+
+def is_idle_context_limit_error(error: object) -> bool:
+    text = str(error or "")
+    return (
+        "maximum context length" in text
+        and "Please reduce the length" in text
+        and "input_tokens" in text
+    )
+
+
+def mark_idle_context_limit_backoff() -> None:
+    global IDLE_CONTEXT_LIMIT_BACKOFF_UNTIL
+    IDLE_CONTEXT_LIMIT_BACKOFF_UNTIL = max(
+        IDLE_CONTEXT_LIMIT_BACKOFF_UNTIL,
+        time.time() + IDLE_CONTEXT_LIMIT_ERROR_BACKOFF_SECONDS,
+    )
+
+
+def idle_context_limit_backoff_remaining() -> float:
+    return max(0.0, IDLE_CONTEXT_LIMIT_BACKOFF_UNTIL - time.time())
+
+
 def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
     if not IDLE_AGENT_ENABLED:
         return False, "idle_disabled"
@@ -771,6 +795,8 @@ def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
         return False, "idle_paused"
     if force:
         return True, "forced"
+    if idle_context_limit_backoff_remaining() > 0:
+        return False, "context_limit_backoff"
     cleanup_stale_active_generations()
     with ACTIVE_GENERATIONS_LOCK:
         if ACTIVE_GENERATIONS:
@@ -794,12 +820,23 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
     if not can_run:
         if reason in ("idle_disabled", "idle_paused"):
             return {"status": "skipped", "reason": reason, "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
-        return {"status": "busy", "reason": reason, "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
+        result = {"status": "busy", "reason": reason, "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
+        if reason == "context_limit_backoff":
+            result["backoff_remaining_seconds"] = round(idle_context_limit_backoff_remaining(), 1)
+        return result
     if not IDLE_AGENT_WORKER_LOCK.acquire(blocking=False):
         return {"status": "busy", "reason": "idle_agent_running", "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
 
     run_id: Optional[int] = None
     try:
+        owner_shared_user_id = idle_writer_owner_shared_user_id()
+        if not owner_shared_user_id:
+            return {
+                "status": "skipped",
+                "reason": "idle_writer_owner_not_configured",
+                "started_at": started_at,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+            }
         IDLE_AGENT_CANCEL_EVENT.clear()
         original_custom_prompt = get_idle_agent_custom_prompt()
         completion_state = idle_custom_prompt_target_reached(original_custom_prompt)
@@ -835,7 +872,13 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
                 "started_at": started_at,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 3),
             }
-        run_id = create_idle_agent_run("other", "idle-agent", prompt_summary, status="writing")
+        run_id = create_idle_agent_run(
+            "other",
+            "idle-agent",
+            prompt_summary,
+            status="writing",
+            owner_shared_user_id=owner_shared_user_id,
+        )
         decision = call_idle_agent_model(prompt)
         if decision.get("cancelled") or IDLE_AGENT_CANCEL_EVENT.is_set():
             finish_idle_agent_run(run_id, "cancelled", "interrupted")
@@ -882,6 +925,7 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
             series_title=series_title,
             episode_index=episode_index,
             summary=summary,
+            owner_shared_user_id=owner_shared_user_id,
         )
         image_result = generate_artifact_theme_images(
             artifact_id,
@@ -889,6 +933,7 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
             summary,
             content,
             image_plan,
+            owner_shared_user_id=owner_shared_user_id,
         )
         release_requested = bool(decision.get("release_prompt_after_this")) or bool(series_plan.get("release_prompt_after_this") if isinstance(series_plan, dict) else False)
         planner_requested_release = bool(series_plan.get("release_prompt_after_this") if isinstance(series_plan, dict) else False) or "planner_release=true" in str(prompt_summary or "")
@@ -930,10 +975,26 @@ def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
         })
         return {"status": "completed", "run_id": run_id, "artifact_id": artifact_id, "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
     except Exception as exc:
+        is_context_limit_error = is_idle_context_limit_error(exc)
+        if is_context_limit_error:
+            mark_idle_context_limit_backoff()
         if run_id is not None:
             finish_idle_agent_run(run_id, "failed", str(exc))
-        record_event(None, "idle_agent_error", "local", {"error": str(exc), "run_id": run_id, "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)})
-        return {"status": "failed", "error": str(exc), "run_id": run_id, "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
+        metadata = {
+            "error": str(exc),
+            "run_id": run_id,
+            "started_at": started_at,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+        }
+        if is_context_limit_error:
+            metadata["reason"] = "context_limit_error"
+            metadata["backoff_seconds"] = IDLE_CONTEXT_LIMIT_ERROR_BACKOFF_SECONDS
+        record_event(None, "idle_agent_error", "local", metadata)
+        result = {"status": "failed", "error": str(exc), "run_id": run_id, "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
+        if is_context_limit_error:
+            result["reason"] = "context_limit_error"
+            result["backoff_seconds"] = IDLE_CONTEXT_LIMIT_ERROR_BACKOFF_SECONDS
+        return result
     finally:
         IDLE_AGENT_WORKER_LOCK.release()
 
@@ -1137,9 +1198,14 @@ def list_idle_agent_artifacts(
     sort: str = "created",
     order: str = "desc",
     sort_seed: int = 0,
+    owner_shared_user_id: str = "",
+    public_only: bool = False,
+    viewer_shared_user_id: str = "",
 ) -> Dict[str, object]:
-    clauses = []
-    params: List[object] = []
+    owner = clean_shared_user_id(owner_shared_user_id)
+    viewer = clean_shared_user_id(viewer_shared_user_id or owner)
+    clauses = ["a.is_public = 1"] if public_only else ["a.owner_shared_user_id = ?"]
+    params: List[object] = [] if public_only else [owner]
     if artifact_type.strip():
         clauses.append("a.artifact_type = ?")
         params.append(artifact_type.strip())
@@ -1174,7 +1240,8 @@ def list_idle_agent_artifacts(
             f"""
             SELECT a.id, a.run_id, a.title, a.artifact_type, a.content,
                    a.series_title, a.episode_index, a.summary, a.created_at,
-                   a.likes, COALESCE(cc.comment_count, 0) AS comment_count,
+                   a.likes, a.owner_shared_user_id, a.is_public, a.published_at,
+                   COALESCE(cc.comment_count, 0) AS comment_count,
                    r.prompt_summary, r.status
             FROM idle_agent_artifacts a
             JOIN idle_agent_runs r ON r.id = a.run_id
@@ -1214,6 +1281,20 @@ def list_idle_agent_artifacts(
                 "episode_index": int(row["episode_index"]) if row["episode_index"] is not None else None,
                 "summary": str(row["summary"] or ""),
                 "likes": int(row["likes"] or 0),
+                "is_public": bool(row["is_public"]),
+                "published_at": str(row["published_at"] or ""),
+                "is_owner": bool(viewer) and hmac.compare_digest(
+                    clean_shared_user_id(str(row["owner_shared_user_id"] or "")),
+                    viewer,
+                ),
+                "can_delete": bool(viewer) and hmac.compare_digest(
+                    clean_shared_user_id(str(row["owner_shared_user_id"] or "")),
+                    viewer,
+                ),
+                "can_publish": bool(viewer) and hmac.compare_digest(
+                    clean_shared_user_id(str(row["owner_shared_user_id"] or "")),
+                    viewer,
+                ),
                 "comment_count": int(row["comment_count"] or 0),
                 "created_at": str(row["created_at"]),
                 "prompt_summary": str(row["prompt_summary"]),
@@ -1523,9 +1604,13 @@ def delete_artifact_comment(comment_id: int) -> Dict[str, object]:
     return {"ok": True, "deleted": len(ids), "ids": ids}
 
 
-def list_idle_agent_runs(status: str = "", limit: int = 100) -> Dict[str, object]:
-    clauses = []
-    params: List[object] = []
+def list_idle_agent_runs(
+    status: str = "",
+    limit: int = 100,
+    owner_shared_user_id: str = "",
+) -> Dict[str, object]:
+    clauses = ["owner_shared_user_id = ?"]
+    params: List[object] = [clean_shared_user_id(owner_shared_user_id)]
     if status.strip():
         clauses.append("status = ?")
         params.append(status.strip())

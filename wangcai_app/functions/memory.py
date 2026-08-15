@@ -806,6 +806,7 @@ def upsert_curated_memory_vector(memory_id: int, vector: object, model_name: str
 def upsert_global_character_memory(
     character_id: int,
     content: str,
+    owner_device_id: str,
     confidence: float = 0.85,
 ) -> int:
     text = str(content or "").strip()
@@ -813,6 +814,9 @@ def upsert_global_character_memory(
         raise ValueError("character_id must be positive")
     if not text:
         raise ValueError("global character memory content is empty")
+    owner_device = normalize_visitor_ip(owner_device_id)
+    if not owner_device or not is_device_identity(owner_device):
+        raise ValueError("character memory owner device is required")
     source_session_id = f"character-profile-{int(character_id)}"
     source_digest = memory_source_hash(source_session_id, 0, int(character_id), "global-character-profile")
     now = utc_now()
@@ -827,11 +831,11 @@ def upsert_global_character_memory(
                 timeline_at, timeline_start_at, timeline_end_at, timeline_kind,
                 confidence, created_at, updated_at
             )
-            VALUES (?, 0, ?, ?, ?, 'characters', NULL, NULL, ?, NULL, NULL, 'point', ?, ?, ?)
+            VALUES (?, 0, ?, ?, ?, 'characters', ?, NULL, ?, NULL, NULL, 'point', ?, ?, ?)
             ON CONFLICT(source_hash) DO UPDATE SET
                 content = excluded.content,
                 importance_label = 'characters',
-                visitor_ip = NULL,
+                visitor_ip = excluded.visitor_ip,
                 profile_id = NULL,
                 timeline_at = excluded.timeline_at,
                 timeline_start_at = NULL,
@@ -845,6 +849,7 @@ def upsert_global_character_memory(
                 int(character_id),
                 source_digest,
                 text,
+                owner_device,
                 now,
                 confidence_value,
                 now,
@@ -868,7 +873,6 @@ def delete_global_character_memory(character_id: int) -> int:
             DELETE FROM curated_memories
             WHERE source_session_id = ?
               AND importance_label = 'characters'
-              AND visitor_ip IS NULL
             """,
             (source_session_id,),
         )
@@ -1180,9 +1184,20 @@ def list_admin_memories(
     label: str = "",
     visitor_ip_filter: str = "",
     limit: int = 200,
+    device_ids: Optional[List[str]] = None,
 ) -> Dict[str, object]:
-    clauses = []
+    if device_ids is not None and not device_ids:
+        return {"total": 0, "items": []}
+    clauses = [
+        "importance_label NOT IN ('artifact', 'characters')",
+        "source_session_id NOT LIKE 'artifact-%'",
+        "source_session_id NOT LIKE 'character-profile-%'",
+    ]
     params: List[object] = []
+    if device_ids is not None:
+        placeholders = ", ".join("?" for _ in device_ids)
+        clauses.append(f"visitor_ip IN ({placeholders})")
+        params.extend(device_ids)
     if keyword.strip():
         clauses.append("content LIKE ?")
         params.append(f"%{keyword.strip()}%")
@@ -1329,10 +1344,7 @@ def retrieve_curated_memories(
                    v.dim, v.vector, v.model_name
             FROM curated_memories m
             JOIN curated_memory_vectors v ON v.memory_id = m.id
-            WHERE (
-                m.visitor_ip IN {in_clause}
-                OR (m.visitor_ip IS NULL AND m.importance_label = 'characters')
-            )
+            WHERE m.visitor_ip IN {in_clause}
             ORDER BY m.id ASC
             """,
             params,
@@ -1423,10 +1435,7 @@ def retrieve_curated_memory_recall_pool(
                    v.dim, v.vector, v.model_name
             FROM curated_memories m
             JOIN curated_memory_vectors v ON v.memory_id = m.id
-            WHERE (
-                m.visitor_ip IN {in_clause}
-                OR (m.visitor_ip IS NULL AND m.importance_label = 'characters')
-            )
+            WHERE m.visitor_ip IN {in_clause}
             ORDER BY m.id ASC
             """,
             params,
@@ -1761,10 +1770,7 @@ def retrieve_curated_memories_by_text(
                    timeline_at, timeline_start_at, timeline_end_at, timeline_kind,
                    supersedes_id, confidence
             FROM curated_memories
-            WHERE (
-                visitor_ip IN {in_clause}
-                OR (visitor_ip IS NULL AND importance_label = 'characters')
-            )
+            WHERE visitor_ip IN {in_clause}
             ORDER BY id DESC
             LIMIT 1000
             """,
@@ -2152,6 +2158,7 @@ def list_analysis_traces(
     session_id: str = "",
     trace_id: str = "",
     limit: int = 200,
+    visitor_ips: Optional[List[str]] = None,
 ) -> List[Dict[str, object]]:
     clauses = []
     params: List[object] = []
@@ -2161,6 +2168,17 @@ def list_analysis_traces(
     if trace_id.strip():
         clauses.append("trace_id = ?")
         params.append(trace_id.strip())
+    normalized_visitors = [
+        normalize_visitor_ip(item)
+        for item in (visitor_ips or [])
+        if normalize_visitor_ip(item)
+    ]
+    if visitor_ips is not None:
+        if not normalized_visitors:
+            return []
+        in_clause, visitor_params = sql_in_clause_params(normalized_visitors)
+        clauses.append(f"visitor_ip IN {in_clause}")
+        params.extend(visitor_params)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     max_rows = min(max(int(limit), 1), 1000)
     with connect_db() as conn:
@@ -2248,7 +2266,11 @@ def list_memory_dashboard_memories(
 ) -> Dict[str, object]:
     if device_ids is not None and not device_ids:
         return {"total": 0, "items": []}
-    clauses = []
+    clauses = [
+        "m.importance_label NOT IN ('artifact', 'characters')",
+        "m.source_session_id NOT LIKE 'artifact-%'",
+        "m.source_session_id NOT LIKE 'character-profile-%'",
+    ]
     params: List[object] = []
     if device_ids is not None:
         placeholders = ", ".join("?" for _ in device_ids)
@@ -2475,6 +2497,9 @@ def memory_id_in_device_scope(memory_id: int, device_ids: List[str]) -> bool:
             FROM curated_memories
             WHERE id = ?
               AND visitor_ip IN ({placeholders})
+              AND importance_label NOT IN ('artifact', 'characters')
+              AND source_session_id NOT LIKE 'artifact-%'
+              AND source_session_id NOT LIKE 'character-profile-%'
             LIMIT 1
             """,
             (int(memory_id), *device_ids),

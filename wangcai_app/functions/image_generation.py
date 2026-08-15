@@ -1584,12 +1584,19 @@ def scrub_artifact_image_character_names(text: str, names: List[str], replacemen
     return cleaned.strip()
 
 
-def artifact_image_mentioned_character_profiles(text: str, limit: int = 4) -> List[Dict[str, object]]:
+def artifact_image_mentioned_character_profiles(
+    text: str,
+    limit: int = 4,
+    owner_shared_user_id: str = "",
+) -> List[Dict[str, object]]:
     source = str(text or "").strip()
     if not source:
         return []
     try:
-        profiles = list_active_character_profiles(limit=80)
+        profiles = list_active_character_profiles(
+            limit=80,
+            owner_shared_user_id=owner_shared_user_id,
+        )
     except Exception as exc:
         record_event(None, "artifact_image_character_context_error", "local", {"error": str(exc)})
         return []
@@ -1605,7 +1612,12 @@ def artifact_image_mentioned_character_profiles(text: str, limit: int = 4) -> Li
     return matched
 
 
-def artifact_image_profiles_for_plan(summary: str, plan: Dict[str, str], limit: int = 4) -> List[Dict[str, object]]:
+def artifact_image_profiles_for_plan(
+    summary: str,
+    plan: Dict[str, str],
+    limit: int = 4,
+    owner_shared_user_id: str = "",
+) -> List[Dict[str, object]]:
     plan_text = "\n".join(
         [
             str(plan.get("title") or ""),
@@ -1613,11 +1625,19 @@ def artifact_image_profiles_for_plan(summary: str, plan: Dict[str, str], limit: 
             str(plan.get("role") or ""),
         ]
     ).strip()
-    profiles = artifact_image_mentioned_character_profiles(plan_text, limit=limit)
+    profiles = artifact_image_mentioned_character_profiles(
+        plan_text,
+        limit=limit,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     if profiles:
         return profiles
     summary_text = compact_idle_artifact_content(str(summary or ""), 320)
-    return artifact_image_mentioned_character_profiles(summary_text, limit=min(2, max(1, int(limit))))
+    return artifact_image_mentioned_character_profiles(
+        summary_text,
+        limit=min(2, max(1, int(limit))),
+        owner_shared_user_id=owner_shared_user_id,
+    )
 
 
 def scrub_artifact_image_text_for_profiles(text: str, profiles: List[Dict[str, object]]) -> str:
@@ -1674,8 +1694,18 @@ def artifact_image_character_visual_context(profiles: List[Dict[str, object]]) -
     return "\n".join(lines).strip()
 
 
-def artifact_image_prompt_source(title: str, summary: str, content: str, plan: Dict[str, str]) -> str:
-    profiles = artifact_image_profiles_for_plan(summary, plan)
+def artifact_image_prompt_source(
+    title: str,
+    summary: str,
+    content: str,
+    plan: Dict[str, str],
+    owner_shared_user_id: str = "",
+) -> str:
+    profiles = artifact_image_profiles_for_plan(
+        summary,
+        plan,
+        owner_shared_user_id=owner_shared_user_id,
+    )
     image_title = scrub_artifact_image_text_for_profiles(str(plan.get("title") or "cover image"), profiles)
     visual_brief = scrub_artifact_image_text_for_profiles(str(plan.get("brief") or ""), profiles)
     story_context = scrub_artifact_image_text_for_profiles(
@@ -1813,6 +1843,7 @@ def generate_artifact_theme_images(
     summary: str,
     content: str,
     image_plan: object,
+    owner_shared_user_id: str = "",
 ) -> Dict[str, object]:
     status = image_generation_status()
     plans = normalize_artifact_image_plan(title, summary, content, image_plan)
@@ -1827,9 +1858,19 @@ def generate_artifact_theme_images(
     images: List[Dict[str, object]] = []
     errors: List[str] = []
     for position, plan in enumerate(plans):
-        prompt_source = artifact_image_prompt_source(title, summary, content, plan)
+        prompt_source = artifact_image_prompt_source(
+            title,
+            summary,
+            content,
+            plan,
+            owner_shared_user_id=owner_shared_user_id,
+        )
         try:
-            profiles = artifact_image_profiles_for_plan(summary, plan)
+            profiles = artifact_image_profiles_for_plan(
+                summary,
+                plan,
+                owner_shared_user_id=owner_shared_user_id,
+            )
             decision = optimize_artifact_image_prompt(prompt_source, profiles)
             batch = generate_image_batch(
                 original_prompt=prompt_source,

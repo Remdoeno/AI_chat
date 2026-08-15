@@ -187,6 +187,10 @@ async function refresh() {
   status.textContent = "读取中";
   try {
     const response = await fetch("/api/background/overview", { cache: "no-store" });
+    if (response.status === 401) {
+      window.location.href = "/background";
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     data.summary.generated_at = data.generated_at;

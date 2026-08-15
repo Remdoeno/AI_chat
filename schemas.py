@@ -20,6 +20,8 @@ class ChatPayload(BaseModel):
     cached_opening: bool = False
     web_search: bool = False
     analysis_mode: bool = False
+    tutorial_mode: bool = False
+    tutorial_id: str = Field(default="", max_length=96)
     web_search_proxy: str = Field(default="")
     client_timing: Dict[str, float] = Field(default_factory=dict)
     max_tokens: int = Field(default=8192, ge=1, le=65536)
@@ -59,10 +61,17 @@ class UserMemoryBindingPayload(BaseModel):
     share_chat_history: bool = False
     is_host: bool = False
     inherit_assistant_profile: bool = False
+    password: str = Field(min_length=6)
+    confirm_password: str = Field(default="")
 
 
 class AdminLoginPayload(BaseModel):
     password: str = Field(min_length=1)
+
+
+class AnalysisLoginPayload(BaseModel):
+    password: str = Field(min_length=6)
+    confirm_password: str = Field(default="")
 
 
 class AuthPasswordPayload(BaseModel):
@@ -86,6 +95,19 @@ class ArtifactCommentPayload(BaseModel):
     content: str = Field(min_length=1)
     parent_id: Optional[int] = None
     author: str = Field(default="visitor")
+
+
+class ArtifactVisibilityPayload(BaseModel):
+    is_public: bool = False
+
+
+class TutorialArtifactPayload(BaseModel):
+    tutorial_id: str = Field(min_length=12, max_length=96)
+    prompt: str = Field(min_length=2, max_length=1200)
+
+
+class TutorialCleanupPayload(BaseModel):
+    tutorial_id: str = Field(min_length=12, max_length=96)
 
 
 class ModelSlotPayload(BaseModel):

@@ -148,7 +148,10 @@ def build_system_prompt(
     date_context = current_date_context()
     memory_gate_decision = normalize_memory_gate_decision(precomputed_memory_gate)
     try:
-        artifact_theater_context = format_artifact_theater_context_for_chat(user_message)
+        artifact_theater_context = format_artifact_theater_context_for_chat(
+            user_message,
+            owner_shared_user_id=shared_user_id_for_device(visitor_ip),
+        )
     except Exception as exc:
         artifact_theater_context = ""
         record_event(session_id, "artifact_theater_context_error", visitor_ip, {"error": str(exc)})
@@ -233,7 +236,12 @@ def build_system_prompt(
                         }
                     )
                 memory_context = format_curated_memory_context(memories)
-                artifact_context = format_idle_artifact_context(retrieve_idle_artifacts(query_vector))
+                artifact_context = format_idle_artifact_context(
+                    retrieve_idle_artifacts(
+                        query_vector,
+                        owner_shared_user_id=shared_user_id_for_device(visitor_ip),
+                    )
+                )
         except Exception as exc:
             record_event(session_id, "curated_memory_error", visitor_ip, {"error": str(exc)})
             memories = retrieve_curated_memories_by_text(
@@ -599,14 +607,6 @@ def admin_auth_token() -> str:
     ).hexdigest()
 
 
-def analysis_auth_token() -> str:
-    return hmac.new(
-        admin_secret_material().encode("utf-8"),
-        b"wangcai-analysis-admin",
-        "sha256",
-    ).hexdigest()
-
-
 def is_admin_authenticated(request: Request) -> bool:
     if not has_configured_admin_password():
         return False
@@ -614,21 +614,9 @@ def is_admin_authenticated(request: Request) -> bool:
     return hmac.compare_digest(token, admin_auth_token())
 
 
-def is_analysis_authenticated(request: Request) -> bool:
-    if not has_configured_admin_password():
-        return False
-    token = request.cookies.get(ANALYSIS_COOKIE_NAME, "")
-    return hmac.compare_digest(token, analysis_auth_token())
-
-
 def require_admin(request: Request) -> None:
     if not is_admin_authenticated(request):
         raise HTTPException(status_code=401, detail="admin password required")
-
-
-def require_analysis_admin(request: Request) -> None:
-    if not is_analysis_authenticated(request):
-        raise HTTPException(status_code=401, detail="analysis password required")
 
 
 def build_extra_body() -> Dict[str, Dict[str, bool]]:
