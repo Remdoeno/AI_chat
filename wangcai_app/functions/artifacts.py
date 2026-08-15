@@ -236,7 +236,7 @@ def user_controls_idle_writer(shared_user_id: str) -> bool:
     if not configured:
         set_app_setting("idle_writer_owner_shared_user_id", owner)
         return True
-    return hmac.compare_digest(configured, owner)
+    return secure_text_equals(configured, owner)
 
 
 def artifact_belongs_to_shared_user(artifact_id: int, shared_user_id: str) -> bool:

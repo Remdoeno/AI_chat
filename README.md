@@ -1,4 +1,4 @@
-# Wangcai 2.4 / 旺财2.4
+# Wangcai 2.4.1 / 旺财2.4.1
 
 ![Wangcai](static/brand/wangcai-2.0-journey.png)
 
@@ -472,5 +472,6 @@ git ls-files | grep -E '(^data/|^logs/|sqlite|\\.db$|\\.pid$|\\.env|safetensors|
 - `log/wangcai_2.1_release_20260618.md`
 - `log/wangcai_2.2_release_20260621.md`
 - `log/wangcai_2.4_release_20260816.md`
+- `log/wangcai_2.4.1_release_20260816.md`
 
 README 只介绍当前系统能力和部署方式；历史更新细节请看对应 release log。

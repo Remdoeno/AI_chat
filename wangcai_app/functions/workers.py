@@ -1283,15 +1283,15 @@ def list_idle_agent_artifacts(
                 "likes": int(row["likes"] or 0),
                 "is_public": bool(row["is_public"]),
                 "published_at": str(row["published_at"] or ""),
-                "is_owner": bool(viewer) and hmac.compare_digest(
+                "is_owner": bool(viewer) and secure_text_equals(
                     clean_shared_user_id(str(row["owner_shared_user_id"] or "")),
                     viewer,
                 ),
-                "can_delete": bool(viewer) and hmac.compare_digest(
+                "can_delete": bool(viewer) and secure_text_equals(
                     clean_shared_user_id(str(row["owner_shared_user_id"] or "")),
                     viewer,
                 ),
-                "can_publish": bool(viewer) and hmac.compare_digest(
+                "can_publish": bool(viewer) and secure_text_equals(
                     clean_shared_user_id(str(row["owner_shared_user_id"] or "")),
                     viewer,
                 ),

@@ -1,6 +1,13 @@
 # Shared-user credentials and analysis-mode authorization.
 
 
+def secure_text_equals(left: object, right: object) -> bool:
+    return hmac.compare_digest(
+        str(left or "").encode("utf-8"),
+        str(right or "").encode("utf-8"),
+    )
+
+
 def shared_user_id_for_device(device_id: str) -> str:
     normalized_device = normalize_visitor_ip(device_id)
     if not normalized_device or not is_device_identity(normalized_device):
@@ -279,7 +286,7 @@ def is_analysis_authenticated(request: Request, enforce_device_scope: bool = Fal
     if not enforce_device_scope:
         return True
     device_user = shared_user_id_for_device(visitor_ip(request))
-    return bool(device_user) and hmac.compare_digest(token_user, device_user)
+    return bool(device_user) and secure_text_equals(token_user, device_user)
 
 
 def require_analysis_user(request: Request) -> str:
