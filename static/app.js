@@ -2633,7 +2633,7 @@ function handleMemoryAdminLongPressStart() {
   window.clearTimeout(memoryAdminLongPressTimer);
   memoryAdminLongPressTimer = window.setTimeout(() => {
     memoryAdminLongPressTriggered = true;
-    window.location.href = "/memory-admin";
+    openMemoryAdminDialog();
   }, WARN_LONG_PRESS_MS);
 }
 

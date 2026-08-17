@@ -20,8 +20,8 @@ def memory_dashboard(request: Request) -> FileResponse:
 
 @app.get("/memory-admin", include_in_schema=False)
 def memory_admin_dashboard(request: Request) -> FileResponse:
-    if not is_analysis_authenticated(request):
-        return html_response("analysis_login.html")
+    if not is_admin_authenticated(request):
+        return html_response("memory_admin_login.html")
     return html_response("memory_admin.html")
 
 

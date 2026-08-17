@@ -5,6 +5,9 @@ const refreshButton = document.getElementById("refreshButton");
 const statusText = document.getElementById("statusText");
 const memoryCount = document.getElementById("memoryCount");
 const memoryList = document.getElementById("memoryList");
+const userScopeCount = document.getElementById("userScopeCount");
+const userScopeList = document.getElementById("userScopeList");
+const activeUserScope = document.getElementById("activeUserScope");
 const newLabel = document.getElementById("newLabel");
 const newIp = document.getElementById("newIp");
 const newTimeline = document.getElementById("newTimeline");
@@ -17,6 +20,8 @@ const fetch = (input, init = {}) => window.fetch(input, {
 
 const LABELS = ["preference", "identity", "rule", "persona", "risk", "diary", "event", "fact", "other"];
 let refreshTimer = null;
+let selectedSharedUserId = "";
+let memoryUsers = [];
 
 function setStatus(text) {
   statusText.textContent = text;
@@ -136,9 +141,49 @@ function renderEmpty() {
   memoryList.appendChild(node);
 }
 
+function makeUserScopeButton(user = null) {
+  const userId = user ? user.shared_user_id : "";
+  const button = document.createElement("button");
+  button.className = "user-scope-button";
+  button.type = "button";
+  button.setAttribute("role", "option");
+  button.classList.toggle("is-active", selectedSharedUserId === userId);
+  button.setAttribute("aria-selected", String(selectedSharedUserId === userId));
+
+  const title = document.createElement("strong");
+  title.textContent = user ? userId : "全部记忆";
+  const detail = document.createElement("span");
+  detail.textContent = user
+    ? `${user.memory_count || 0} 条记忆 · ${user.device_count || 0} 台设备`
+    : "不限制共享用户";
+  button.append(title, detail);
+  button.addEventListener("click", () => {
+    if (selectedSharedUserId === userId) return;
+    selectedSharedUserId = userId;
+    deviceFilter.value = "";
+    renderMemoryUsers({ total: memoryUsers.length, items: memoryUsers });
+    loadMemories().catch((error) => setStatus(`失败: ${error.message}`));
+  });
+  return button;
+}
+
+function renderMemoryUsers(payload) {
+  memoryUsers = payload.items || [];
+  if (selectedSharedUserId && !memoryUsers.some((item) => item.shared_user_id === selectedSharedUserId)) {
+    selectedSharedUserId = "";
+  }
+  userScopeCount.textContent = `${payload.total ?? memoryUsers.length} 位`;
+  activeUserScope.textContent = selectedSharedUserId || "全部用户";
+  clearChildren(userScopeList);
+  userScopeList.appendChild(makeUserScopeButton());
+  for (const user of memoryUsers) {
+    userScopeList.appendChild(makeUserScopeButton(user));
+  }
+}
+
 function renderMemories(payload) {
   clearChildren(memoryList);
-  memoryCount.textContent = String(payload.total ?? 0);
+  memoryCount.textContent = `${payload.total ?? 0} 条`;
   const items = payload.items || [];
   if (!items.length) {
     renderEmpty();
@@ -160,6 +205,7 @@ function renderMemories(payload) {
       item.supersedes_id ? `supersedes #${item.supersedes_id}` : null,
       item.refine_status ? `精简 ${item.refine_status}` : null,
       item.refined_from_id ? `from #${item.refined_from_id}` : null,
+      item.shared_user_id ? `user ${item.shared_user_id}` : null,
       item.device_id || item.visitor_ip ? `device ${item.device_id || item.visitor_ip}` : "global",
       `updated ${formatTime(item.updated_at)}`,
     ].filter(Boolean).join(" · ");
@@ -188,7 +234,7 @@ function renderMemories(payload) {
     const deviceInput = document.createElement("input");
     deviceInput.type = "text";
     deviceInput.value = item.device_id || item.visitor_ip || "";
-    deviceInput.placeholder = "仅可选择当前共享用户已绑定的设备";
+    deviceInput.placeholder = "留空则设为全局记忆";
     deviceField.append(deviceTitle, deviceInput);
 
     const contentField = document.createElement("label");
@@ -233,19 +279,26 @@ function buildQuery() {
   const params = new URLSearchParams();
   if (keywordInput.value.trim()) params.set("keyword", keywordInput.value.trim());
   if (labelFilter.value) params.set("label", labelFilter.value);
+  if (selectedSharedUserId) params.set("shared_user_id_filter", selectedSharedUserId);
   if (deviceFilter.value.trim()) params.set("device_id_filter", deviceFilter.value.trim());
-  params.set("limit", "300");
+  params.set("limit", "1000");
   return params.toString();
 }
 
 async function ensureOk(response) {
   if (response.status === 401) {
-    window.location.href = "/analysis-login?next=/memory-admin";
+    window.location.href = "/memory-admin";
     throw new Error("需要重新登录");
   }
   if (!response.ok) {
     throw new Error(await response.text());
   }
+}
+
+async function loadMemoryUsers() {
+  const response = await fetch("/api/admin/memory-users");
+  await ensureOk(response);
+  renderMemoryUsers(await response.json());
 }
 
 async function loadMemories() {
@@ -276,7 +329,7 @@ async function createMemory() {
   await ensureOk(response);
   newContent.value = "";
   setStatus("已新增");
-  await loadMemories();
+  await Promise.all([loadMemoryUsers(), loadMemories()]);
 }
 
 async function updateMemory(id, content, label, timelinePayload, deviceId) {
@@ -297,7 +350,7 @@ async function updateMemory(id, content, label, timelinePayload, deviceId) {
   });
   await ensureOk(response);
   setStatus(`已保存 #${id}`);
-  await loadMemories();
+  await Promise.all([loadMemoryUsers(), loadMemories()]);
 }
 
 async function deleteMemory(id) {
@@ -305,7 +358,7 @@ async function deleteMemory(id) {
   const response = await fetch(`/api/admin/memories/${id}`, { method: "DELETE" });
   await ensureOk(response);
   setStatus(`已删除 #${id}`);
-  await loadMemories();
+  await Promise.all([loadMemoryUsers(), loadMemories()]);
 }
 
 function scheduleLoad() {
@@ -319,7 +372,7 @@ keywordInput.addEventListener("input", scheduleLoad);
 labelFilter.addEventListener("change", scheduleLoad);
 deviceFilter.addEventListener("input", scheduleLoad);
 refreshButton.addEventListener("click", () => {
-  loadMemories().catch((error) => setStatus(`失败: ${error.message}`));
+  Promise.all([loadMemoryUsers(), loadMemories()]).catch((error) => setStatus(`失败: ${error.message}`));
 });
 createButton.addEventListener("click", () => {
   createMemory().catch((error) => setStatus(`失败: ${error.message}`));
@@ -327,4 +380,4 @@ createButton.addEventListener("click", () => {
 
 const newTimelinePicker = makeTimelineEditor({});
 newTimeline.replaceChildren(newTimelinePicker.root);
-loadMemories().catch((error) => setStatus(`失败: ${error.message}`));
+Promise.all([loadMemoryUsers(), loadMemories()]).catch((error) => setStatus(`失败: ${error.message}`));

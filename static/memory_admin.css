@@ -36,7 +36,7 @@ a {
 
 .admin-shell {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -106,6 +106,70 @@ h1 {
 
 h2 {
   font-size: 17px;
+}
+
+.user-scope-panel {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.user-scope-head,
+.section-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-scope-head span,
+.section-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.user-scope-list {
+  display: grid;
+  gap: 6px;
+  max-height: 264px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.user-scope-button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--panel);
+  cursor: pointer;
+  text-align: left;
+}
+
+.user-scope-button strong,
+.user-scope-button span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.user-scope-button span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-scope-button:hover {
+  border-color: var(--accent);
+}
+
+.user-scope-button.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+  color: var(--accent-strong);
 }
 
 .field {
@@ -181,6 +245,15 @@ textarea:focus {
   color: var(--muted);
   font-size: 13px;
   font-weight: 800;
+}
+
+.section-summary {
+  justify-content: flex-end;
+}
+
+.section-summary span + span {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
 }
 
 .memory-list {
@@ -300,6 +373,18 @@ html[data-theme="dark"] .empty {
   background: rgba(16, 18, 24, 0.94);
   color: var(--ink);
   box-shadow: var(--shadow);
+}
+
+html[data-theme="dark"] .user-scope-button {
+  border-color: #3f3827;
+  background: #0d0f14;
+  color: var(--ink);
+}
+
+html[data-theme="dark"] .user-scope-button.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+  color: #f0c85a;
 }
 
 html[data-theme="dark"] .back-link,

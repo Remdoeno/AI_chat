@@ -38,6 +38,42 @@ def shared_user_device_ids(shared_user_id: str) -> List[str]:
     ]
 
 
+def list_admin_memory_users() -> Dict[str, object]:
+    with connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT bindings.shared_user_id,
+                   COUNT(DISTINCT bindings.device_id) AS device_count,
+                   COUNT(DISTINCT memories.id) AS memory_count,
+                   MAX(bindings.updated_at) AS updated_at
+            FROM shared_user_bindings bindings
+            LEFT JOIN curated_memories memories
+              ON memories.visitor_ip = bindings.device_id
+             AND memories.importance_label NOT IN ('artifact', 'characters')
+             AND memories.source_session_id NOT LIKE 'artifact-%'
+             AND memories.source_session_id NOT LIKE 'character-profile-%'
+            WHERE TRIM(bindings.shared_user_id) <> ''
+            GROUP BY bindings.shared_user_id
+            ORDER BY memory_count DESC, bindings.shared_user_id COLLATE NOCASE ASC
+            """
+        ).fetchall()
+        items = []
+        for row in rows:
+            shared_user_id = clean_shared_user_id(str(row["shared_user_id"] or ""))
+            if not shared_user_id:
+                continue
+            items.append(
+                {
+                    "shared_user_id": shared_user_id,
+                    "device_count": int(row["device_count"] or 0),
+                    "memory_count": int(row["memory_count"] or 0),
+                    "host_device_id": effective_host_device_id(conn, shared_user_id),
+                    "updated_at": str(row["updated_at"] or ""),
+                }
+            )
+    return {"total": len(items), "items": items}
+
+
 def require_shared_user_for_request(request: Request) -> str:
     shared_user_id = shared_user_id_for_device(visitor_ip(request))
     if not shared_user_id:

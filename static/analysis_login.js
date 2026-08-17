@@ -8,7 +8,7 @@ const returnLink = document.getElementById("analysisReturnLink");
 const pageTitle = document.querySelector(".analysis-login-card h1");
 
 let configured = true;
-const allowedNextPaths = new Set(["/analysis", "/memory", "/memory-admin"]);
+const allowedNextPaths = new Set(["/analysis", "/memory"]);
 
 function nextPath() {
   const requested = new URLSearchParams(window.location.search).get("next") || "";

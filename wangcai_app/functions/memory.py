@@ -1217,7 +1217,13 @@ def list_admin_memories(
                    timeline_at, timeline_start_at, timeline_end_at, timeline_kind,
                    supersedes_id, confidence,
                    refine_status, refined_at, refined_from_id, refine_reason,
-                   created_at, updated_at
+                   created_at, updated_at,
+                   (
+                       SELECT bindings.shared_user_id
+                       FROM shared_user_bindings bindings
+                       WHERE bindings.device_id = curated_memories.visitor_ip
+                       LIMIT 1
+                   ) AS shared_user_id
             FROM curated_memories
             {where}
             ORDER BY id DESC
@@ -1240,6 +1246,7 @@ def list_admin_memories(
                 "importance_label": str(row["importance_label"]),
                 "visitor_ip": str(row["visitor_ip"]) if row["visitor_ip"] else None,
                 "device_id": str(row["visitor_ip"]) if row["visitor_ip"] else None,
+                "shared_user_id": str(row["shared_user_id"] or ""),
                 "profile_id": int(row["profile_id"]) if row["profile_id"] is not None else None,
                 "timeline_at": str(row["timeline_at"] or ""),
                 "timeline_start_at": str(row["timeline_start_at"] or ""),

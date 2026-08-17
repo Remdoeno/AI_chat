@@ -341,16 +341,16 @@ def admin_memories_endpoint(
     request: Request,
     keyword: str = "",
     label: str = "",
+    shared_user_id_filter: str = "",
     visitor_ip_filter: str = "",
     device_id_filter: str = "",
     limit: int = Query(default=200, ge=1, le=1000),
 ) -> Dict[str, object]:
     init_db()
-    shared_user_id = require_analysis_user(request)
-    devices = shared_user_device_ids(shared_user_id)
+    require_admin(request)
+    selected_user = clean_shared_user_id(shared_user_id_filter)
+    devices = shared_user_device_ids(selected_user) if selected_user else None
     requested_filter = device_id_filter or visitor_ip_filter
-    if requested_filter:
-        shared_user_memory_device_id(shared_user_id, requested_filter)
     return list_admin_memories(
         keyword=keyword,
         label=label,
@@ -360,15 +360,19 @@ def admin_memories_endpoint(
     )
 
 
+@app.get("/api/admin/memory-users")
+def admin_memory_users_endpoint(request: Request) -> Dict[str, object]:
+    init_db()
+    require_admin(request)
+    return list_admin_memory_users()
+
+
 @app.post("/api/admin/memories")
 def admin_create_memory_endpoint(payload: MemoryAdminPayload, request: Request) -> Dict[str, object]:
     init_db()
     reject_tutorial_persistence(request, "memory")
-    shared_user_id = require_analysis_user(request)
-    target_device = shared_user_memory_device_id(
-        shared_user_id,
-        payload.device_id or payload.visitor_ip or "",
-    )
+    require_admin(request)
+    target_device = payload.device_id or payload.visitor_ip or ""
     memory_id = create_admin_memory(
         payload.content,
         payload.importance_label,
@@ -390,16 +394,10 @@ def admin_update_memory_endpoint(
 ) -> Dict[str, object]:
     init_db()
     reject_tutorial_persistence(request, "memory")
-    shared_user_id = require_analysis_user(request)
-    devices = shared_user_device_ids(shared_user_id)
-    if not memory_id_in_device_scope(memory_id, devices):
-        raise HTTPException(status_code=404, detail="memory not found")
+    require_admin(request)
     target_device = None
     if payload.device_id is not None or payload.visitor_ip is not None:
-        target_device = shared_user_memory_device_id(
-            shared_user_id,
-            payload.device_id if payload.device_id is not None else payload.visitor_ip or "",
-        )
+        target_device = payload.device_id if payload.device_id is not None else payload.visitor_ip or ""
     updated = update_admin_memory(
         memory_id,
         payload.content,
@@ -420,9 +418,7 @@ def admin_update_memory_endpoint(
 def admin_delete_memory_endpoint(memory_id: int, request: Request) -> Dict[str, object]:
     init_db()
     reject_tutorial_persistence(request, "memory")
-    devices = shared_user_device_ids(require_analysis_user(request))
-    if not memory_id_in_device_scope(memory_id, devices):
-        raise HTTPException(status_code=404, detail="memory not found")
+    require_admin(request)
     deleted = delete_admin_memory(memory_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="memory not found")
