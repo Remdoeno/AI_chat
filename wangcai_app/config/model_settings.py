@@ -352,17 +352,7 @@ def model_http_client(slot: Dict[str, object], timeout: float) -> httpx.Client:
 
 def openai_client_for_slot(slot_name: str, timeout: float) -> Tuple[OpenAI, httpx.Client, Dict[str, object]]:
     slot = model_slot_config(slot_name)
-    http_client = model_http_client(slot, timeout)
-    client_kwargs: Dict[str, object] = {}
-    if slot.get("provider") == "local":
-        client_kwargs["max_retries"] = 0
-    client = OpenAI(
-        api_key=model_api_key(slot),
-        base_url=str(slot.get("base_url") or BASE_URL).rstrip("/"),
-        http_client=http_client,
-        **client_kwargs,
-    )
-    return client, http_client, slot
+    return configured_model_client(slot, timeout, task='background' if slot_name == MODEL_SLOT_BACKGROUND else 'chat')
 
 
 def model_supports_thinking(slot: Dict[str, object]) -> bool:

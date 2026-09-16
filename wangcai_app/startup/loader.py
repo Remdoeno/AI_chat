@@ -19,6 +19,7 @@ SOURCE_FILES = (
     "wangcai_app/functions/persistence.py",
     "wangcai_app/functions/shared_user_auth.py",
     "wangcai_app/functions/sessions.py",
+    "wangcai_app/functions/release_controls.py",
     "wangcai_app/functions/memory.py",
     "wangcai_app/functions/recent_state.py",
     "wangcai_app/functions/image_generation.py",
@@ -36,6 +37,7 @@ SOURCE_FILES = (
     "wangcai_app/routes/api.py",
     "wangcai_app/routes/schedule.py",
     "wangcai_app/routes/memberships.py",
+    "wangcai_app/routes/release_controls.py",
 )
 
 _NAMESPACE_CACHE: Dict[str, Any] | None = None
