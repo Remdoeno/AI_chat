@@ -453,7 +453,7 @@ def call_artifact_directive_agent_model(context: str) -> Dict[str, object]:
             ],
             temperature=HIDDEN_ARTIFACT_DIRECTIVE_AGENT_TEMPERATURE,
             top_p=HIDDEN_ARTIFACT_DIRECTIVE_AGENT_TOP_P,
-            max_tokens=HIDDEN_ARTIFACT_DIRECTIVE_AGENT_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, HIDDEN_ARTIFACT_DIRECTIVE_AGENT_MAX_TOKENS),
         )
         content = (resp.choices[0].message.content or "").strip()
         _, answer = split_think_text(content)
@@ -565,7 +565,7 @@ def maybe_start_artifact_directive_agent_job(
                     payload={"error": str(exc)},
                 )
 
-    thread = threading.Thread(target=worker, daemon=True, name=f"artifact-directive-agent-{session_id[:8]}")
+    thread = threading.Thread(target=bind_model_context(worker), daemon=True, name=f"artifact-directive-agent-{session_id[:8]}")
     thread.start()
     return True
 

@@ -29,9 +29,13 @@ SOURCE_FILES = (
     "wangcai_app/functions/workers.py",
     "wangcai_app/functions/background_dashboard.py",
     "wangcai_app/functions/chat.py",
+    "wangcai_app/functions/schedule.py",
+    "wangcai_app/functions/memberships.py",
     "wangcai_app/functions/tutorial.py",
     "wangcai_app/routes/pages.py",
     "wangcai_app/routes/api.py",
+    "wangcai_app/routes/schedule.py",
+    "wangcai_app/routes/memberships.py",
 )
 
 _NAMESPACE_CACHE: Dict[str, Any] | None = None

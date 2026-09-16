@@ -2,10 +2,47 @@
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    schedule_store().initialize()
+    membership_store().initialize()
+    holiday_calendar().initialize()
+    schedule_memory_stop = threading.Event()
+    schedule_memory_thread = threading.Thread(target=run_schedule_memory_maintenance, args=(schedule_memory_stop,), daemon=True)
+    schedule_memory_thread.start()
+    threading.Thread(target=run_holiday_sync, args=(schedule_memory_stop,), daemon=True).start()
     start_memory_agent_worker()
     start_idle_agent_worker()
-    yield
+    try:
+        yield
+    finally:
+        schedule_memory_stop.set()
 
 
-app = FastAPI(title="Wangcai Web", version="2.5.0", lifespan=lifespan)
+app = FastAPI(
+    title="Wangcai Web",
+    version="2.8.5",
+    lifespan=lifespan,
+    openapi_url=None,
+    docs_url=None,
+    redoc_url=None,
+)
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: Callable) -> Response:
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    if request.url.scheme == "https" or forwarded_proto == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+app.add_middleware(ModelOwnerMiddleware, resolve_owner=model_owner_for_request)
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

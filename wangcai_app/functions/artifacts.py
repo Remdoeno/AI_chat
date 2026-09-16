@@ -1569,7 +1569,7 @@ def call_idle_series_planner_model(context: str) -> Dict[str, object]:
             ],
             temperature=IDLE_SERIES_PLANNER_TEMPERATURE,
             top_p=IDLE_SERIES_PLANNER_TOP_P,
-            max_tokens=IDLE_SERIES_PLANNER_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, IDLE_SERIES_PLANNER_MAX_TOKENS),
         )
         _, answer = split_think_text(resp.choices[0].message.content or "")
         return parse_idle_series_planner_response(answer)
@@ -2305,7 +2305,7 @@ def call_idle_agent_repair_model(raw_text: str, source_prompt: str) -> Dict[str,
             ],
             temperature=0.1,
             top_p=0.9,
-            max_tokens=max(4096, min(int(IDLE_AGENT_MAX_TOKENS), 12000)),
+            max_tokens=model_output_token_limit(model_slot, max(4096, min(int(IDLE_AGENT_MAX_TOKENS), 12000))),
         )
         _, answer = split_think_text(resp.choices[0].message.content or "")
         return parse_idle_agent_response(answer)
@@ -2363,7 +2363,7 @@ def call_idle_agent_model(prompt: str) -> Dict[str, str]:
             ],
             temperature=IDLE_AGENT_TEMPERATURE,
             top_p=IDLE_AGENT_TOP_P,
-            max_tokens=IDLE_AGENT_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, IDLE_AGENT_MAX_TOKENS),
             stream=True,
         )
         chunks: List[str] = []

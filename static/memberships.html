@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>会员卡包 · 旺财</title><link rel="icon" href="/static/favicon.svg" />
+<script src="/static/theme.js?v=20260916_home_2_8_1"></script>
+<link rel="stylesheet" href="/static/schedule.css?v=20260916_memberships_2_7_0" />
+<link rel="stylesheet" href="/static/memberships.css?v=20260916_home_2_8_1" />
+</head>
+<body>
+<main class="schedule-shell">
+<header class="page-header"><a class="brand" href="/">🐰 <span>旺财 / 会员卡包</span></a><nav><a href="/">返回聊天</a><button type="button" class="icon-button" data-theme-toggle aria-label="切换深色模式">◐</button></nav></header>
+<section class="intro"><div><p class="eyebrow">记住余额，把选择留给你</p><h1>我的会员卡<span class="heading-dot">.</span></h1><p class="muted">有需要时再用，不让余额被忘记</p></div><button id="newCard" class="primary" type="button">＋ 添加会员卡</button></section>
+<div id="pageStatus" class="notice" role="status" hidden></div>
+<div class="workspace">
+<section class="calendar-panel" aria-label="会员卡列表">
+<div class="wallet-toolbar"><div><h2 id="cardCount">正在读取…</h2><p id="hintState" class="muted"></p></div><button id="resumeHint" type="button" hidden>恢复首页提示</button><button id="refreshCards" type="button">↻ 刷新</button></div>
+<div id="walletCards" class="wallet-cards"></div>
+<p class="wallet-note muted">首页每日轮换一张卡，可折叠或延后一个月。余额和次数按你提供的信息记录，未知的留空；消费后告诉旺财最新余额即可。</p>
+</section>
+<aside class="chat-panel" aria-label="和旺财管理会员卡">
+<div class="chat-heading"><span class="avatar">🐰</span><div><h2>和旺财整理卡包</h2><p class="muted">更新余额、记录问题、暂停提示</p></div></div>
+<div id="cardChatMessages" class="chat-messages" aria-live="polite"><div class="bubble assistant">告诉我卡名、剩余余额或次数就好。<br />不确定的先留空，遇到使用问题也可以记在这里。</div></div>
+<form id="cardChatForm" class="chat-composer"><label for="cardChatInput" class="sr-only">会员卡信息</label><textarea id="cardChatInput" rows="3" maxlength="4000" placeholder="例如：玉生堂还剩300元；这张卡先别提醒…" required></textarea><div><span class="muted">也可以在首页聊天中告诉我</span><button id="sendCardChat" class="primary" type="submit">发送 ↑</button></div></form>
+</aside>
+</div><p class="page-note">同一绑定用户跨设备同步 · 与后台关联记忆同步 · 不提供通知推送</p>
+</main>
+<dialog id="cardDialog" aria-labelledby="cardDialogTitle"><form id="cardForm">
+<div class="dialog-header"><h2 id="cardDialogTitle">添加会员卡</h2><button id="closeCard" type="button" class="icon-button" aria-label="关闭">×</button></div>
+<label>名称<input name="name" required maxlength="120" placeholder="品牌或门店名称" /></label>
+<div class="form-row"><label>准确余额（元）<input name="balance" type="number" min="0" max="999999999" step="0.01" placeholder="不确定就留空" /></label><label>剩余次数<input name="remaining_uses" type="number" min="0" max="100000" step="1" placeholder="不确定就留空" /></label></div>
+<label>余额补充<input name="balance_note" maxlength="120" placeholder="例如：还有几元；有余额，具体待核实" /></label>
+<label>适用门店／地点<input name="location" maxlength="200" /></label>
+<div class="form-row"><label>有效期<input name="expires_on" type="date" /></label><label>使用状态<select name="status"><option value="active">待使用</option><option value="issue">使用问题待处理</option><option value="used_up">已用完</option></select></label></div>
+<label>首页提示<select name="reminder_enabled"><option value="true">参与每日轮换</option><option value="false">暂停这张卡的提示</option></select></label>
+<label>备注／使用问题<textarea name="notes" rows="3" maxlength="2000" placeholder="例如：归属地似乎有问题，需要核实适用门店"></textarea></label>
+<p class="muted form-help">余额和次数分别记录；标为已用完后保留记录，不再提醒。</p><p id="cardFormStatus" class="form-status" role="status"></p>
+<div class="dialog-actions"><button id="deleteCard" type="button" class="danger" hidden>删除卡片</button><button id="saveCard" type="submit" class="primary">保存卡片</button></div>
+</form></dialog>
+<script src="/static/device_identity.js?v=20260916_memberships_2_7_0"></script><script src="/static/memberships.js?v=20260916_member_dismiss_day_2_8_2"></script>
+</body></html>

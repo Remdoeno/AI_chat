@@ -230,7 +230,7 @@ def generate_tutorial_artifact(tutorial_id: str, device_id: str, prompt: str) ->
             ],
             temperature=0.8,
             top_p=0.9,
-            max_tokens=1800,
+            max_tokens=model_output_token_limit(slot, 1800),
             stream=False,
         )
         raw = response.choices[0].message.content or ""

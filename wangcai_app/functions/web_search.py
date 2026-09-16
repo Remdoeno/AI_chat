@@ -201,7 +201,7 @@ def extract_search_results(html_text: str, max_results: int = WEB_SEARCH_MAX_RES
 
 
 def normalize_web_search_proxy(proxy: str = "") -> Optional[str]:
-    selected = (proxy or "").strip() or WEB_SEARCH_PROXY.strip()
+    selected = (proxy or "").strip() or str(load_model_settings().get(MODEL_WEB_SEARCH_PROXY_KEY) or "").strip() or WEB_SEARCH_PROXY.strip()
     if not selected:
         return None
     parsed = urlparse(selected)
@@ -606,7 +606,7 @@ def build_memory_retrieval_query(
             messages=planner_messages,
             temperature=0.05,
             top_p=0.8,
-            max_tokens=320,
+            max_tokens=model_output_token_limit(model_slot, 320),
         )
         content = resp.choices[0].message.content or ""
         _, answer = split_think_text(content)
@@ -731,7 +731,7 @@ def get_memory_gate_decision(
             messages=messages,
             temperature=0.0,
             top_p=0.8,
-            max_tokens=MEMORY_GATE_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_GATE_MAX_TOKENS),
         )
         content = resp.choices[0].message.content or ""
         _, answer = split_think_text(content)
@@ -899,7 +899,7 @@ def build_search_plan(
             ],
             temperature=0.1,
             top_p=0.8,
-            max_tokens=500,
+            max_tokens=model_output_token_limit(model_slot, 500),
         )
         content = resp.choices[0].message.content or ""
         _, answer = split_think_text(content)

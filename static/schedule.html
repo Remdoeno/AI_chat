@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#f5f6f2" />
+  <title>日程 · 旺财</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <script src="/static/theme.js?v=20260916_memberships_2_7_0"></script>
+  <link rel="stylesheet" href="/static/schedule.css?v=20260916_weekend_red_2_8_1" />
+</head>
+<body>
+  <main class="schedule-shell">
+    <header class="page-header">
+      <a class="brand" href="/">🐰 <span>旺财<span class="brand-divider"> / </span>日程</span></a>
+      <nav><a href="/">返回聊天</a><button type="button" class="icon-button" data-theme-toggle aria-label="切换深色模式">◐</button></nav>
+    </header>
+    <section class="intro">
+      <div><p class="eyebrow">留一点空间，给生活</p><h1>接下来的两周<span class="heading-dot">.</span></h1><p id="dateRange" class="muted">正在读取日程…</p></div>
+      <button id="addEvent" type="button" class="primary">＋ 新建事项</button>
+    </section>
+    <div id="pageStatus" class="notice" role="status" aria-live="polite" hidden></div>
+    <div class="workspace">
+      <section class="calendar-panel" aria-label="两周日历">
+        <div class="calendar-toolbar"><div class="view-label">▦ <strong>两周日历</strong><span id="eventCount" class="pill"></span></div><div class="toolbar-actions"><button id="todayButton" type="button">今天</button><button id="refreshButton" type="button" aria-label="刷新日程">↻ 刷新</button></div></div>
+        <div class="legend-status"><span><i class="sample confirmed"></i>已确定</span><span><i class="sample tentative"></i>待确认</span><span class="legend-hint">点击事项查看或修改</span></div>
+        <div class="holiday-legend"><span><b class="holiday-badge holiday">休</b> 放假</span><span><b class="holiday-badge makeup">班</b> 调休补班</span><span class="weekend-date">红色日期：周六、周日</span></div>
+        <div id="dateStrip" class="date-strip" aria-label="选择日期"></div>
+        <div id="calendarGrid" class="calendar-grid"></div>
+        <div id="mobileAgenda" class="mobile-agenda"></div>
+        <section class="undated-section"><div class="section-title"><h2>日期待定</h2><span class="muted">先记下来，再慢慢确定</span></div><div id="undatedEvents" class="undated-events"></div></section>
+        <footer class="calendar-footer"><span class="muted">场景图例</span><div id="categoryLegend" class="category-legend"></div></footer>
+        <details class="holiday-source"><summary>全国放假调休 · 每日自动更新</summary><div id="holidayStatus" role="status"></div></details>
+      </section>
+      <aside class="chat-panel" aria-label="和旺财管理日程">
+        <div class="chat-heading"><span class="avatar">🐰</span><div><h2>和旺财安排一下</h2><p class="muted">告诉我这件事，剩下的慢慢确认</p></div></div>
+        <div id="chatMessages" class="chat-messages" aria-live="polite" aria-relevant="additions">
+          <div class="bubble assistant">把近期的安排告诉我吧。<br />只是有这个事情，我会先画成虚线；确定要去，再变成实线。</div>
+          <div class="chat-examples"><p>你可以这样说</p><button type="button" data-example="周五有个宣讲会，还没决定去不去">周五有宣讲会，还没决定去</button><button type="button" data-example="明天中午和同学约好了吃饭">明天中午和同学约好了吃饭</button><button type="button" data-example="请从已有记忆中导入未来两周的日程，不确定出席的先标为待确认">从已有记忆整理近期日程</button></div>
+        </div>
+        <form id="scheduleChatForm" class="chat-composer"><label for="chatInput" class="sr-only">输入日程安排</label><textarea id="chatInput" rows="3" maxlength="4000" placeholder="添加、补充、改期、确认或取消…" required></textarea><div><span class="muted">也可以在首页聊天中告诉我</span><button id="sendChat" type="submit" class="primary">发送 ↑</button></div></form>
+      </aside>
+    </div>
+    <p class="page-note">日期和时间均为北京时间 · 同一绑定用户跨设备同步 · 暂不提供闹钟推送</p>
+  </main>
+  <dialog id="eventDialog" aria-labelledby="eventDialogTitle">
+    <form id="eventForm">
+      <div class="dialog-header"><h2 id="eventDialogTitle">新建事项</h2><button id="closeDialog" type="button" class="icon-button" aria-label="关闭">×</button></div>
+      <label>事项名称<input name="title" maxlength="120" required placeholder="例如：和同学约饭" /></label>
+      <div class="form-row"><label>分类<select name="category" id="categorySelect"></select></label><label>状态<select name="status"><option value="tentative">待确认 · 虚线</option><option value="confirmed">已确定 · 实线</option><option value="cancelled">已取消</option></select></label></div>
+      <label>重复<select name="repeat"><option value="none">不重复</option><option value="weekly">每周重复（按开始日期的星期）</option></select></label>
+      <p class="muted form-help">每周事项会自动续排。编辑或删除重复事项会作用于整个系列；保存时同步更新记忆。</p>
+      <div class="form-row"><label>开始日期<input name="date" type="date" /></label><label>开始时间<input name="time" type="time" /></label></div>
+      <div class="form-row"><label>结束日期（可选）<input name="end_date" type="date" /></label><label>结束时间（可选）<input name="end_time" type="time" /></label></div>
+      <p class="muted form-help">不知道日期或时间可以留空，不会替你猜测。</p>
+      <label>地点<input name="location" maxlength="200" placeholder="线下地点或线上会议" /></label>
+      <label>备注<textarea name="notes" rows="3" maxlength="2000" placeholder="例如：下午，具体时间还没定"></textarea></label>
+      <p id="formStatus" class="form-status" role="status"></p>
+      <div class="dialog-actions"><button id="deleteEvent" type="button" class="danger" hidden>删除事项</button><button id="saveEvent" type="submit" class="primary">保存事项</button></div>
+    </form>
+  </dialog>
+  <script src="/static/device_identity.js?v=20260916_memberships_2_7_0"></script>
+  <script src="/static/schedule.js?v=20260916_weekend_red_2_8_1"></script>
+</body>
+</html>

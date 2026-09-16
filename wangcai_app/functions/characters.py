@@ -1222,7 +1222,7 @@ def call_hidden_character_agent_model(context: str) -> Dict[str, object]:
             ],
             temperature=HIDDEN_CHARACTER_AGENT_TEMPERATURE,
             top_p=HIDDEN_CHARACTER_AGENT_TOP_P,
-            max_tokens=HIDDEN_CHARACTER_AGENT_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, HIDDEN_CHARACTER_AGENT_MAX_TOKENS),
         )
         content = (resp.choices[0].message.content or "").strip()
         _, answer = split_think_text(content)
@@ -1764,7 +1764,7 @@ def call_character_library_agent_model(context: str) -> Dict[str, object]:
             ],
             temperature=HIDDEN_CHARACTER_AGENT_TEMPERATURE,
             top_p=HIDDEN_CHARACTER_AGENT_TOP_P,
-            max_tokens=HIDDEN_CHARACTER_AGENT_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, HIDDEN_CHARACTER_AGENT_MAX_TOKENS),
         )
         content = (resp.choices[0].message.content or "").strip()
         _, answer = split_think_text(content)
@@ -1883,7 +1883,7 @@ def maybe_start_character_avatar_job(character_result: object, visitor_ip: str) 
                 {"character_id": character_id, "error": str(exc)},
             )
 
-    thread = threading.Thread(target=worker, daemon=True, name=f"character-avatar-{character_id}")
+    thread = threading.Thread(target=bind_model_context(worker), daemon=True, name=f"character-avatar-{character_id}")
     thread.start()
 
 
@@ -1914,7 +1914,7 @@ def maybe_start_character_photo_job_if_missing(character_result: object, visitor
                 {"character_id": character_id, "error": str(exc)},
             )
 
-    thread = threading.Thread(target=worker, daemon=True, name=f"character-photo-{character_id}")
+    thread = threading.Thread(target=bind_model_context(worker), daemon=True, name=f"character-photo-{character_id}")
     thread.start()
 
 
@@ -2203,7 +2203,7 @@ def maybe_start_character_image_tasks(character_result: object, image_tasks: obj
                     {"character_id": character_id, "kind": kind, "error": str(exc)},
                 )
 
-    thread = threading.Thread(target=worker, daemon=True, name=f"character-image-tasks-{character_id}")
+    thread = threading.Thread(target=bind_model_context(worker), daemon=True, name=f"character-image-tasks-{character_id}")
     thread.start()
 
 
@@ -2383,7 +2383,7 @@ def maybe_start_hidden_character_agent_job(
                     payload={"error": str(exc), "source_type": source_type},
                 )
 
-    thread = threading.Thread(target=worker, daemon=True, name=f"hidden-character-agent-{session_id[:8]}")
+    thread = threading.Thread(target=bind_model_context(worker), daemon=True, name=f"hidden-character-agent-{session_id[:8]}")
     thread.start()
     return True
 

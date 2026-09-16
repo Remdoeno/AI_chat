@@ -397,7 +397,7 @@ def call_memory_validation_model(
             messages=messages,
             temperature=MEMORY_VALIDATION_TEMPERATURE,
             top_p=0.8,
-            max_tokens=MEMORY_VALIDATION_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_VALIDATION_MAX_TOKENS),
         )
         content = resp.choices[0].message.content or ""
         _, answer = split_think_text(content)
@@ -474,6 +474,7 @@ def load_event_update_candidates(session_id: str, limit: int = EVENT_MEMORY_UPDA
             FROM curated_memories
             WHERE visitor_ip IN {in_clause}
               AND importance_label = 'event'
+              AND source_session_id NOT LIKE 'schedule-%'
               AND id NOT IN (
                 SELECT supersedes_id FROM curated_memories WHERE supersedes_id IS NOT NULL
               )
@@ -579,7 +580,7 @@ def call_event_memory_updater_model(
             ],
             temperature=0.2,
             top_p=0.8,
-            max_tokens=1024,
+            max_tokens=model_output_token_limit(model_slot, 1024),
         )
         msg = resp.choices[0].message
         _reasoning, answer = split_think_text(getattr(msg, "content", "") or "")
@@ -1089,6 +1090,15 @@ def update_admin_memory(
     timeline_kind: Optional[str] = None,
     visitor_ip: Optional[str] = None,
 ) -> bool:
+    if "update_membership_from_memory" in globals():
+        linked_result = update_membership_from_memory(memory_id, content, visitor_ip)
+        if linked_result is not None:
+            return linked_result
+    if "update_schedule_from_memory" in globals():
+        linked_result = update_schedule_from_memory(memory_id, content, importance_label, timeline_at,
+            timeline_start_at, timeline_end_at, timeline_kind, visitor_ip)
+        if linked_result is not None:
+            return linked_result
     text = content.strip()
     if not text:
         raise ValueError("admin memory content is empty")
@@ -1164,6 +1174,14 @@ def update_admin_memory(
 
 
 def delete_admin_memory(memory_id: int) -> bool:
+    if "delete_membership_from_memory" in globals():
+        linked_result = delete_membership_from_memory(memory_id)
+        if linked_result is not None:
+            return linked_result
+    if "delete_schedule_from_memory" in globals():
+        linked_result = delete_schedule_from_memory(memory_id)
+        if linked_result is not None:
+            return linked_result
     with connect_db() as conn:
         row = conn.execute(
             "SELECT visitor_ip FROM curated_memories WHERE id = ?",
@@ -1588,7 +1606,7 @@ def judge_curated_memories_with_model(
             messages=messages,
             temperature=0.05,
             top_p=0.8,
-            max_tokens=MEMORY_JUDGE_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_JUDGE_MAX_TOKENS),
         )
         content = resp.choices[0].message.content or ""
         _, answer = split_think_text(content)

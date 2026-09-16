@@ -70,7 +70,10 @@
       button.setAttribute("aria-label", label);
       button.title = label;
       const text = button.querySelector("[data-theme-toggle-text]");
-      if (text) {
+      const icon = button.querySelector("[data-theme-toggle-icon]");
+      if (icon) {
+        icon.textContent = isDark ? "☀" : "☾";
+      } else if (text) {
         text.textContent = isDark ? "光明模式" : "黑暗模式";
       } else {
         button.textContent = isDark ? "光明模式" : "黑暗模式";

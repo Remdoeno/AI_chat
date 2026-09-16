@@ -258,7 +258,7 @@ def call_user_recent_state_agent_model(
             ],
             temperature=USER_RECENT_STATE_TEMPERATURE,
             top_p=USER_RECENT_STATE_TOP_P,
-            max_tokens=USER_RECENT_STATE_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, USER_RECENT_STATE_MAX_TOKENS),
         )
         content = (resp.choices[0].message.content or "").strip()
         _, answer = split_think_text(content)
@@ -372,7 +372,9 @@ def run_user_recent_state_agent_once(force: bool = False) -> Dict[str, object]:
                     continue
                 previous = load_user_recent_state(scope_key, int(window_days))
                 previous_state = previous.get("state") if previous else None
-                state = call_user_recent_state_agent_model(int(window_days), memories, previous_state)
+                model_owner = scope_key.split(":", 1)[1] if scope_key.startswith("shared:") else shared_user_id_for_device(scope_key)
+                with model_owner_scope(model_owner):
+                    state = call_user_recent_state_agent_model(int(window_days), memories, previous_state)
                 if not state.get("state_summary"):
                     skipped += 1
                     continue

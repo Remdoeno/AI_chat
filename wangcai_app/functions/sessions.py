@@ -85,6 +85,7 @@ def render_cached_opening_prompt(cached_prompt: str, visitor_ip: str = "") -> st
     return "\n\n".join(parts)
 
 
+@scoped_model_call(lambda visitor_ip: shared_user_id_for_device(visitor_ip))
 def refresh_cached_opening_prompt(visitor_ip: str) -> str:
     ip = normalize_visitor_ip(visitor_ip)
     if not is_device_identity(ip):

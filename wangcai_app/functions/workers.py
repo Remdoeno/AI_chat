@@ -87,6 +87,8 @@ def load_memory_dedupe_candidate_pairs(
             FROM curated_memories m
             JOIN curated_memory_vectors v ON v.memory_id = m.id
             WHERE m.importance_label != 'artifact'
+              AND m.source_session_id NOT LIKE 'schedule-%'
+              AND m.source_session_id NOT LIKE 'membership-%'
               AND m.visitor_ip LIKE 'device:%'
               AND NOT EXISTS (
                 SELECT 1 FROM curated_memories newer WHERE newer.supersedes_id = m.id
@@ -230,7 +232,7 @@ def call_memory_dedupe_agent_model(candidates: List[Dict[str, object]]) -> Dict[
             ],
             temperature=MEMORY_DEDUPE_AGENT_TEMPERATURE,
             top_p=MEMORY_DEDUPE_AGENT_TOP_P,
-            max_tokens=MEMORY_DEDUPE_AGENT_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_DEDUPE_AGENT_MAX_TOKENS),
         )
         content = (resp.choices[0].message.content or "").strip()
         _, answer = split_think_text(content)
@@ -350,7 +352,15 @@ def run_memory_dedupe_agent_once(force: bool = False) -> Dict[str, object]:
         if not candidates:
             mark_memory_dedupe_agent_run()
             return {"status": "skipped", "reason": "no_candidates", "started_at": started_at, "duration_ms": round((time.perf_counter() - started) * 1000, 3)}
-        decision = call_memory_dedupe_agent_model(candidates)
+        grouped_candidates = {}
+        for pair in candidates:
+            owner = shared_user_id_for_device(str(pair.get("visitor_ip") or "")) or ""
+            grouped_candidates.setdefault(owner, []).append(pair)
+        decision = {"actions": []}
+        for owner, owned_candidates in grouped_candidates.items():
+            with model_owner_scope(owner):
+                owned_decision = call_memory_dedupe_agent_model(owned_candidates)
+            decision["actions"].extend(owned_decision.get("actions", []))
         actions = decision.get("actions") if isinstance(decision, dict) else []
         applied = 0
         results = []
@@ -432,6 +442,8 @@ def load_memory_refine_candidates(limit: int = MEMORY_REFINE_AGENT_MAX_CANDIDATE
                    created_at, updated_at
             FROM curated_memories
             WHERE importance_label != 'artifact'
+              AND source_session_id NOT LIKE 'schedule-%'
+              AND source_session_id NOT LIKE 'membership-%'
               AND visitor_ip LIKE 'device:%'
               AND COALESCE(refine_status, '') = ''
               AND LENGTH(content) >= ?
@@ -508,6 +520,7 @@ def parse_memory_refine_agent_response(text: str) -> Dict[str, object]:
     }
 
 
+@scoped_model_call(lambda memory_item: shared_user_id_for_device(str(memory_item.get("visitor_ip") or "")))
 def call_memory_refine_agent_model(memory_item: Dict[str, object]) -> Dict[str, object]:
     client, http_client, model_slot = openai_client_for_slot(
         MODEL_SLOT_BACKGROUND,
@@ -533,7 +546,7 @@ def call_memory_refine_agent_model(memory_item: Dict[str, object]) -> Dict[str, 
             ],
             temperature=MEMORY_REFINE_AGENT_TEMPERATURE,
             top_p=MEMORY_REFINE_AGENT_TOP_P,
-            max_tokens=MEMORY_REFINE_AGENT_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_REFINE_AGENT_MAX_TOKENS),
         )
         content = (resp.choices[0].message.content or "").strip()
         _, answer = split_think_text(content)
@@ -813,6 +826,7 @@ def idle_agent_can_run(force: bool = False) -> Tuple[bool, str]:
     return True, "idle"
 
 
+@scoped_model_call(lambda *args, **kwargs: idle_writer_owner_shared_user_id())
 def run_idle_agent_once(force: bool = False) -> Dict[str, object]:
     started_at = utc_now()
     started = time.perf_counter()
@@ -1540,7 +1554,7 @@ def call_artifact_comment_model(prompt: str) -> str:
             ],
             temperature=0.75,
             top_p=0.9,
-            max_tokens=900,
+            max_tokens=model_output_token_limit(model_slot, 900),
         )
         _, answer = split_think_text(resp.choices[0].message.content or "")
         return normalize_idle_artifact_terms(answer).strip()
@@ -2156,7 +2170,7 @@ def repair_memory_agent_response(source: str, raw_answer: str) -> Dict[str, obje
             ],
             temperature=0.0,
             top_p=0.8,
-            max_tokens=MEMORY_AGENT_REPAIR_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_AGENT_REPAIR_MAX_TOKENS),
         )
         msg = resp.choices[0].message
         _, answer = split_think_text(getattr(msg, "content", "") or "")
@@ -2191,7 +2205,7 @@ def call_memory_agent_model(source: str) -> Dict[str, object]:
             ],
             temperature=MEMORY_AGENT_TEMPERATURE,
             top_p=MEMORY_AGENT_TOP_P,
-            max_tokens=MEMORY_AGENT_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_AGENT_MAX_TOKENS),
             stream=True,
         )
         chunks: List[str] = []
@@ -2212,6 +2226,7 @@ def call_memory_agent_model(source: str) -> Dict[str, object]:
         http_client.close()
 
 
+@scoped_model_call(lambda job_id: model_owner_for_memory_job(job_id))
 def process_memory_agent_job(job_id: int) -> Dict[str, object]:
     if MEMORY_AGENT_CANCEL_EVENT.is_set():
         mark_memory_agent_job(job_id, "cancelled", "interrupted before start")

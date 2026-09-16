@@ -5,6 +5,8 @@ cd "$(dirname "$0")"
 
 WEB_HOST=${WEB_HOST:-0.0.0.0}
 WEB_PORT=${WEB_PORT:-7777}
+TLS_CERT_FILE=${WANGCAI_TLS_CERT_FILE:-}
+TLS_KEY_FILE=${WANGCAI_TLS_KEY_FILE:-}
 PYTHON=${PYTHON:-/opt/conda/bin/python3}
 LOG_DIR=${LOG_DIR:-logs}
 PID_FILE=${PID_FILE:-wangcai_ai.pid}
@@ -41,7 +43,18 @@ fi
 echo "Starting wangcai_ai on ${WEB_HOST}:${WEB_PORT}"
 echo "Log file: $LOG_FILE"
 
+TLS_ARGS=()
+if [ -n "$TLS_CERT_FILE" ] || [ -n "$TLS_KEY_FILE" ]; then
+  if [ ! -r "$TLS_CERT_FILE" ] || [ ! -r "$TLS_KEY_FILE" ]; then
+    echo "ERROR: both readable WANGCAI_TLS_CERT_FILE and WANGCAI_TLS_KEY_FILE are required."
+    exit 1
+  fi
+  TLS_ARGS+=(--ssl-certfile "$TLS_CERT_FILE" --ssl-keyfile "$TLS_KEY_FILE")
+  echo "TLS enabled with certificate: $TLS_CERT_FILE"
+fi
+
 nohup "$PYTHON" -m uvicorn app:app --host "$WEB_HOST" --port "$WEB_PORT" \
+  "${TLS_ARGS[@]}" \
   > "$LOG_FILE" 2>&1 &
 
 PID=$!

@@ -103,7 +103,7 @@ def call_memory_compressor_model(user_message: str, source: str) -> str:
             ],
             temperature=MEMORY_COMPRESS_TEMPERATURE,
             top_p=MEMORY_COMPRESS_TOP_P,
-            max_tokens=MEMORY_COMPRESS_MAX_TOKENS,
+            max_tokens=model_output_token_limit(model_slot, MEMORY_COMPRESS_MAX_TOKENS),
         )
         content = (resp.choices[0].message.content or "").strip()
         _, answer = split_think_text(content)
@@ -619,6 +619,22 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=401, detail="admin password required")
 
 
+def request_uses_https(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
+
+
+def set_auth_cookie(response: Response, request: Request, name: str, value: str) -> None:
+    response.set_cookie(
+        name,
+        value,
+        httponly=True,
+        secure=request_uses_https(request),
+        samesite="strict",
+        path="/",
+    )
+
+
 def build_extra_body() -> Dict[str, Dict[str, bool]]:
     return {"chat_template_kwargs": {"enable_thinking": False}}
 
@@ -683,7 +699,7 @@ def chat_model_candidate_slots(messages: List[Dict[str, object]]) -> List[Tuple[
         chat_slot = model_slot_config(MODEL_SLOT_CHAT)
     except Exception:
         chat_slot = default_model_slot("local")
-    if not model_messages_have_images(messages):
+    if not model_messages_have_images(messages) or model_slot_likely_accepts_image_messages(chat_slot):
         return [("聊天模型", chat_slot, "")]
 
     candidates: List[Tuple[str, Dict[str, object], str]] = []
@@ -730,7 +746,7 @@ def iter_model_deltas(
                 messages=messages,
                 temperature=temperature,
                 top_p=top_p,
-                max_tokens=max_tokens,
+                max_tokens=model_output_token_limit(model_slot, max_tokens),
                 stream=True,
             )
             for chunk in stream:
@@ -766,7 +782,7 @@ def call_chat_completion_once_with_slot(
             messages=messages,
             temperature=temperature,
             top_p=top_p,
-            max_tokens=max_tokens,
+            max_tokens=model_output_token_limit(model_slot, max_tokens),
             stream=False,
         )
         if not resp.choices:

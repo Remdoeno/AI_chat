@@ -176,7 +176,7 @@ async function parseRateLimitPayload(response) {
 }
 
 function removeEmptyAssistantBubble(assistantBody) {
-  const bubble = assistantBody && assistantBody.closest ? assistantBody.closest(".message") : null;
+  const bubble = assistantBody && assistantBody.closest ? assistantBody.closest(".analysis-message") : null;
   if (bubble) {
     bubble.remove();
   }
@@ -919,7 +919,7 @@ function renderAnalysisGeneratedImageBatch(images, optimizedPrompt = "") {
     const details = document.createElement("details");
     details.className = "analysis-generated-image-prompt";
     const summary = document.createElement("summary");
-    summary.textContent = "优化后的 prompt";
+    summary.textContent = "实际使用的绘图 prompt";
     const pre = document.createElement("pre");
     pre.textContent = optimizedPrompt;
     details.append(summary, pre);
@@ -1345,8 +1345,14 @@ function readableTraceModel(model) {
   if (lower.includes("deepseek")) {
     return "DeepSeek";
   }
-  if (lower.includes("qwen3.6") || lower.includes("qwen3-") || lower.includes("qwen")) {
+  if (lower.includes("qwen3.8")) {
+    return "qwen3.8";
+  }
+  if (lower.includes("qwen3.6")) {
     return "qwen3.6";
+  }
+  if (lower.includes("qwen3-") || lower.includes("qwen")) {
+    return "Qwen";
   }
   if (lower.includes("gpt-4.1")) {
     return "GPT-4.1";
@@ -1488,7 +1494,11 @@ function traceTitleParts(item) {
     title = `${traceAgentName("聊天 Prompt", payload)}：完整输入${count ? `，${count} 条消息` : ""}`;
   } else if (step === "main_chat_stream") {
     const chars = Number(payload.answer_chars || payload.chars || 0);
-    const status = payload.status === "cancelled" ? "已中断" : "回复完成";
+    const status = payload.status === "cancelled" ? "已中断"
+      : payload.status === "empty_skipped" ? "未生成正文（已跳过）"
+      : payload.status === "empty_failed" ? "生成失败：正文为空"
+      : eventType === "model_call_error" ? "调用失败"
+      : chars > 0 ? "回复完成" : "未返回正文";
     title = `${traceAgentName("聊天 Agent", payload)}：${status}${chars ? `，${chars} 字` : ""}`;
   } else if (step === "draw_memory_gate") {
     const decision = payload.decision || {};
@@ -2562,7 +2572,7 @@ async function sendMessage(text, options = {}) {
         } else if (parsed.event === "draw_prompt") {
           setStatus("HiDream 生成中");
           if (payload.optimized_prompt) {
-            assistantMarkdown = "画图 prompt 已优化，正在生成图片。";
+            assistantMarkdown = "绘图 prompt 已准备，正在生成图片。";
             setRenderedMarkdown(assistantBody, assistantMarkdown);
           }
         } else if (parsed.event === "draw_image_batch") {
@@ -2584,6 +2594,7 @@ async function sendMessage(text, options = {}) {
         } else if (parsed.event === "error") {
           assistantMarkdown += payload.message || "error";
           setRenderedMarkdown(assistantBody, assistantMarkdown);
+          setStatus("生成失败");
         } else if (parsed.event === "stopped") {
           if (!assistantMarkdown.trim()) {
             assistantMarkdown = "[已停止]";

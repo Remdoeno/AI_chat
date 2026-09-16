@@ -856,7 +856,7 @@ def background_detect_gpu_role_indices() -> Dict[str, str]:
             role = "本地画图"
         elif "embedding" in text or "--runner pooling" in text or "convert embed" in text:
             role = "Embedding"
-        elif "qwen3.6" in text or "qwen3-35" in text or "vllm serve" in text:
+        elif "qwen3.8" in text or "qwen3.6" in text or "qwen3-35" in text or "vllm serve" in text:
             role = "本地 LLM"
         if not role:
             continue

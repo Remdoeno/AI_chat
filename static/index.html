@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财AI助手</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
+    <script src="/static/theme.js?v=20260916_home_2_8_1"></script>
     <link rel="stylesheet" href="/static/styles.css?v=20260705_quote_display" />
     <link rel="stylesheet" href="/static/password_visibility.css?v=20260816_wangcai_2_4" />
+    <link rel="stylesheet" href="/static/member_hint.css?v=20260916_home_2_8_1" />
     <link rel="stylesheet" href="/static/tutorial.css?v=20260816_wangcai_2_4" />
   </head>
   <body>
@@ -18,9 +19,10 @@
             <span aria-hidden="true">🐰</span>
           </button>
           <div>
-            <p id="modelDisplayName" class="eyebrow">qwen3.6</p>
+            <p id="modelDisplayName" class="eyebrow">qwen3.8</p>
             <h1>AI助手</h1>
           </div>
+          <button class="home-theme-toggle" type="button" data-theme-toggle aria-label="切换黑暗模式"><span data-theme-toggle-icon aria-hidden="true">☾</span></button>
         </div>
         <div class="session-panel">
           <span class="label">状态</span>
@@ -30,10 +32,10 @@
           <span aria-hidden="true">↻</span>
           <span>Reset</span>
         </button>
-        <button class="sidebar-link sidebar-button theme-toggle-button" type="button" data-theme-toggle>
-          <span aria-hidden="true">◐</span>
-          <span data-theme-toggle-text>黑暗模式</span>
-        </button>
+        <a class="sidebar-link" href="/schedule" aria-label="查看和管理未来两周日程">
+          <span aria-hidden="true">▦</span>
+          <span>日程</span>
+        </a>
         <a class="sidebar-link" href="/artifacts" aria-label="查看空闲成果">
           <span aria-hidden="true">✦</span>
           <span>成果</span>
@@ -59,6 +61,7 @@
       </aside>
 
       <section class="chat-area" aria-label="聊天窗口">
+        <section id="memberHint" class="member-hint" aria-label="会员卡轻提示" hidden></section>
         <div id="messages" class="messages"></div>
         <form id="chatForm" class="composer">
           <div id="searchActivity" class="search-activity" hidden>
@@ -207,9 +210,12 @@
     <dialog id="modelSettingsDialog" class="admin-login-dialog model-settings-dialog" aria-labelledby="modelSettingsDialogTitle">
       <form id="modelSettingsForm" class="admin-login-form model-settings-form" method="dialog">
         <div class="binding-dialog-header">
-          <h2 id="modelSettingsDialogTitle">模型选择</h2>
+          <h2 id="modelSettingsDialogTitle">模型设置</h2>
         </div>
+        <label class="field" for="modelSettingsScope"><span>配置范围</span><select id="modelSettingsScope"><option value="user">我的模型（同一用户跨设备同步）</option><option value="system">系统默认（管理员）</option></select></label>
+        <p id="modelSettingsScopeNote" class="dialog-status"></p>
         <section class="model-slot-panel" aria-label="聊天大模型">
+          <label class="binding-check-field" data-model-inherit-label="chat"><input type="checkbox" data-model-inherit="chat" /><span>使用系统默认</span></label>
           <h3>聊天大模型</h3>
           <label class="field" for="chatProviderSelect">
             <span>服务</span>
@@ -235,6 +241,11 @@
             <span>模型</span>
             <input id="chatModelInput" data-model-field="model" data-model-slot="chat" type="text" autocomplete="off" />
           </label>
+          <label class="binding-check-field" for="chatThinkingCheckbox">
+            <input id="chatThinkingCheckbox" data-model-field="thinking_enabled" data-model-slot="chat" type="checkbox" />
+            <span>开启思考</span>
+          </label>
+          <small data-model-thinking-note="chat"></small>
           <label class="field" for="chatApiKeyInput">
             <span>API Key</span>
             <input id="chatApiKeyInput" data-model-field="api_key" data-model-slot="chat" type="password" autocomplete="off" placeholder="留空则保留已保存密钥" />
@@ -249,6 +260,7 @@
           </label>
         </section>
         <section class="model-slot-panel" aria-label="后台大模型">
+          <label class="binding-check-field" data-model-inherit-label="background"><input type="checkbox" data-model-inherit="background" /><span>使用系统默认</span></label>
           <h3>后台大模型</h3>
           <label class="field" for="backgroundProviderSelect">
             <span>服务</span>
@@ -274,6 +286,11 @@
             <span>模型</span>
             <input id="backgroundModelInput" data-model-field="model" data-model-slot="background" type="text" autocomplete="off" />
           </label>
+          <label class="binding-check-field" for="backgroundThinkingCheckbox">
+            <input id="backgroundThinkingCheckbox" data-model-field="thinking_enabled" data-model-slot="background" type="checkbox" />
+            <span>开启思考</span>
+          </label>
+          <small data-model-thinking-note="background"></small>
           <label class="field" for="backgroundApiKeyInput">
             <span>API Key</span>
             <input id="backgroundApiKeyInput" data-model-field="api_key" data-model-slot="background" type="password" autocomplete="off" placeholder="留空则保留已保存密钥" />
@@ -288,6 +305,7 @@
           </label>
         </section>
         <section class="model-slot-panel" aria-label="图像生成模型">
+          <label class="binding-check-field" data-model-inherit-label="image"><input type="checkbox" data-model-inherit="image" /><span>使用系统默认</span></label>
           <h3>图像生成模型</h3>
           <label class="field" for="imageProviderSelect">
             <span>服务</span>
@@ -343,7 +361,9 @@
     </script>
     <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
     <script src="/static/tutorial.js?v=20260816_wangcai_2_4"></script>
-    <script src="/static/app.js?v=20260818_global_admin_memory"></script>
+    <script src="/static/device_identity.js?v=20260916_user_models_2_8_0"></script>
+    <script src="/static/member_hint.js?v=20260916_member_dismiss_day_2_8_2"></script>
+    <script src="/static/app.js?v=20260917_opening_empty_2_8_5"></script>
     <script src="/static/password_visibility.js?v=20260816_wangcai_2_4"></script>
     <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
   </body>

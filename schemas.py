@@ -116,6 +116,7 @@ class ModelSlotPayload(BaseModel):
     base_url: str = Field(default="")
     model: str = Field(default="")
     api_key: Optional[str] = None
+    thinking_enabled: bool = False
     use_proxy: bool = False
     proxy_url: str = Field(default="")
 

@@ -57,12 +57,24 @@ def public_image_model_status() -> Dict[str, object]:
     }
 
 
+def redacted_image_model_status() -> Dict[str, object]:
+    status = image_generation_status()
+    return {
+        "redacted": True,
+        "available": bool(status.get("available")),
+        "reason": "ok" if status.get("available") else "unavailable",
+        "display_name": status.get("display_name", ""),
+    }
+
+
 def image_generation_status() -> Dict[str, object]:
     slot = image_slot_config()
     provider = str(slot.get("provider") or "none").strip().lower()
     base_url = str(slot.get("base_url") or "").strip().rstrip("/")
     model = str(slot.get("model") or "").strip()
     display_name = str(slot.get("display_name") or model or "").strip()
+    if provider == "none" and current_model_owner() and MODEL_SLOT_IMAGE in user_model_settings_store().load(current_model_owner())["slots"]:
+        return {"available": False, "reason": "disabled", "provider": "none", "model": "", "display_name": "已关闭画图", "base_url": "", "error": ""}
     if provider in {"", "none"} or not base_url or not model:
         detected = detect_local_image_generation_service()
         if detected.get("available"):
@@ -177,6 +189,14 @@ def prompt_contains_cjk(text: object) -> bool:
     return bool(re.search(r"[\u4e00-\u9fff]", str(text or "")))
 
 
+def draw_prompt_completion_kwargs(slot: Dict[str, object]) -> Dict[str, object]:
+    """Use bounded JSON output for drawing preparation, preserving other model tasks."""
+    kwargs = model_completion_kwargs(slot)
+    if slot.get("provider") == "deepseek":
+        kwargs["response_format"] = {"type": "json_object"}
+    return kwargs
+
+
 def translate_draw_text_to_english(
     text: str,
     apply_fields: bool = True,
@@ -198,11 +218,11 @@ def translate_draw_text_to_english(
     started = time.perf_counter()
     try:
         resp = client.chat.completions.create(
-            **model_completion_kwargs(model_slot),
+            **draw_prompt_completion_kwargs(model_slot),
             messages=messages,
             temperature=0.0,
             top_p=1.0,
-            max_tokens=max(1200, min(7000, len(source) * 2)),
+            max_tokens=model_output_token_limit(model_slot, max(1200, min(7000, len(source) * 2))),
         )
         _, answer = split_think_text(resp.choices[0].message.content or "")
         payload = clean_image_model_json(answer)
@@ -377,7 +397,10 @@ def image_attachment_refs_b64(attachments: Optional[List[object]]) -> List[str]:
     return refs[:MAX_CHAT_ATTACHMENTS]
 
 
-IMAGE_MESSAGE_INCOMPATIBLE_PROVIDERS = {"deepseek"}
+# Official Flash aliases now route to the multimodal V4.1 Flash model.
+DEEPSEEK_IMAGE_MESSAGE_MODELS = frozenset({
+    "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
+})
 IMAGE_MESSAGE_COMPATIBLE_MODEL_MARKERS = (
     "vision",
     "vl",
@@ -402,8 +425,8 @@ def model_slot_likely_accepts_image_messages(slot: Dict[str, object]) -> bool:
     model = str(slot.get("model") or "").strip().lower()
     if provider in {"", "none", "hidream"}:
         return False
-    if provider in IMAGE_MESSAGE_INCOMPATIBLE_PROVIDERS:
-        return False
+    if provider == "deepseek":
+        return model in DEEPSEEK_IMAGE_MESSAGE_MODELS
     if provider == "local":
         return True
     if any(marker in model for marker in IMAGE_MESSAGE_COMPATIBLE_MODEL_MARKERS):
@@ -442,7 +465,7 @@ def draw_reference_image_analysis_slots() -> List[Tuple[str, Dict[str, object], 
             continue
         seen.add(signature)
         if model_slot_likely_accepts_image_messages(slot):
-            candidates.append((label, slot, ""))
+            return [(label, slot, "")]
     if not any(str(slot.get("provider") or "").strip().lower() == "local" for _, slot, _ in candidates):
         try:
             local_slot = default_model_slot("local")
@@ -548,7 +571,7 @@ def build_draw_reference_image_context(
                 messages=messages,
                 temperature=0.1,
                 top_p=0.9,
-                max_tokens=1800,
+                max_tokens=model_output_token_limit(model_slot, 1800),
             )
             _, answer = split_think_text(resp.choices[0].message.content or "")
             payload = clean_image_model_json(answer)
@@ -737,11 +760,11 @@ def classify_draw_prompt_mode(
     started = time.perf_counter()
     try:
         resp = client.chat.completions.create(
-            **model_completion_kwargs(model_slot),
+            **draw_prompt_completion_kwargs(model_slot),
             messages=messages,
             temperature=0.0,
             top_p=1.0,
-            max_tokens=260,
+            max_tokens=model_output_token_limit(model_slot, 260),
         )
         _, answer = split_think_text(resp.choices[0].message.content or "")
         payload = clean_image_model_json(answer)
@@ -995,6 +1018,9 @@ def optimize_draw_prompt(
     raw_prompt = str(user_prompt or "").strip()
     if not raw_prompt:
         return normalize_draw_prompt_decision({}, "")
+    background_slot = model_slot_config(MODEL_SLOT_BACKGROUND)
+    if background_slot.get("provider") == "deepseek" and not str(background_slot.get("api_key") or "").strip():
+        raise ValueError("后台 DeepSeek 未配置 API Key，无法优化绘图提示词；请在模型设置中补齐后重试。尚未开始画图。")
     processed_prompt = apply_professional_prompt_fields(raw_prompt)
     english_prompt = translate_draw_text_to_english(
         processed_prompt,
@@ -1014,6 +1040,8 @@ def optimize_draw_prompt(
     )
     mode = str(prompt_mode.get("mode") or "natural")
     if mode == "professional":
+        if prompt_contains_cjk(processed_prompt) and english_prompt.strip() == processed_prompt.strip():
+            raise ValueError("绘图提示词翻译未完成，已停止画图；请检查后台模型配置后重试。")
         decision = normalize_draw_prompt_decision(
             {
                 "optimized_prompt": english_prompt,
@@ -1043,17 +1071,23 @@ def optimize_draw_prompt(
         else:
             user_content = english_prompt if not english_context else f"{english_context.strip()}\n\nUser drawing request:\n{english_prompt}"
         resp = client.chat.completions.create(
-            **model_completion_kwargs(model_slot),
+            **draw_prompt_completion_kwargs(model_slot),
             messages=[
                 {"role": "system", "content": DRAW_PROMPT_AGENT_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
             temperature=0.45,
             top_p=0.9,
-            max_tokens=900,
+            max_tokens=model_output_token_limit(model_slot, 1800),
         )
+        if resp.choices[0].finish_reason == "length":
+            raise ValueError("绘图提示词输出被截断")
         _, answer = split_think_text(resp.choices[0].message.content or "")
-        decision = normalize_draw_prompt_decision(clean_image_model_json(answer), english_prompt)
+        parsed = clean_image_model_json(answer)
+        optimized = str(parsed.get("optimized_prompt") or parsed.get("prompt") or "").strip()
+        if not optimized or optimized == english_prompt.strip():
+            raise ValueError("后台模型没有返回优化后的绘图提示词")
+        decision = normalize_draw_prompt_decision(parsed, english_prompt)
         if str(decision.get("aspect_ratio") or "1:1") == "1:1":
             context_ratio = extract_aspect_ratio_from_prompt(context or "") if mode == "revision" and context else "1:1"
             decision["aspect_ratio"] = context_ratio if context_ratio != "1:1" else extract_aspect_ratio_from_prompt(processed_prompt)
@@ -1096,7 +1130,7 @@ def optimize_draw_prompt(
                 },
             )
         record_event(None, "draw_prompt_optimize_error", "local", {"error": str(exc), "prompt_chars": len(raw_prompt)})
-        return normalize_draw_prompt_decision({}, english_prompt)
+        raise RuntimeError("绘图提示词优化失败，已停止画图；后台调用失败或返回了不完整结果，请重试或检查后台模型配置。") from exc
     finally:
         http_client.close()
 
@@ -1788,7 +1822,7 @@ def optimize_artifact_image_prompt(prompt_source: str, profiles: List[Dict[str, 
             ],
             temperature=0.35,
             top_p=0.9,
-            max_tokens=1200,
+            max_tokens=model_output_token_limit(model_slot, 1200),
         )
         _, answer = split_think_text(resp.choices[0].message.content or "")
         decision = normalize_draw_prompt_decision(clean_image_model_json(answer), fallback_prompt)

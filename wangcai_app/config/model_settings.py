@@ -1,3 +1,6 @@
+from wangcai_app.model_context import current_model_owner, model_owner_scope, scoped_model_call, bind_model_context, ModelOwnerMiddleware
+from wangcai_app.user_model_settings import UserModelSettingsStore
+
 # Runtime model slot configuration. Keep these helpers pure where possible; DB
 # access is isolated to load/save so callers can depend on slot interfaces.
 MODEL_SETTINGS_KEY = "model_settings_v1"
@@ -9,7 +12,7 @@ MODEL_PROVIDER_API_KEYS_KEY = "provider_api_keys"
 MODEL_WEB_SEARCH_PROXY_KEY = "web_search_proxy"
 MODEL_KEYLESS_PROVIDERS = {"local", "none", "hidream"}
 
-LOCAL_MODEL_DISPLAY_NAME = "qwen3.6"
+LOCAL_MODEL_DISPLAY_NAME = "qwen3.8"
 IMAGE_MODEL_DISPLAY_NAME = "HiDream-O1-Image-Dev-2604"
 DEFAULT_MODEL_PROVIDER = "local"
 MODEL_PROVIDER_PRESETS: Dict[str, Dict[str, object]] = {
@@ -38,9 +41,9 @@ MODEL_PROVIDER_PRESETS: Dict[str, Dict[str, object]] = {
         "proxy_url": "",
     },
     "deepseek": {
-        "display_name": "deepseek-v4-pro",
+        "display_name": "deepseek-flash",
         "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-flash",
         "api_key": "",
         "use_proxy": True,
         "proxy_url": "",
@@ -144,13 +147,11 @@ def normalize_model_slot(
 
     if provider == "local":
         display_name = LOCAL_MODEL_DISPLAY_NAME
+        base_url = BASE_URL.rstrip("/")
+        model = MODEL_NAME
         api_key = ""
         use_proxy = False
         proxy_url = ""
-        if not base_url:
-            base_url = BASE_URL.rstrip("/")
-        if not model:
-            model = MODEL_NAME
     elif provider == "none":
         display_name = "未配置"
         base_url = ""
@@ -170,6 +171,7 @@ def normalize_model_slot(
         "base_url": base_url,
         "model": model,
         "api_key": api_key,
+        "thinking_enabled": bool(data.get("thinking_enabled", (existing or {}).get("thinking_enabled", False))) if model_supports_thinking({"provider": provider, "model": model}) else False,
         "use_proxy": use_proxy,
         "proxy_url": proxy_url,
     }
@@ -241,7 +243,7 @@ def normalize_model_settings(
     return settings
 
 
-def load_model_settings() -> Dict[str, Dict[str, object]]:
+def load_system_model_settings() -> Dict[str, Dict[str, object]]:
     try:
         raw = get_app_setting(MODEL_SETTINGS_KEY, "")
     except sqlite3.OperationalError:
@@ -255,9 +257,34 @@ def load_model_settings() -> Dict[str, Dict[str, object]]:
     return normalize_model_settings(payload, existing=default_model_settings())
 
 
+def user_model_settings_store():
+    return UserModelSettingsStore(connect_db, normalize_model_slot, load_system_model_settings, public_model_slot)
+
+
+def load_model_settings() -> Dict[str, Dict[str, object]]:
+    owner = current_model_owner()
+    return user_model_settings_store().effective(owner) if owner else load_system_model_settings()
+
+
+def model_owner_for_memory_job(job_id):
+    with connect_db() as conn:
+        row = conn.execute("SELECT s.visitor_ip FROM memory_agent_jobs j JOIN sessions s ON s.id=j.session_id WHERE j.id=?", (job_id,)).fetchone()
+    return shared_user_id_for_device(str(row[0])) if row else ""
+
+
+def model_owner_for_request(scope):
+    request = Request(scope)
+    try:
+        return shared_user_id_for_device(visitor_ip(request)) or ""
+    except sqlite3.OperationalError:
+        # Database initialization happens during lifespan, before user requests.
+        return ""
+
+
 def save_model_settings(payload: object) -> Dict[str, Dict[str, object]]:
-    current = load_model_settings()
-    settings = normalize_model_settings(payload, existing=current)
+    current = load_system_model_settings()
+    merged = {**current, **(payload if isinstance(payload, dict) else {})}
+    settings = normalize_model_settings(merged, existing=current)
     set_app_setting(MODEL_SETTINGS_KEY, json.dumps(settings, ensure_ascii=False, sort_keys=True))
     return settings
 
@@ -269,6 +296,8 @@ def public_model_slot(slot: Dict[str, object]) -> Dict[str, object]:
         "display_name": slot.get("display_name", LOCAL_MODEL_DISPLAY_NAME),
         "base_url": slot.get("base_url", ""),
         "model": slot.get("model", ""),
+        "thinking_enabled": bool(slot.get("thinking_enabled", False)) and model_supports_thinking(slot),
+        "thinking_supported": model_supports_thinking(slot),
         "has_api_key": bool(api_key and api_key != "EMPTY"),
         "use_proxy": bool(slot.get("use_proxy", False)),
         "proxy_url": slot.get("proxy_url", ""),
@@ -286,6 +315,21 @@ def public_model_settings(settings: Optional[Dict[str, Dict[str, object]]] = Non
     }
     public[MODEL_WEB_SEARCH_PROXY_KEY] = str(data.get(MODEL_WEB_SEARCH_PROXY_KEY) or "").strip()
     return public
+
+
+def redacted_model_settings(settings: Optional[Dict[str, Dict[str, object]]] = None) -> Dict[str, object]:
+    data = settings or load_model_settings()
+    return {
+        "redacted": True,
+        **{
+            slot: {
+                "provider": data[slot].get("provider", DEFAULT_MODEL_PROVIDER),
+                "display_name": data[slot].get("display_name", ""),
+                "model": data[slot].get("model", ""),
+            }
+            for slot in MODEL_SETTING_SLOTS
+        },
+    }
 
 
 def model_slot_config(slot: str) -> Dict[str, object]:
@@ -321,8 +365,25 @@ def openai_client_for_slot(slot_name: str, timeout: float) -> Tuple[OpenAI, http
     return client, http_client, slot
 
 
+def model_supports_thinking(slot: Dict[str, object]) -> bool:
+    name = str(slot.get("model") or "").strip().lower().rsplit("/", 1)[-1]
+    return slot.get("provider") != "local" and name in {
+        "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro",
+    }
+
+
+def model_output_token_limit(slot: Dict[str, object], requested: int) -> int:
+    """Reserve reasoning tokens without reducing any existing task's output budget."""
+    requested = int(requested)
+    if model_supports_thinking(slot) and slot.get("thinking_enabled", False):
+        return max(requested, min(32768, requested + 8192))
+    return requested
+
+
 def model_completion_kwargs(slot: Dict[str, object]) -> Dict[str, object]:
     kwargs: Dict[str, object] = {"model": str(slot.get("model") or MODEL_NAME)}
     if slot.get("provider") == "local":
         kwargs["extra_body"] = build_extra_body()
+    elif model_supports_thinking(slot):
+        kwargs["extra_body"] = {"thinking": {"type": "enabled" if slot.get("thinking_enabled", False) else "disabled"}}
     return kwargs

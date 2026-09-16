@@ -1,4 +1,4 @@
-# Wangcai 2.5.0 / 旺财2.5.0
+# Wangcai 2.8.5 / 旺财2.8.5
 
 ![Wangcai](static/brand/wangcai-2.0-journey.png)
 
@@ -17,6 +17,30 @@ Wangcai 是一个面向个人和家庭本地部署的 AI Web 系统。它不是�
 - **更本地化**：聊天模型、后台模型、embedding、图像生成、数据库和管理员密码都可以放在自己的机器或内网服务器上。你也可以改用 OpenAI-compatible 的外部 API。
 
 ## 特色功能
+
+### 按用户配置模型
+
+台前、后台分别提供 DeepSeek 思考开关（默认关闭），开启时增加 8192 token 的思考预算，自动增额后的额度不超过 32768，原有更高额度不缩减。本地 Qwen 3.8 当前不支持开启。DeepSeek 默认型号为 deepseek-flash。开场白为空时明确显示失败。
+
+绘图提示词优化失败时明确报错并停止画图，不再把原始输入当成已优化结果。结果页展示“实际使用的绘图 prompt”；专业提示词可保留其完整表达。
+
+DeepSeek `deepseek-flash` 及官方兼容别名支持图像理解，上传图片时直接使用所选 Flash，失败时明确报错，不自动切回本地模型；V4 Pro 等纯文本型号沿用识图模型回退。聊天开始输出及结束、失败或停止后，清理临时处理提示。
+
+绑定用户后，连续点四次首页兔子，通过“高级配置 → 模型设置 → 我的模型”分别设置前台聊天、后台任务和画图模型。三项可独立继承系统默认，个人设置跨设备同步，API Key 不回显。切换用户自动刷新配置；记忆整理与后台创作按任务归属用户选择模型。选择“系统默认（管理员）”时弹出密码验证，通过后维护公共配置，已有默认配置继续供未单独设置的用户使用。
+
+
+### 会员卡包
+
+记录余额、次数、适用门店、有效期和使用问题；支持首页聊天、卡包聊天及手动编辑，与关联记忆双向同步。首页采用每日轮换一张卡的轻提示，点 × 关闭后当天不再显示，按北京时间次日恢复；同一用户跨设备同步，当天刷新页面或开启新对话也不重复提醒；可折叠、延后一个月或按卡暂停。未知金额留空，原话保留；不会根据消费计划自动扣减余额，不插入无关聊天，不推送通知。
+
+
+### 两周日程
+
+日程聊天保留最近多轮上下文，分次提供名称、时间和地点会合并到同一事项；已经保存的待定事项继续更新，信息存在歧义时再追问。
+
+首页“日程”入口按上海时间展示今天起共 14 天；电脑显示日历网格，手机显示日期导航和每日事项。支持在首页聊天或日程页聊天中添加、改期、确认、取消，也可点击事项手动编辑。仅提到的事项用虚线，确定出席用实线；约饭、约会、会议、组会、社团、面试、宣讲、课程和其他事项分别配色。日期未定的事项单独列出，同一绑定用户可跨设备同步。支持每周课程和组会自动续排；编辑、取消或删除重复事项作用于整个系列。日程修改与后台关联记忆在同一事务内保存；记忆后台编辑或删除关联记录也会回写日程。向量索引通过持久化队列更新，失败会重试，文本和日期先保持一致。当前不提供通知推送。
+
+布局参考 [FullCalendar DayGrid](https://fullcalendar.io/docs/daygrid-view)，以原生 HTML/CSS/JavaScript 实现，无外部日历 CDN 依赖。
 
 ### 长期记忆
 
@@ -197,9 +221,27 @@ Wangcai 默认按 OpenAI-compatible API 调模型。最常用配置如下：
 
 ```bash
 export WANGCAI_MODEL_BASE_URL="http://127.0.0.1:8000/v1"
-export WANGCAI_MODEL_NAME="qwen3.6-35b-a3b-262k"
+export WANGCAI_MODEL_NAME="qwen3.8-27b"
 export WANGCAI_MODEL_API_KEY="EMPTY"
 ```
+
+仓库附带的单卡启动脚本默认在 GPU 7 上以 BF16、32K 上下文启动 Qwen3.8-27B：
+
+```bash
+./start_wangcai_model_qwen38_27b_1gpu_32k.sh
+```
+
+可通过 `GPUS`、`PORT`、`CONTEXT_LEN`、`GPU_MEMORY_UTIL`、`MAX_NUM_SEQS` 等环境变量覆盖默认配置。
+
+生产环境应使用 HTTPS。启动脚本可直接加载已签发的证书：
+
+```bash
+export WANGCAI_TLS_CERT_FILE="/path/to/fullchain.pem"
+export WANGCAI_TLS_KEY_FILE="/path/to/privkey.pem"
+./start_wangcai_ai.sh
+```
+
+若使用 Nginx、Caddy 等 TLS 反向代理，应将 Uvicorn 的 `WEB_HOST` 设为 `127.0.0.1`，只由反向代理对外提供 HTTPS。生产环境不注册 `/openapi.json`、`/docs` 和 `/redoc`；模型配置与本地服务操作需要管理员鉴权。
 
 如果使用外部 API：
 
@@ -230,7 +272,7 @@ vLLM 示例：
 ```bash
 pip install vllm
 vllm serve /path/to/your-chat-model \
-  --served-model-name qwen3.6-35b-a3b-262k \
+  --served-model-name qwen3.8-27b \
   --host 0.0.0.0 \
   --port 8000 \
   --dtype bfloat16 \
@@ -241,7 +283,7 @@ vllm serve /path/to/your-chat-model \
 
 ```bash
 export WANGCAI_MODEL_BASE_URL="http://127.0.0.1:8000/v1"
-export WANGCAI_MODEL_NAME="qwen3.6-35b-a3b-262k"
+export WANGCAI_MODEL_NAME="qwen3.8-27b"
 export WANGCAI_MODEL_API_KEY="EMPTY"
 ```
 
@@ -251,7 +293,7 @@ SGLang 示例：
 pip install "sglang[all]"
 python -m sglang.launch_server \
   --model-path /path/to/your-chat-model \
-  --served-model-name qwen3.6-35b-a3b-262k \
+  --served-model-name qwen3.8-27b \
   --host 0.0.0.0 \
   --port 8000
 ```
@@ -476,3 +518,7 @@ git ls-files | grep -E '(^data/|^logs/|sqlite|\\.db$|\\.pid$|\\.env|safetensors|
 - `log/wangcai_2.5.0_release_20260818.md`
 
 README 只介绍当前系统能力和部署方式；历史更新细节请看对应 release log。
+
+### 日历节假日（2.6.2）
+
+日程标注全国放假、调休补班和普通周末。依据国务院公告，通过 [holiday-cn](https://github.com/NateScarlet/holiday-cn) 获取结构化安排，保留原文链接；后台每日北京时间 06:15 检查本年及次年安排，启动时补同步。网络失败保留上次数据，一小时后重试；未公布或未收录年份显示待定。此信息不自动改变个人课程、组会等事项。日历底部可查看来源及最近成功检查时间。

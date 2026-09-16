@@ -21,6 +21,7 @@ const userMemoryBindingSummary = document.getElementById("userMemoryBindingSumma
 const memoryAdminButton = document.getElementById("memoryAdminButton");
 const memoryAdminDialog = document.getElementById("memoryAdminDialog");
 const memoryAdminLoginForm = document.getElementById("memoryAdminLoginForm");
+const memoryAdminDialogTitle = document.getElementById("memoryAdminDialogTitle");
 const memoryAdminPassword = document.getElementById("memoryAdminPassword");
 const memoryAdminLoginStatus = document.getElementById("memoryAdminLoginStatus");
 const memoryAdminCancelButton = document.getElementById("memoryAdminCancelButton");
@@ -78,12 +79,12 @@ const DEFAULT_SAMPLING_SETTINGS = {
   top_p: 0.95,
   web_search_proxy: "",
 };
-const LOCAL_MODEL_DISPLAY_NAME = "qwen3.6";
+const LOCAL_MODEL_DISPLAY_NAME = "qwen3.8";
 const MODEL_PROVIDER_PRESETS = {
   local: {
     display_name: LOCAL_MODEL_DISPLAY_NAME,
     base_url: "http://127.0.0.1:8000/v1",
-    model: "qwen3.6-35b-a3b-262k",
+    model: "qwen3.8-27b",
     use_proxy: false,
     proxy_url: "",
   },
@@ -109,9 +110,9 @@ const MODEL_PROVIDER_PRESETS = {
     proxy_url: "",
   },
   deepseek: {
-    display_name: "deepseek-v4-pro",
+    display_name: "deepseek-flash",
     base_url: "https://api.deepseek.com/v1",
-    model: "deepseek-v4-pro",
+    model: "deepseek-flash",
     use_proxy: true,
     proxy_url: "",
   },
@@ -199,6 +200,8 @@ let touchHistoryArmOnTop = false;
 let touchHistoryClearTimer = 0;
 let userMemoryBindingState = null;
 let modelSettingsState = null;
+let modelSettingsLoadGeneration = 0;
+let adminLoginNextAction = null;
 
 function isUsableDeviceId(value) {
   return /^[A-Za-z0-9_-]{12,96}$/.test(String(value || "").trim());
@@ -235,6 +238,20 @@ function setModelDisplayName(settings) {
   }
 }
 
+function syncModelThinkingOption(slot) {
+  const input = modelField(slot, "thinking_enabled");
+  if (!input) return;
+  const provider = modelField(slot, "provider")?.value || "local";
+  const model = (modelField(slot, "model")?.value || "").trim().toLowerCase().split("/").pop();
+  const supported = provider !== "local" && ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"].includes(model);
+  const inherited = modelSettingsState?.scope === "user" && document.querySelector(`[data-model-inherit="${slot}"]`)?.checked;
+  input.disabled = !supported || Boolean(inherited);
+  if (!supported) input.checked = false;
+  const note = document.querySelector(`[data-model-thinking-note="${slot}"]`);
+  if (note) note.textContent = provider === "local" ? "当前本地 Qwen 3.8 不支持开启思考"
+    : supported ? "开启后自动增加思考额度，回复可能更慢" : "当前模型暂未接入思考开关";
+}
+
 function applyProviderPreset(slot) {
   const providerInput = modelField(slot, "provider");
   const provider = providerInput ? providerInput.value : "local";
@@ -269,6 +286,8 @@ function applyProviderPreset(slot) {
     proxyUrlInput.value = isProxylessProvider(provider) ? "" : (currentWebSearchProxy() || preset.proxy_url);
     proxyUrlInput.disabled = isProxylessProvider(provider);
   }
+  if (modelField(slot, "thinking_enabled")) modelField(slot, "thinking_enabled").checked = false;
+  syncModelThinkingOption(slot);
 }
 
 function populateModelSlot(slot, settings) {
@@ -308,10 +327,19 @@ function populateModelSlot(slot, settings) {
       displayInput.value = "未配置";
     }
   }
+  if (modelField(slot, "thinking_enabled")) modelField(slot, "thinking_enabled").checked = Boolean(data.thinking_enabled);
+  const inherit = document.querySelector(`[data-model-inherit="${slot}"]`);
+  const inheritLabel = document.querySelector(`[data-model-inherit-label="${slot}"]`);
+  if (inherit) inherit.checked = Boolean(data.inherit);
+  if (inheritLabel) inheritLabel.hidden = settings.scope !== "user";
   syncModelSlotDisabledState(slot);
 }
 
 function syncModelSlotDisabledState(slot) {
+  const inherited = modelSettingsState?.scope === "user" && document.querySelector(`[data-model-inherit="${slot}"]`)?.checked;
+  document.querySelectorAll(`[data-model-slot="${slot}"]`).forEach((input) => { input.disabled = Boolean(inherited); });
+  syncModelThinkingOption(slot);
+  if (inherited) return;
   const providerInput = modelField(slot, "provider");
   const provider = providerInput ? providerInput.value : "local";
   const displayInput = modelField(slot, "display_name");
@@ -360,6 +388,7 @@ function syncModelSlotDisabledState(slot) {
 }
 
 function readModelSlot(slot) {
+  if (modelSettingsState?.scope === "user" && document.querySelector(`[data-model-inherit="${slot}"]`)?.checked) return null;
   const provider = modelField(slot, "provider")?.value || "local";
   const isLocalLike = isProxylessProvider(provider);
   const proxyUrl = isLocalLike ? "" : ((modelField(slot, "proxy_url")?.value || "").trim() || currentWebSearchProxy());
@@ -370,6 +399,7 @@ function readModelSlot(slot) {
     model: modelField(slot, "model")?.value || "",
     use_proxy: !isLocalLike && (Boolean(modelField(slot, "use_proxy")?.checked) || Boolean(proxyUrl)),
     proxy_url: proxyUrl,
+    ...(slot !== "image" ? { thinking_enabled: Boolean(modelField(slot, "thinking_enabled")?.checked) } : {}),
   };
   if (provider === "none") {
     payload.display_name = "未配置";
@@ -383,20 +413,34 @@ function readModelSlot(slot) {
   return payload;
 }
 
-async function loadModelSettings() {
-  const response = await fetch("/api/model-settings", { headers: deviceIdentityHeaders() });
+async function loadModelSettings(scope = "") {
+  const generation = ++modelSettingsLoadGeneration;
+  const response = await fetch("/api/model-settings" + (scope ? `?scope=${scope}` : ""), { headers: deviceIdentityHeaders() });
   if (!response.ok) {
-    throw new Error("模型配置读取失败");
+    const payload = await response.json().catch(() => ({}));
+    const error = new Error(payload.detail === "shared user binding required" ? "请先在首页绑定用户，再配置我的模型。" : response.status === 401 ? "需要管理员验证" : "模型配置读取失败");
+    error.status = response.status;
+    throw error;
   }
-  modelSettingsState = await response.json();
-  if (typeof modelSettingsState.web_search_proxy === "string") {
-    saveSamplingSettings({
-      ...samplingSettings,
-      web_search_proxy: modelSettingsState.web_search_proxy,
-    });
+  const settings = await response.json();
+  if (generation !== modelSettingsLoadGeneration) return settings;
+  modelSettingsState = settings;
+  if (scope !== "system" || !userMemoryBindingState?.shared_user_id) {
+    if (typeof settings.web_search_proxy === "string") {
+      saveSamplingSettings({ ...samplingSettings, web_search_proxy: settings.web_search_proxy });
+      if (webSearchProxyInput) webSearchProxyInput.value = settings.web_search_proxy;
+    }
+    setModelDisplayName(settings);
   }
-  setModelDisplayName(modelSettingsState);
-  return modelSettingsState;
+  return settings;
+}
+
+function populateModelSettings(settings) {
+  ["chat", "background", "image"].forEach((slot) => populateModelSlot(slot, settings));
+  document.getElementById("modelSettingsScope").value = settings.scope || "system";
+  document.getElementById("modelSettingsScopeNote").textContent = settings.scope === "user"
+    ? "仅对当前绑定用户生效。三类模型可分别设置；勾选使用系统默认即可恢复继承。"
+    : "修改系统默认会影响所有仍在继承默认设置的用户。";
 }
 
 function setLocalModelServiceStatus(text, state = "") {
@@ -479,6 +523,13 @@ async function startLocalModelService() {
       method: "POST",
       headers: jsonHeaders(),
     });
+    if (response.status === 401) {
+      openMemoryAdminDialog({
+        title: "本地服务验证",
+        nextAction: startLocalModelService,
+      });
+      throw new Error("需要管理员验证");
+    }
     if (!response.ok) {
       throw new Error("启动请求失败");
     }
@@ -508,9 +559,15 @@ async function openModelSettingsDialog() {
   modelSettingsStatus.textContent = "读取中";
   try {
     const settings = await loadModelSettings();
-    populateModelSlot("chat", settings);
-    populateModelSlot("background", settings);
-    populateModelSlot("image", settings);
+    if (settings.redacted) {
+      modelSettingsStatus.textContent = "需要管理员验证";
+      openMemoryAdminDialog({
+        title: "模型设置验证",
+        nextAction: openModelSettingsDialog,
+      });
+      return;
+    }
+    populateModelSettings(settings);
     modelSettingsStatus.textContent = "";
     if (typeof modelSettingsDialog.showModal === "function") {
       modelSettingsDialog.showModal();
@@ -519,6 +576,7 @@ async function openModelSettingsDialog() {
     }
   } catch (error) {
     modelSettingsStatus.textContent = error.message || "模型配置读取失败";
+    if (error.status === 401) openMemoryAdminDialog({ title: "系统模型设置验证", nextAction: openModelSettingsDialog });
   }
 }
 
@@ -531,25 +589,40 @@ function closeModelSettingsDialog() {
 
 async function saveModelSettings(event) {
   event.preventDefault();
+  if (!modelSettingsState || document.getElementById("modelSettingsScope").value !== modelSettingsState.scope) {
+    modelSettingsStatus.textContent = "请等待当前配置范围加载完毕";
+    return;
+  }
   modelSettingsStatus.textContent = "保存中";
   try {
-    const response = await fetch("/api/model-settings", {
+    const scope = modelSettingsState?.scope || "user";
+    const response = await fetch(`/api/model-settings?scope=${scope}`, {
       method: "PUT",
       headers: jsonHeaders(),
       body: JSON.stringify({
+        ...(scope === "user" ? { expected_owner: modelSettingsState.owner } : {}),
         chat: readModelSlot("chat"),
         background: readModelSlot("background"),
         image: readModelSlot("image"),
-        web_search_proxy: currentWebSearchProxy(),
+        web_search_proxy: scope === "system" ? (modelSettingsState.web_search_proxy || "") : currentWebSearchProxy(),
       }),
     });
+    if (response.status === 401) {
+      openMemoryAdminDialog({
+        title: "模型设置验证",
+        nextAction: () => modelSettingsForm.requestSubmit(),
+      });
+      throw new Error("需要管理员验证");
+    }
     if (!response.ok) {
-      throw new Error("保存失败");
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(typeof payload.detail === "string" ? payload.detail : "保存失败");
     }
     modelSettingsState = await response.json();
     setModelDisplayName(modelSettingsState);
     modelSettingsStatus.textContent = "已保存";
     closeModelSettingsDialog();
+    await loadModelSettings();
     setStatus(`模型已更新：${modelSettingsState.chat.provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : (modelSettingsState.chat.model || modelSettingsState.chat.display_name || "AI模型")}`);
   } catch (error) {
     modelSettingsStatus.textContent = error.message || "保存失败";
@@ -557,25 +630,19 @@ async function saveModelSettings(event) {
 }
 
 async function syncModelProxySettingToServer() {
+  const proxy = currentWebSearchProxy();
   try {
-    const settings = modelSettingsState || await loadModelSettings();
-    const response = await fetch("/api/model-settings", {
-      method: "PUT",
-      headers: jsonHeaders(),
-      body: JSON.stringify({
-        chat: settings.chat || readModelSlot("chat"),
-        background: settings.background || readModelSlot("background"),
-        image: settings.image || readModelSlot("image"),
-        web_search_proxy: currentWebSearchProxy(),
+    const settings = await loadModelSettings();
+    if (settings.redacted) return;
+    const personal = settings.scope === "user";
+    const response = await fetch(`/api/model-settings?scope=${personal ? "user" : "system"}`, {
+      method: "PUT", headers: jsonHeaders(),
+      body: JSON.stringify(personal ? { expected_owner: settings.owner, web_search_proxy: proxy } : {
+        chat: settings.chat, background: settings.background, image: settings.image, web_search_proxy: proxy,
       }),
     });
-    if (response.ok) {
-      modelSettingsState = await response.json();
-      setModelDisplayName(modelSettingsState);
-    }
-  } catch (_error) {
-    // Proxy sync is best-effort; chat requests still carry the current proxy.
-  }
+    if (response.ok) await loadModelSettings();
+  } catch (_) { /* Keep the current request usable if saving its proxy fails. */ }
 }
 
 async function parseRateLimitPayload(response) {
@@ -655,6 +722,7 @@ function applyCachedUserMemoryBindingState() {
 }
 
 function applyUserMemoryBindingState(binding, options = {}) {
+  const previousModelOwner = userMemoryBindingState?.shared_user_id || "";
   const shouldPublish = options.publish !== false;
   const payload = binding && typeof binding === "object" ? binding : {};
   userMemoryBindingState = {
@@ -677,6 +745,7 @@ function applyUserMemoryBindingState(binding, options = {}) {
   if (userMemoryBindingButton) {
     userMemoryBindingButton.classList.toggle("is-host", userMemoryBindingState.is_host);
   }
+  if (previousModelOwner !== userMemoryBindingState.shared_user_id) window.dispatchEvent(new Event("wangcai-binding-changed"));
   if (shouldPublish) {
     publishUserMemoryBindingState();
   }
@@ -789,6 +858,7 @@ function setSendButtonGenerating(generating) {
 }
 
 function setBusy(busy) {
+  if (!busy) clearSearchActivity();
   setSendButtonGenerating(Boolean(busy && activeController));
   sendButton.disabled = isResetting && !activeController;
   resetButton.disabled = isResetting;
@@ -1619,7 +1689,7 @@ function renderGeneratedImageBatch(images, optimizedPrompt = "") {
     const details = document.createElement("details");
     details.className = "generated-image-prompt";
     const summary = document.createElement("summary");
-    summary.textContent = "优化后的 prompt";
+    summary.textContent = "实际使用的绘图 prompt";
     const pre = document.createElement("pre");
     pre.textContent = optimizedPrompt;
     details.append(summary, pre);
@@ -2228,6 +2298,7 @@ async function createSession(options = {}) {
   if (payload.memory_binding) {
     applyUserMemoryBindingState(payload.memory_binding);
   }
+  window.dispatchEvent(new CustomEvent("wangcai-conversation-started", { detail: { sessionId } }));
   storeCachedOpeningPrompt(payload.opening_prompt);
   if (clearExisting) {
     resetPreviousSessionLoadState();
@@ -2534,10 +2605,10 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
         setStatus(payload.message || "画图中");
       },
       draw_prompt: (payload) => {
-        setSearchActivity("画图 prompt 已优化");
+        setSearchActivity("绘图 prompt 已准备");
         setStatus("HiDream 生成中");
         if (payload.optimized_prompt) {
-          setRenderedMarkdown(assistantBody, "画图 prompt 已优化，正在生成图片。");
+          setRenderedMarkdown(assistantBody, "绘图 prompt 已准备，正在生成图片。");
         }
       },
       draw_image_batch: (payload) => {
@@ -2556,6 +2627,10 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
         return true;
       },
       token: (payload) => {
+        if (!hasReceivedToken) {
+          clearSearchActivity();
+          setStatus("生成中");
+        }
         if (!hasReceivedToken && openingPlaceholder) {
           setRenderedMarkdown(assistantBody, "");
         }
@@ -2609,7 +2684,11 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
   }
 }
 
-function openMemoryAdminDialog() {
+function openMemoryAdminDialog(options = {}) {
+  adminLoginNextAction = typeof options.nextAction === "function" ? options.nextAction : null;
+  if (memoryAdminDialogTitle) {
+    memoryAdminDialogTitle.textContent = options.title || "记忆后台";
+  }
   memoryAdminLoginStatus.textContent = "";
   memoryAdminPassword.value = "";
   if (typeof memoryAdminDialog.showModal === "function") {
@@ -2657,6 +2736,7 @@ function clearBunnyWarnLongPress() {
 }
 
 function closeMemoryAdminDialog() {
+  adminLoginNextAction = null;
   memoryAdminDialog.close();
 }
 
@@ -2756,7 +2836,14 @@ async function loginMemoryAdmin(event) {
       memoryAdminPassword.select();
       return;
     }
-    window.location.href = "/memory-admin";
+    const nextAction = adminLoginNextAction;
+    adminLoginNextAction = null;
+    memoryAdminDialog.close();
+    if (nextAction) {
+      await nextAction();
+    } else {
+      window.location.href = "/memory-admin";
+    }
   } catch (error) {
     memoryAdminLoginStatus.textContent = `验证失败：${error.message}`;
   }
@@ -2997,3 +3084,41 @@ function bootChatSession() {
 }
 
 Promise.resolve(window.__wangcaiTutorialReady).finally(bootChatSession);
+
+document.querySelectorAll("[data-model-inherit]").forEach((input) => input.addEventListener("change", () => {
+  const slot = input.dataset.modelInherit;
+  if (!input.checked && modelSettingsState?.[slot]?.inherit) { modelField(slot, "provider").value = slot === "image" ? "none" : "local"; applyProviderPreset(slot); }
+  syncModelSlotDisabledState(slot);
+}));
+document.getElementById("modelSettingsScope")?.addEventListener("change", (event) => {
+  const scope = event.target.value;
+  const previousScope = modelSettingsState?.scope || "user";
+  const saveButton = modelSettingsForm.querySelector('button[type="submit"]');
+  const load = async () => {
+    saveButton.disabled = true;
+    try {
+      const settings = await loadModelSettings(scope);
+      populateModelSettings(settings); modelSettingsStatus.textContent = "";
+    } catch (error) {
+      event.target.value = previousScope;
+      modelSettingsStatus.textContent = error.message || "配置读取失败";
+    } finally { saveButton.disabled = false; }
+  };
+  if (scope === "system") {
+    event.target.value = previousScope;
+    openMemoryAdminDialog({ title: "管理员模型设置 · 请输入管理员密码", nextAction: load });
+  } else { load(); }
+});
+window.addEventListener("wangcai-binding-changed", () => {
+  modelSettingsLoadGeneration += 1;
+  modelSettingsState = null;
+  document.querySelectorAll('[data-model-field="api_key"]').forEach((input) => { input.value = ""; });
+  if (modelSettingsDialog?.open) closeModelSettingsDialog();
+  saveSamplingSettings({ ...samplingSettings, web_search_proxy: "" });
+  if (webSearchProxyInput) webSearchProxyInput.value = "";
+  loadModelSettings().catch(() => {});
+});
+
+
+
+document.querySelectorAll('[data-model-field="model"]').forEach((input) => input.addEventListener("input", () => syncModelThinkingOption(input.dataset.modelSlot)));

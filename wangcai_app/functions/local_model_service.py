@@ -19,6 +19,8 @@ LOCAL_IMAGE_PORT_CANDIDATES = [
     if port.strip().isdigit()
 ]
 LOCAL_MODEL_SERVICE_LOCK = threading.Lock()
+LOCAL_WANGCAI_MODEL_GPUS = os.environ.get("WANGCAI_LOCAL_MODEL_GPUS", "7").strip() or "7"
+LOCAL_EMBEDDING_GPU = os.environ.get("WANGCAI_LOCAL_EMBEDDING_GPU", "6").strip() or "6"
 
 
 def local_service_script_path(env_name: str, candidates: List[Path]) -> Path:
@@ -34,6 +36,9 @@ def local_service_script_path(env_name: str, candidates: List[Path]) -> Path:
 LOCAL_WANGCAI_MODEL_START_SCRIPT = local_service_script_path(
     "WANGCAI_LOCAL_MODEL_START_SCRIPT",
     [
+        APP_DIR / "start_wangcai_model_qwen38_27b_1gpu_32k.sh",
+        APP_DIR.parent / "start_wangcai_model_qwen38_27b_1gpu_32k.sh",
+        APP_DIR.parent.parent / "start_wangcai_model_qwen38_27b_1gpu_32k.sh",
         APP_DIR.parent.parent / "start_wangcai_model_35b_2gpu_262k.sh",
         APP_DIR.parent / "start_wangcai_model_35b_2gpu_262k.sh",
         APP_DIR.parent.parent / "start_qwen36_35b_2gpu_262k.sh",
@@ -208,6 +213,26 @@ def local_model_service_status() -> Dict[str, object]:
     }
 
 
+def redacted_local_model_service_status(status: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    data = status or local_model_service_status()
+
+    def component(name: str) -> Dict[str, object]:
+        raw = data.get(name) if isinstance(data.get(name), dict) else {}
+        return {"running": bool(raw.get("running"))}
+
+    model = component("model")
+    embedding = component("embedding")
+    image = component("image")
+    return {
+        "redacted": True,
+        "model": model,
+        "embedding": embedding,
+        "image": image,
+        "ready": bool(model["running"] and embedding["running"]),
+        "summary": "本地服务已就绪" if model["running"] and embedding["running"] else "本地服务未就绪",
+    }
+
+
 def port_is_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.25)
@@ -241,12 +266,24 @@ def select_local_service_gpus() -> Dict[str, str]:
         gpus = parse_gpu_used_memory(output)
     except Exception:
         gpus = []
-    if len(gpus) >= 3:
-        ordered = sorted(gpus, key=lambda item: (item[1], -item[0]))
-        embedding_gpu = ordered[0][0]
-        model_gpus = sorted([ordered[1][0], ordered[2][0]])
-        return {"embedding": str(embedding_gpu), "model": ",".join(str(gpu) for gpu in model_gpus)}
-    return {"embedding": "5", "model": "6,7"}
+    available_indices = {index for index, _ in gpus}
+    model_gpus = [
+        int(value.strip())
+        for value in LOCAL_WANGCAI_MODEL_GPUS.split(",")
+        if value.strip().isdigit() and int(value.strip()) in available_indices
+    ]
+    if not model_gpus:
+        model_gpus = [max(available_indices)] if available_indices else [7]
+    configured_embedding_gpu = int(LOCAL_EMBEDDING_GPU) if LOCAL_EMBEDDING_GPU.isdigit() else 6
+    embedding_candidates = [item for item in gpus if item[0] not in model_gpus]
+    if configured_embedding_gpu in available_indices and configured_embedding_gpu not in model_gpus:
+        embedding_gpu = configured_embedding_gpu
+    else:
+        embedding_gpu = min(embedding_candidates, key=lambda item: (item[1], -item[0]))[0] if embedding_candidates else 6
+    return {
+        "embedding": str(embedding_gpu),
+        "model": ",".join(str(gpu) for gpu in model_gpus),
+    }
 
 
 def launch_shell_command(command: str, cwd: Path) -> None:
@@ -295,12 +332,14 @@ def start_missing_local_model_services(status: Dict[str, object]) -> Dict[str, o
         if not LOCAL_WANGCAI_MODEL_START_SCRIPT.exists():
             raise RuntimeError(f"本地模型启动脚本不存在: {LOCAL_WANGCAI_MODEL_START_SCRIPT}")
         model_log = log_dir / f"start_wangcai_model_{model_port}_{int(time.time())}.launcher.log"
+        model_gpus = str(gpu_selection["model"])
+        model_tp_size = max(1, len([gpu for gpu in model_gpus.split(",") if gpu.strip()]))
         command = (
             "nohup env "
             "KILL_OLD=0 "
             "INTERACTIVE=0 "
-            f"GPUS={gpu_selection['model']} "
-            "TP_SIZE=2 "
+            f"GPUS={model_gpus} "
+            f"TP_SIZE={model_tp_size} "
             "ENABLE_COT=0 "
             f"PORT={model_port} "
             f"{LOCAL_WANGCAI_MODEL_START_SCRIPT} > {model_log} 2>&1 &"
