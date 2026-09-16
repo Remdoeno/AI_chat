@@ -244,6 +244,7 @@ function setAnalysisSendButtonGenerating(generating) {
 }
 
 function setAnalysisBusy(busy) {
+  window.dispatchEvent(new CustomEvent("wangcai:busy", {detail:{busy:Boolean(busy)}}));
   setAnalysisSendButtonGenerating(Boolean(busy && activeController));
   sendButton.disabled = false;
   messageInput.disabled = busy;

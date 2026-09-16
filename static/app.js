@@ -858,6 +858,7 @@ function setSendButtonGenerating(generating) {
 }
 
 function setBusy(busy) {
+  window.dispatchEvent(new CustomEvent("wangcai:busy", {detail:{busy:Boolean(busy)}}));
   if (!busy) clearSearchActivity();
   setSendButtonGenerating(Boolean(busy && activeController));
   sendButton.disabled = isResetting && !activeController;
@@ -2083,7 +2084,8 @@ async function startFastOpeningPrompt(openingPrompt) {
         return true;
       },
       error: (payload) => {
-        setRenderedMarkdown(assistantBody, payload.message || "模型服务调用失败");
+        const partial = window.WangcaiRelease?.enabled('live_feedback') ? (payload.partial_content || getRawMarkdown(assistantBody)) : "";
+        setRenderedMarkdown(assistantBody, (partial.trim() ? partial + "\n\n**回复未完成：** " : "") + (payload.message || "模型服务调用失败"));
         assistantBody.parentElement.classList.add("error");
         setStatus("错误");
         return true;

@@ -808,9 +808,10 @@ def background_gpu_usage() -> Dict[str, object]:
 
 def background_gpu_role_indices() -> Dict[str, str]:
     role_by_index = background_detect_gpu_role_indices()
+    use_complete_defaults = release_feature_enabled("gpu_role_detection") and not role_by_index
     for env_name, role, default_value in BACKGROUND_GPU_ROLE_DEFAULTS:
         raw = os.getenv(env_name)
-        if raw is None and not role_by_index:
+        if raw is None and (use_complete_defaults or not role_by_index):
             raw = default_value
         if raw is None:
             continue
@@ -851,6 +852,8 @@ def background_detect_gpu_role_indices() -> Dict[str, str]:
         if not visible_devices:
             continue
         text = f"{cmdline} {' '.join(f'{key}={value}' for key, value in environ.items())}".lower()
+        if release_feature_enabled("gpu_role_detection"):
+            text = cmdline.lower()
         role = ""
         if "hidream" in text or "imggen" in text:
             role = "本地画图"

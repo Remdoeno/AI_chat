@@ -2700,9 +2700,11 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
             yield format_sse("done", {"message_id": assistant_id, "content": answer})
         except Exception as exc:
             message_text = f"模型服务调用失败: {exc}"
-            add_message(session_id, "assistant", message_text, status="failed")
+            partial = "".join(answer_parts).strip() if release_feature_enabled('live_feedback') else ""
+            saved_text = (partial + "\n\n回复未完成：" + message_text) if partial else message_text
+            add_message(session_id, "assistant", saved_text, status="failed")
             record_event(session_id, "message_error", ip, {"error": str(exc)})
-            yield format_sse("error", {"message": message_text})
+            yield format_sse("error", {"message": message_text, "partial_content": partial})
         finally:
             release_generation_token(session_id, generation_token)
             if queued_memory_job:
