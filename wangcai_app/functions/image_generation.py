@@ -478,17 +478,7 @@ def draw_reference_image_analysis_slots() -> List[Tuple[str, Dict[str, object], 
 
 
 def openai_client_for_model_slot_config(slot: Dict[str, object], timeout: float) -> Tuple[OpenAI, httpx.Client, Dict[str, object]]:
-    http_client = model_http_client(slot, timeout)
-    client_kwargs: Dict[str, object] = {}
-    if slot.get("provider") == "local":
-        client_kwargs["max_retries"] = 0
-    client = OpenAI(
-        api_key=model_api_key(slot),
-        base_url=str(slot.get("base_url") or BASE_URL).rstrip("/"),
-        http_client=http_client,
-        **client_kwargs,
-    )
-    return client, http_client, slot
+    return configured_model_client(slot, timeout, task='chat')
 
 
 def draw_reference_trace_messages(user_prompt: str, attachments: Optional[List[object]]) -> List[Dict[str, object]]:
@@ -1008,6 +998,48 @@ def build_draw_memory_context(
         return debug
 
 
+def optimize_draw_prompt_single_pass(raw_prompt, context=None, session_id="", visitor_ip="local", analysis_trace_id=""):
+    """One model request with the same source/context; legacy path remains selectable."""
+    processed = apply_professional_prompt_fields(raw_prompt)
+    messages = [
+        {"role": "system", "content": DRAW_PROMPT_SINGLE_PASS_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps({"request": processed, "context": str(context or "")}, ensure_ascii=False)},
+    ]
+    client, http_client, slot = openai_client_for_slot(MODEL_SLOT_BACKGROUND, timeout=IMAGE_PROMPT_TIMEOUT)
+    started = time.perf_counter()
+    try:
+        response = client.chat.completions.create(**draw_prompt_completion_kwargs(slot), messages=messages,
+            temperature=0.35, top_p=0.9, max_tokens=model_output_token_limit(slot, max(1800, min(12000, len(processed) * 2))))
+        if response.choices[0].finish_reason == "length":
+            raise ValueError("绘图提示词输出被截断")
+        _, answer = split_think_text(response.choices[0].message.content or "")
+        parsed = clean_image_model_json(answer)
+        mode = str(parsed.get("prompt_mode") or "")
+        optimized = str(parsed.get("optimized_prompt") or "").strip()
+        if mode not in {"natural", "professional", "revision"} or not optimized:
+            raise ValueError("绘图提示词整理结果不完整")
+        if mode == "revision" and not draw_prompt_context_has_previous_prompt(context):
+            raise ValueError("缺少上一版绘图提示词，无法可靠续改")
+        if mode == "professional" and not prompt_contains_cjk(processed):
+            parsed["optimized_prompt"] = processed
+        elif prompt_contains_cjk(optimized) or (mode != "professional" and optimized == processed):
+            raise ValueError("绘图提示词没有完成英文优化")
+        decision = normalize_draw_prompt_decision(parsed, processed)
+        if decision["aspect_ratio"] == "1:1":
+            ratio = extract_aspect_ratio_from_prompt(context or "") if mode == "revision" else "1:1"
+            decision["aspect_ratio"] = ratio if ratio != "1:1" else extract_aspect_ratio_from_prompt(processed)
+        if analysis_trace_id:
+            record_analysis_trace(session_id=session_id, trace_id=analysis_trace_id, event_type="model_call",
+                visitor_ip=visitor_ip, step_name="draw_prompt_agent_model", duration_ms=round((time.perf_counter()-started)*1000, 3),
+                payload={"model": slot.get("model"), "pipeline": "single_pass", "prompt_mode": {"mode": mode}, "decision": decision})
+        return decision
+    except Exception as exc:
+        record_event(session_id or None, "draw_prompt_optimize_error", visitor_ip, {"pipeline": "single_pass", "error": str(exc)})
+        raise RuntimeError("绘图提示词整理失败，已停止画图。" + str(friendly_error(exc))) from exc
+    finally:
+        http_client.close()
+
+
 def optimize_draw_prompt(
     user_prompt: str,
     context: Optional[str] = None,
@@ -1021,6 +1053,8 @@ def optimize_draw_prompt(
     background_slot = model_slot_config(MODEL_SLOT_BACKGROUND)
     if background_slot.get("provider") == "deepseek" and not str(background_slot.get("api_key") or "").strip():
         raise ValueError("后台 DeepSeek 未配置 API Key，无法优化绘图提示词；请在模型设置中补齐后重试。尚未开始画图。")
+    if release_feature_enabled('draw_single_pass'):
+        return optimize_draw_prompt_single_pass(raw_prompt, context, session_id, visitor_ip, analysis_trace_id)
     processed_prompt = apply_professional_prompt_fields(raw_prompt)
     english_prompt = translate_draw_text_to_english(
         processed_prompt,
