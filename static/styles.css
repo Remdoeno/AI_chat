@@ -1224,6 +1224,7 @@ input[type="range"] {
   font-size: 15px;
 }
 
+.model-slot-panel [data-model-thinking-note],
 .model-slot-panel .binding-check-field,
 .model-slot-panel .field:has(input[type="url"]) {
   grid-column: 1 / -1;
