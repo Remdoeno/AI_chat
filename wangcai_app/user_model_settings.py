@@ -33,15 +33,24 @@ class UserModelSettingsStore:
             row = conn.execute('SELECT value FROM app_settings WHERE key=?', (self.key(owner),)).fetchone()
             record = json.loads(row[0]) if row else {'slots': {}}
             overrides = record['slots']
+            saved = record.setdefault('saved_slots', {})
+            profiles = record.setdefault('provider_profiles', {})
             for name in SLOTS:
                 if name not in payload:
                     continue
                 raw = payload[name]
                 if raw is None:
+                    if name in overrides:
+                        saved[name] = dict(overrides[name])
+                        profiles.setdefault(name, {})[overrides[name]['provider']] = dict(overrides[name])
                     overrides.pop(name, None)
                     continue
-                if not isinstance(raw, dict) or set(raw) - FIELDS:
+                if not isinstance(raw, dict) or set(raw) - (FIELDS | {'inherit'}):
                     raise ValueError('模型槽配置不正确')
+                inherit = raw.get('inherit', False)
+                if type(inherit) is not bool:
+                    raise ValueError('继承开关必须为布尔值')
+                raw = {k: v for k, v in raw.items() if k != 'inherit'}
                 if any(not isinstance(value, str) and value is not None for key, value in raw.items() if key not in {'use_proxy', 'thinking_enabled'}):
                     raise ValueError('模型配置需为文字')
                 if 'thinking_enabled' in raw and type(raw['thinking_enabled']) is not bool:
@@ -50,15 +59,21 @@ class UserModelSettingsStore:
                     raise ValueError('代理开关必须为布尔值')
                 if any(isinstance(value, str) and len(value) > 4096 for value in raw.values()):
                     raise ValueError('模型配置过长')
-                old = overrides.get(name, {})
+                old = overrides.get(name) or saved.get(name, {})
+                if old:
+                    profiles.setdefault(name, {})[old['provider']] = dict(old)
                 provider = raw.get('provider') or old.get('provider') or ('none' if name == 'image' else 'local')
                 allowed = {'none', 'hidream', 'custom'} if name == 'image' else {'local', 'openai', 'deepseek', 'zhipu', 'dashscope', 'doubao', 'custom'}
                 if provider not in allowed:
                     raise ValueError('当前模型类型不支持所选服务')
+                if provider != old.get('provider'):
+                    old = profiles.get(name, {}).get(provider, {})
                 same_provider = provider == old.get('provider')
                 merged = {**(old if same_provider else {}), **raw, 'provider': provider}
                 # Empty form submissions preserve only this user's own slot key.
                 merged['api_key'] = raw.get('api_key') or (old.get('api_key', '') if same_provider else '')
+                if raw.get('base_url') and raw['base_url'].rstrip('/') != str(old.get('base_url') or '').rstrip('/') and not raw.get('api_key'):
+                    merged['api_key'] = ''
                 slot = self.normalize_slot(merged, existing=old if same_provider else None)
                 # Do not inherit environment/preset secrets, even for local services.
                 slot['api_key'] = merged['api_key']
@@ -71,7 +86,12 @@ class UserModelSettingsStore:
                         raise ValueError('接口地址或代理地址格式不正确')
                 if provider != 'none' and (not slot['base_url'] or not slot['model']):
                     raise ValueError('请填写接口地址和模型名')
-                overrides[name] = slot
+                saved[name] = dict(slot)
+                profiles.setdefault(name, {})[provider] = dict(slot)
+                if inherit:
+                    overrides.pop(name, None)
+                else:
+                    overrides[name] = slot
             if 'web_search_proxy' in payload:
                 proxy = payload['web_search_proxy']
                 if not isinstance(proxy, str) or len(proxy) > 4096:
@@ -104,4 +124,6 @@ class UserModelSettingsStore:
                 result[name] = {'inherit': True, 'provider': slot['provider'], 'display_name': slot['display_name'], 'model': slot['model'],
                                 'base_url': '', 'proxy_url': '', 'has_api_key': False, 'use_proxy': False,
                                 'thinking_enabled': self.public_slot(slot)['thinking_enabled'], 'thinking_supported': self.public_slot(slot)['thinking_supported']}
+        result['saved_slots'] = {k: self.public_slot(v) for k, v in record.get('saved_slots', {}).items() if k in SLOTS}
+        result['provider_profiles'] = {k: {provider: self.public_slot(v) for provider, v in values.items()} for k, values in record.get('provider_profiles', {}).items() if k in SLOTS}
         return result

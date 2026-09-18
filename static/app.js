@@ -252,9 +252,25 @@ function syncModelThinkingOption(slot) {
     : supported ? "开启后自动增加思考额度，回复可能更慢" : "当前模型暂未接入思考开关";
 }
 
+let modelSlotDrafts = {};
+
 function applyProviderPreset(slot) {
   const providerInput = modelField(slot, "provider");
   const provider = providerInput ? providerInput.value : "local";
+  if (modelSettingsState?.scope === "user") {
+    const previous = providerInput.dataset.previousProvider;
+    if (previous) {
+      const draft = readModelSlot(slot, previous);
+      if (draft) (modelSlotDrafts[slot] ||= {})[previous] = {...draft, provider: previous};
+    }
+    const remembered = modelSlotDrafts[slot]?.[provider] || modelSettingsState.provider_profiles?.[slot]?.[provider];
+    if (remembered) {
+      populateModelSlot(slot, {...modelSettingsState, [slot]: {...remembered, inherit: false}});
+      modelField(slot, "api_key").value = remembered.api_key || "";
+      return;
+    }
+  }
+  providerInput.dataset.previousProvider = provider;
   const preset = modelPreset(provider);
   const displayInput = modelField(slot, "display_name");
   const baseUrlInput = modelField(slot, "base_url");
@@ -291,10 +307,13 @@ function applyProviderPreset(slot) {
 }
 
 function populateModelSlot(slot, settings) {
-  const data = settings && settings[slot] ? settings[slot] : { provider: "local" };
+  const effective = settings && settings[slot] ? settings[slot] : { provider: "local" };
+  const retained = effective.inherit && settings.saved_slots?.[slot];
+  const data = retained ? {...retained, inherit: true} : effective;
   const providerInput = modelField(slot, "provider");
   if (providerInput) {
     providerInput.value = data.provider || "local";
+    providerInput.dataset.previousProvider = providerInput.value;
   }
   for (const field of ["display_name", "base_url", "model", "proxy_url"]) {
     const input = modelField(slot, field);
@@ -387,12 +406,14 @@ function syncModelSlotDisabledState(slot) {
   }
 }
 
-function readModelSlot(slot) {
-  if (modelSettingsState?.scope === "user" && document.querySelector(`[data-model-inherit="${slot}"]`)?.checked) return null;
-  const provider = modelField(slot, "provider")?.value || "local";
+function readModelSlot(slot, providerOverride = "") {
+  const inherited = modelSettingsState?.scope === "user" && document.querySelector(`[data-model-inherit="${slot}"]`)?.checked;
+  if (inherited && !modelField(slot, "base_url")?.value && !modelSettingsState.saved_slots?.[slot]) return null;
+  const provider = providerOverride || modelField(slot, "provider")?.value || "local";
   const isLocalLike = isProxylessProvider(provider);
   const proxyUrl = isLocalLike ? "" : ((modelField(slot, "proxy_url")?.value || "").trim() || currentWebSearchProxy());
   const payload = {
+    ...(modelSettingsState?.scope === "user" ? {inherit: Boolean(inherited)} : {}),
     provider,
     display_name: provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : (modelField(slot, "display_name")?.value || ""),
     base_url: modelField(slot, "base_url")?.value || "",
@@ -436,6 +457,7 @@ async function loadModelSettings(scope = "") {
 }
 
 function populateModelSettings(settings) {
+  modelSlotDrafts = {};
   ["chat", "background", "image"].forEach((slot) => populateModelSlot(slot, settings));
   document.getElementById("modelSettingsScope").value = settings.scope || "system";
   document.getElementById("modelSettingsScopeNote").textContent = settings.scope === "user"
@@ -3089,7 +3111,7 @@ Promise.resolve(window.__wangcaiTutorialReady).finally(bootChatSession);
 
 document.querySelectorAll("[data-model-inherit]").forEach((input) => input.addEventListener("change", () => {
   const slot = input.dataset.modelInherit;
-  if (!input.checked && modelSettingsState?.[slot]?.inherit) { modelField(slot, "provider").value = slot === "image" ? "none" : "local"; applyProviderPreset(slot); }
+  // Inheritance only disables the editor; keep the personal draft and entered key intact.
   syncModelSlotDisabledState(slot);
 }));
 document.getElementById("modelSettingsScope")?.addEventListener("change", (event) => {

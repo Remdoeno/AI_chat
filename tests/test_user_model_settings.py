@@ -243,6 +243,35 @@ class UserModelSettingsTests(unittest.TestCase):
         own=self.store.load('alpha')['slots']['chat'];self.assertEqual(own['api_key'],'ALPHA-SECRET');self.assertEqual(own['base_url'],'https://example.test/v1')
         self.assertNotIn('ALPHA-SECRET',self.client.get('/api/model-settings',headers=self.headers('bravo_one')).text)
 
+    def test_inheritance_preserves_personal_configuration_and_key(self):
+        own={**self.slot('my-model','PRIVATE-KEY'),'thinking_enabled':True}
+        self.put({'chat':own})
+        response=self.put({'chat':None})
+        self.assertTrue(response.json()['chat']['inherit'])
+        self.assertEqual(response.json()['saved_slots']['chat']['model'],'my-model')
+        self.assertNotIn('PRIVATE-KEY',response.text)
+        self.assertNotIn('saved_slots',self.store.effective('alpha'))
+        response=self.put({'chat':{'provider':'custom','inherit':False}})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.store.effective('alpha')['chat']['api_key'],'PRIVATE-KEY')
+        self.assertEqual(self.store.effective('alpha')['chat']['model'],'my-model')
+
+    def test_save_draft_while_inherited_and_restore_after_provider_switch(self):
+        own={**self.slot('private-model','PRIVATE-KEY'),'inherit':True}
+        response=self.put({'chat':own})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertTrue(response.json()['chat']['inherit'])
+        self.assertNotEqual(self.store.effective('alpha')['chat']['model'],'private-model')
+        self.put({'chat':{'provider':'local'}})
+        response=self.put({'chat':{'provider':'custom'}})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.store.effective('alpha')['chat']['api_key'],'PRIVATE-KEY')
+        self.assertEqual(self.store.effective('alpha')['chat']['model'],'private-model')
+        self.assertNotIn('PRIVATE-KEY',response.text)
+        self.assertNotIn('private-model',self.client.get('/api/model-settings',headers=self.headers('bravo_one')).text)
+        self.put({'chat':{'provider':'custom','base_url':'https://different.test/v1'}})
+        self.assertEqual(self.store.effective('alpha')['chat']['api_key'],'')
+
     def test_inherit_reset_tracks_default_without_replacing_other_slots(self):
         self.put({'chat':self.slot('mine'), 'background':self.slot('mine-bg')})
         self.put({'chat':None})
