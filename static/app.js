@@ -2064,7 +2064,7 @@ async function startFastOpeningPrompt(openingPrompt) {
   const assistantBody = createBubble("assistant", "");
   activeAssistantBody = assistantBody;
   setBusy(true);
-  setStatus("开场生成中");
+  setStatus("本地开场生成中");
 
   try {
     const response = await fetch("/api/opening/stream", {

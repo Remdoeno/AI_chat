@@ -197,6 +197,30 @@ class UserModelSettingsTests(unittest.TestCase):
         self.assertEqual(system['chat']['model'],'deepseek-flash')
         self.assertTrue(self.store.public('bravo')['chat']['thinking_enabled'])
 
+    def test_local_opening_ignores_personal_cloud_and_normal_chat_keeps_it(self):
+        cloud={**self.slot('deepseek-flash','MYKEY'),'provider':'deepseek'}
+        client=mock.Mock();http=mock.Mock()
+        client.chat.completions.create.side_effect=lambda **kw: iter([mock.Mock(choices=[mock.Mock(delta=mock.Mock(content='hello'))])])
+        picked=[]
+        def make(slot,timeout):
+            picked.append(slot['provider']);return client,http,slot
+        with mock.patch.dict(self.ns,{'chat_model_candidate_slots':lambda *a:[('chat',cloud,'')], 'openai_client_for_model_slot_config':make}):
+            self.assertEqual(''.join(self.app.iter_model_deltas([],512,0.6,0.9,opening=True)),'hello')
+            self.assertEqual(''.join(self.app.iter_model_deltas([],512,0.6,0.9)),'hello')
+        self.assertEqual(picked,['local','deepseek'])
+        with mock.patch.dict(self.ns,{'chat_model_candidate_slots':lambda *a:[('chat',cloud,'')], 'call_chat_completion_once_with_slot':lambda messages,tokens,temp,p,slot:slot['provider']}):
+            self.assertEqual(self.app.call_chat_completion_once([],512,0.6,0.9,opening=True),'local')
+            self.assertEqual(self.app.call_chat_completion_once([],512,0.6,0.9),'deepseek')
+
+    def test_fast_opening_explicitly_requests_local_model(self):
+        import queue,threading
+        requested=[]
+        def stream(*args,**kwargs):
+            requested.append(kwargs.get('opening'));return iter(['hello'])
+        with mock.patch.dict(self.ns,{'iter_model_deltas':stream,'is_generation_cancelled':lambda *a:False}):
+            self.app.run_opening_model_stream(queue.Queue(),threading.Event(),'test','token',self.app.OpeningStreamPayload(opening_id='test',opening_prompt='hello'),[], 'device:test')
+        self.assertEqual(requested,[True])
+
     def test_empty_opening_returns_error_and_failed_trace_instead_of_success(self):
         session=self.app.create_session('device:model_test_alpha_one','test')
         with mock.patch.dict(self.ns,{

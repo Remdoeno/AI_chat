@@ -1515,7 +1515,7 @@ def run_opening_model_stream(
     answer_parts: List[str] = []
     stripper = ThinkStripper()
     model_started = time.perf_counter()
-    model_name = chat_trace_model_name(model_messages)
+    model_name = str(default_model_slot("local")["model"])
 
     def record_fast_opening_trace(event_type: str, status: str, extra: Optional[Dict[str, object]] = None) -> None:
         trace_payload = {
@@ -1540,6 +1540,7 @@ def run_opening_model_stream(
             payload.max_tokens,
             payload.temperature,
             payload.top_p,
+            opening=True,
         ):
             if cancel_event.is_set() or is_generation_cancelled(generation_key, generation_token):
                 enqueue_opening_stream_event(
@@ -1571,6 +1572,7 @@ def run_opening_model_stream(
                 payload.max_tokens,
                 payload.temperature,
                 payload.top_p,
+                opening=True,
             ).strip()
             if retry_answer:
                 answer = retry_answer
@@ -1804,7 +1806,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
             if analysis_trace_id:
                 return
             trace_payload = {
-                "model": chat_trace_model_name(model_messages_for_trace),
+                "model": (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages_for_trace)),
                 "status": status,
                 "answer_chars": len("".join(answer_parts)),
                 "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
@@ -2445,7 +2447,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                     isolate_history=bool(payload.web_search),
                 )
             if analysis_trace_id:
-                chat_model_name = chat_trace_model_name(model_messages)
+                chat_model_name = (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages))
                 record_analysis_trace(
                     session_id=session_id,
                     trace_id=analysis_trace_id,
@@ -2464,6 +2466,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                 payload.max_tokens,
                 payload.temperature,
                 payload.top_p,
+                opening=cached_opening,
             ):
                 if is_generation_cancelled(session_id, generation_token):
                     record_event(
@@ -2482,7 +2485,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                             step_name="main_chat_stream",
                             duration_ms=round((time.perf_counter() - model_started) * 1000, 3),
                             payload={
-                                "model": chat_trace_model_name(model_messages),
+                                "model": (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages)),
                                 "status": "cancelled",
                                 "chars": len("".join(answer_parts)),
                             },
@@ -2517,6 +2520,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                         payload.max_tokens,
                         payload.temperature,
                         payload.top_p,
+                        opening=cached_opening,
                     ).strip()
                 except Exception as exc:
                     retry_answer = ""
@@ -2535,7 +2539,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                             step_name="main_chat_empty_retry",
                             duration_ms=round((time.perf_counter() - retry_started) * 1000, 3),
                             payload={
-                                "model": chat_trace_model_name(model_messages),
+                                "model": (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages)),
                                 "error": str(exc),
                                 "cached_opening": cached_opening,
                             },
@@ -2553,7 +2557,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                             step_name="main_chat_empty_retry",
                             duration_ms=round((time.perf_counter() - retry_started) * 1000, 3),
                             payload={
-                                "model": chat_trace_model_name(model_messages),
+                                "model": (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages)),
                                 "status": "recovered",
                                 "answer_chars": len(answer),
                                 "cached_opening": cached_opening,
@@ -2575,7 +2579,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                             step_name="main_chat_stream",
                             duration_ms=round((time.perf_counter() - model_started) * 1000, 3),
                             payload={
-                                "model": chat_trace_model_name(model_messages),
+                                "model": (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages)),
                                 "status": "empty_failed",
                                 "answer_chars": 0,
                                 "cached_opening": cached_opening,
@@ -2601,7 +2605,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                             step_name="main_chat_stream",
                             duration_ms=round((time.perf_counter() - model_started) * 1000, 3),
                             payload={
-                                "model": chat_trace_model_name(model_messages),
+                                "model": (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages)),
                                 "status": "empty_failed",
                                 "answer_chars": 0,
                             },
@@ -2637,7 +2641,7 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                     step_name="main_chat_stream",
                     duration_ms=round((time.perf_counter() - model_started) * 1000, 3),
                     payload={
-                        "model": chat_trace_model_name(model_messages),
+                        "model": (str(default_model_slot("local")["model"]) if cached_opening else chat_trace_model_name(model_messages)),
                         "status": "completed",
                         "answer_chars": len(answer),
                         "recovered_from_empty_stream": recovered_from_empty_stream,

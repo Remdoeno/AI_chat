@@ -734,8 +734,9 @@ def iter_model_deltas(
     max_tokens: int,
     temperature: float,
     top_p: float,
+    opening: bool = False,
 ) -> Iterable[str]:
-    candidates = chat_model_candidate_slots(messages)
+    candidates = [("本地开场", default_model_slot("local"), "")] if opening else chat_model_candidate_slots(messages)
     last_exc: Optional[Exception] = None
     for index, (_slot_label, model_slot, _fallback_reason) in enumerate(candidates):
         client, http_client, _ = openai_client_for_model_slot_config(model_slot, timeout=REQUEST_TIMEOUT)
@@ -798,8 +799,9 @@ def call_chat_completion_once(
     max_tokens: int,
     temperature: float,
     top_p: float,
+    opening: bool = False,
 ) -> str:
-    candidates = chat_model_candidate_slots(messages)
+    candidates = [("本地开场", default_model_slot("local"), "")] if opening else chat_model_candidate_slots(messages)
     last_exc: Optional[Exception] = None
     for index, (_slot_label, model_slot, _fallback_reason) in enumerate(candidates):
         try:
