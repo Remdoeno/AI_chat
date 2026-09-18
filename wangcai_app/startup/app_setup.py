@@ -9,6 +9,8 @@ async def lifespan(_app: FastAPI):
     schedule_memory_thread = threading.Thread(target=run_schedule_memory_maintenance, args=(schedule_memory_stop,), daemon=True)
     schedule_memory_thread.start()
     threading.Thread(target=run_holiday_sync, args=(schedule_memory_stop,), daemon=True).start()
+    from wangcai_app.event_retention import run_maintenance
+    threading.Thread(target=run_maintenance, args=(DB_PATH, schedule_memory_stop), daemon=True, name="event-retention").start()
     start_memory_agent_worker()
     start_idle_agent_worker()
     try:
@@ -19,7 +21,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Wangcai Web",
-    version="3.0.3",
+    version="3.0.4",
     lifespan=lifespan,
     openapi_url=None,
     docs_url=None,
