@@ -2571,7 +2571,7 @@ async function sendMessage(text, options = {}) {
         } else if (parsed.event === "draw_status") {
           setStatus(payload.message || "画图中");
         } else if (parsed.event === "draw_prompt") {
-          setStatus("HiDream 生成中");
+          setStatus(payload.image_model_name ? `${payload.image_model_name} 生成中` : "图片生成中");
           if (payload.optimized_prompt) {
             assistantMarkdown = "绘图 prompt 已准备，正在生成图片。";
             setRenderedMarkdown(assistantBody, assistantMarkdown);

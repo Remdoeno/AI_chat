@@ -1104,10 +1104,11 @@ def character_library_chat_stream(payload: CharacterChatPayload, request: Reques
                         "negative_prompt": decision.get("negative_prompt", ""),
                         "aspect_ratio": decision.get("aspect_ratio", "1:1"),
                         "image_count": CHAT_DRAW_IMAGE_COUNT,
+                        "image_model_name": status.get("display_name") or status.get("model") or "图像模型",
                         "short_caption": decision.get("short_caption", ""),
                     },
                 )
-                yield format_sse("draw_status", {"stage": "generating", "message": "HiDream 生成中"})
+                yield format_sse("draw_status", {"stage": "generating", "message": f"{status.get('display_name') or status.get('model') or '图像模型'} 生成中"})
                 if is_generation_cancelled(session_id, generation_token):
                     record_event(session_id, "character_library_generation_cancelled", ip, {"stage": "draw_before_image"})
                     yield format_sse("stopped", {"content": ""})
@@ -1972,10 +1973,11 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                         "negative_prompt": decision.get("negative_prompt", ""),
                         "aspect_ratio": decision.get("aspect_ratio", "1:1"),
                         "image_count": CHAT_DRAW_IMAGE_COUNT,
+                        "image_model_name": status.get("display_name") or status.get("model") or "图像模型",
                         "short_caption": decision.get("short_caption", ""),
                     },
                 )
-                yield format_sse("draw_status", {"stage": "generating", "message": "HiDream 生成中"})
+                yield format_sse("draw_status", {"stage": "generating", "message": f"{status.get('display_name') or status.get('model') or '图像模型'} 生成中"})
                 draw_started = time.perf_counter()
                 try:
                     batch = generate_image_batch(

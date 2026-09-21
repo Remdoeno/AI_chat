@@ -1086,9 +1086,9 @@ async function sendCharacterMessage(text, attachments, mode = "chat") {
         setAssistantMarkdown(assistantBody, payload.message || "画图中");
         setStatus(payload.message || "画图中");
       },
-      draw_prompt: () => {
+      draw_prompt: (payload) => {
         setAssistantMarkdown(assistantBody, "画图 prompt 已优化，正在生成图片。");
-        setStatus("HiDream 生成中");
+        setStatus(payload.image_model_name ? `${payload.image_model_name} 生成中` : "图片生成中");
       },
       draw_image_batch: (payload) => {
         assistantBody.replaceChildren();

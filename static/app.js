@@ -2634,7 +2634,7 @@ async function sendMessage(text, attachments = [], webSearch = false, options = 
       },
       draw_prompt: (payload) => {
         setSearchActivity("绘图 prompt 已准备");
-        setStatus("HiDream 生成中");
+        setStatus(payload.image_model_name ? `${payload.image_model_name} 生成中` : "图片生成中");
         if (payload.optimized_prompt) {
           setRenderedMarkdown(assistantBody, "绘图 prompt 已准备，正在生成图片。");
         }
