@@ -7,7 +7,7 @@
   <title>日程 · 旺财</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <script src="/static/theme.js?v=20260916_memberships_2_7_0"></script>
-  <link rel="stylesheet" href="/static/schedule.css?v=20260922_compact_3_1_4" />
+  <link rel="stylesheet" href="/static/schedule.css?v=20260922_header_3_1_5" />
 </head>
 <body>
   <main class="schedule-shell">
@@ -15,17 +15,21 @@
       <a class="brand" href="/">🐰 <span>旺财<span class="brand-divider"> / </span>日程</span></a>
       <nav><a href="/">返回聊天</a><button type="button" class="icon-button" data-theme-toggle aria-label="切换深色模式">◐</button></nav>
     </header>
-    <section class="intro">
-      <div><p class="eyebrow">留一点空间，给生活</p><h1>日程与进度<span class="heading-dot">.</span></h1><p id="dateRange" class="muted">正在读取日程…</p></div>
-      <button id="addEvent" type="button" class="primary">＋ 新建事项</button>
+    <section class="intro compact-intro">
+      <div class="intro-title"><h1>日程与进度<span class="heading-dot">.</span></h1><p id="dateRange" class="muted">正在读取日程…</p><span id="eventCount" class="pill"></span></div>
+      <div class="header-controls">
+        <div class="calendar-mode" role="group" aria-label="日历展示模式"><button id="projectMode" type="button" aria-pressed="true">项目模式</button><button id="singleMode" type="button" aria-pressed="false">单项模式</button><span id="modeHint" class="muted">展开长条查看阶段与重要节点</span></div>
+        <div class="header-actions"><div class="toolbar-actions"><button id="previousWindow" type="button" aria-label="上两周">‹ 上两周</button><button id="nextWindow" type="button" aria-label="下两周">下两周 ›</button><button id="todayButton" type="button">今天</button><button id="refreshButton" type="button" aria-label="刷新日程">↻ 刷新</button></div><button id="addEvent" type="button" class="primary">＋ 新建事项</button></div>
+      </div>
     </section>
     <div id="pageStatus" class="notice" role="status" aria-live="polite" hidden></div>
     <div class="workspace">
       <section class="calendar-panel" aria-label="两周日历">
-        <div class="calendar-toolbar"><div class="view-label">▦ <strong>两周日历</strong><span id="eventCount" class="pill"></span></div><div class="toolbar-actions"><button id="previousWindow" type="button" aria-label="上两周">‹ 上两周</button><button id="nextWindow" type="button" aria-label="下两周">下两周 ›</button><button id="todayButton" type="button">今天</button><button id="refreshButton" type="button" aria-label="刷新日程">↻ 刷新</button></div></div>
-        <div class="calendar-mode" role="group" aria-label="日历展示模式"><button id="projectMode" type="button" aria-pressed="true">项目模式</button><button id="singleMode" type="button" aria-pressed="false">单项模式</button><span id="modeHint" class="muted">展开长条查看阶段与重要节点</span></div>
-        <div class="legend-status"><span><i class="sample confirmed"></i>已确定</span><span><i class="sample tentative"></i>待确认</span><span class="legend-hint">点击事项查看或修改</span></div>
-        <div class="holiday-legend"><span><b class="holiday-badge holiday">休</b> 放假</span><span><b class="holiday-badge makeup">班</b> 调休补班</span><span class="weekend-date">红色日期：周六、周日</span></div>
+        <div class="calendar-key" aria-label="日历图例">
+          <div class="legend-status"><span><i class="sample confirmed"></i>已确定</span><span><i class="sample tentative"></i>待确认</span></div>
+          <div class="holiday-legend"><span><b class="holiday-badge holiday">休</b> 放假</span><span><b class="holiday-badge makeup">班</b> 调休补班</span><span class="weekend-date">红色日期：周末</span></div>
+          <span class="muted key-hint">点击事项查看或修改</span>
+        </div>
         <section id="projectTimeline" hidden aria-label="长期事项时间轴"></section>
         <div id="dateStrip" class="date-strip" aria-label="选择日期"></div>
         <div class="calendar-scroll"><div id="calendarGrid" class="calendar-grid"></div></div>
@@ -77,11 +81,11 @@
     <h2 id="unsavedTitle">保存本次修改？</h2><p>你修改了事项内容，关闭前是否保存？</p>
     <div class="dialog-actions"><button id="continueEditing" type="button">继续编辑</button><button id="discardChanges" type="button">不保存</button><button id="saveChanges" type="button" class="primary">保存并关闭</button></div>
   </dialog>
-  <script src="/static/schedule_colors.js?v=20260922_compact_3_1_4"></script>
+  <script src="/static/schedule_colors.js?v=20260922_header_3_1_5"></script>
   <script src="/static/device_identity.js?v=20260916_memberships_2_7_0"></script>
-  <script src="/static/schedule_ranges.js?v=20260922_compact_3_1_4"></script>
-  <script src="/static/schedule_connections.js?v=20260922_compact_3_1_4"></script>
-  <script src="/static/schedule_progress.js?v=20260922_compact_3_1_4"></script>
-  <script src="/static/schedule.js?v=20260922_compact_3_1_4"></script>
+  <script src="/static/schedule_ranges.js?v=20260922_header_3_1_5"></script>
+  <script src="/static/schedule_connections.js?v=20260922_header_3_1_5"></script>
+  <script src="/static/schedule_progress.js?v=20260922_header_3_1_5"></script>
+  <script src="/static/schedule.js?v=20260922_header_3_1_5"></script>
 </body>
 </html>
