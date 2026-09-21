@@ -2,6 +2,8 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   let snapshot = null;
+  let calendarMode = "project";
+  let detailProject = null;
   let selectedDate = "";
   let editing = null;
   let loading = false;
@@ -84,8 +86,8 @@
   }
   function eventCard(event, day = selectedDate) {
     const category = snapshot.categories.find((item) => item.id === event.category);
-    const card = button("", () => openEvent(event), `event-card ${event.status}`);
-    card.style.setProperty("--event-color", category?.color || "#77818e");
+    const card = button("", () => event.kind === "project" ? openProject(event) : openEvent(event), `event-card ${event.status}`);
+    card.style.setProperty("--event-color", event.kind === "project" ? ScheduleProgress.color(event) : category?.color || "#77818e");
     const time = event.kind === "project" ? "长期事项" : event.time ? `${event.time}${event.end_time ? " – " + event.end_time : ""}` : "时间待定";
     card.append(node("span", "event-time", time), node("span", "event-title", event.title));
     if (event.kind === "project") card.append(ScheduleProgress.summary(event, day));
@@ -105,7 +107,10 @@
     const holiday = holidayBadge(selectedDate);
     if (holiday) { holiday.classList.add("agenda-holiday"); agenda.append(holiday); }
     const events = eventsFor(selectedDate);
-    if (events.length) events.forEach((event) => agenda.append(eventCard(event)));
+    const agendaCards = calendarMode === "single"
+      ? [...events.filter(e => e.kind !== "project").map(e => eventCard(e)), ...ScheduleProgress.activeNodes(snapshot.items, selectedDate).map(item => ScheduleProgress.nodeCard(item, openProject))]
+      : events.map(e => eventCard(e));
+    if (agendaCards.length) agenda.append(...agendaCards);
     else agenda.append(node("p", "mobile-empty", "这一天还没有安排，留一点自由时间。"));
     $("calendarGrid").querySelectorAll(".day-cell").forEach(cell => cell.classList.toggle("selected-day", cell.dataset.date === selectedDate));
     $("dateStrip").querySelectorAll("button").forEach((element) => element.setAttribute("aria-pressed", String(element.dataset.date === selectedDate)));
@@ -115,6 +120,10 @@
     const confirmed = snapshot.items.filter((event) => event.status === "confirmed").length;
     $("eventCount").textContent = `${confirmed} 已确定 · ${snapshot.items.length - confirmed} 待确认`;
     $("calendarGrid").replaceChildren();
+    $("calendarGrid").classList.toggle("single-mode", calendarMode === "single");
+    $("projectMode").setAttribute("aria-pressed", String(calendarMode === "project"));
+    $("singleMode").setAttribute("aria-pressed", String(calendarMode === "single"));
+    $("modeHint").textContent = calendarMode === "project" ? "展开长条查看阶段与重要节点" : "同色节点属于同一项目，细曲线连接阶段顺序";
     $("dateStrip").replaceChildren();
     for (let index = 0; index < 14; index += 1) {
       const day = addDays(snapshot.today, index);
@@ -126,7 +135,8 @@
       const holiday = holidayBadge(day);
       if (holiday) heading.append(holiday);
       cell.append(heading);
-      events.filter(event => event.kind !== "project" || event.milestones?.some(s => s.date === day)).forEach((event) => cell.append(eventCard(event, day)));
+      events.filter(event => event.kind !== "project").forEach((event) => cell.append(eventCard(event, day)));
+      if (calendarMode === "single") ScheduleProgress.singleNodes(snapshot.items, day, snapshot.today).forEach(item => cell.append(ScheduleProgress.nodeCard(item, openProject)));
       if (!events.length) cell.append(node("p", "day-empty", "—"));
       $("calendarGrid").append(cell);
       const tab = button("", () => { selectedDate = day; renderAgenda(); }, `date-button${index === 0 ? " is-today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
@@ -144,9 +154,10 @@
       $("dateStrip").append(tab);
     }
     $("undatedEvents").replaceChildren();
-    const undated = snapshot.items.filter((event) => !event.date);
+    const undated = snapshot.items.filter((event) => !event.date && (calendarMode !== "single" || event.kind !== "project" || !event.milestones?.length));
     if (undated.length) undated.forEach((event) => $("undatedEvents").append(eventCard(event)));
-    else $("undatedEvents").append(node("p", "empty-note", "暂无日期待定的事项"));
+    if (calendarMode === "single") ScheduleProgress.undatedNodes(snapshot.items).forEach(item => $("undatedEvents").append(ScheduleProgress.nodeCard(item, openProject)));
+    if (!$("undatedEvents").children.length) $("undatedEvents").append(node("p", "empty-note", "暂无日期待定的事项"));
     $("categoryLegend").replaceChildren();
     $("categorySelect").replaceChildren();
     snapshot.categories.forEach((category) => {
@@ -158,12 +169,14 @@
       option.value = category.id;
       $("categorySelect").append(option);
     });
-    ScheduleProgress.timeline($("projectTimeline"), snapshot, openEvent, selectDay, addDays);
+    ScheduleProgress.timeline($("projectTimeline"), snapshot, openProject, selectDay, addDays);
+    if (calendarMode === "single") $("projectTimeline").hidden = true;
+    ScheduleConnections.schedule($("calendarGrid"));
     renderHolidayStatus();
     renderAgenda();
   }
   async function refresh() {
-    if (loading || $("eventDialog").open) return;
+    if (loading || $("eventDialog").open || $("projectDialog").open) return;
     loading = true;
     $("refreshButton").disabled = true;
     try {
@@ -175,6 +188,7 @@
       }
       previousOwner = data.owner;
       snapshot = data;
+      try { calendarMode = localStorage.getItem(`wangcai-calendar-mode:${data.owner}`) === "single" ? "single" : "project"; } catch (_) { calendarMode = "project"; }
       if (!selectedDate || selectedDate < data.today || selectedDate > data.end) selectedDate = data.today;
       render();
       $("addEvent").disabled = false;
@@ -194,6 +208,23 @@
       }
     } finally { loading = false; $("refreshButton").disabled = false; }
   }
+  function openProject(project, focusId = "") {
+    detailProject = project;
+    $("projectTitle").textContent = project.title;
+    $("projectDetails").replaceChildren(ScheduleProgress.details(project, focusId));
+    $("projectDialog").showModal();
+    if (focusId) requestAnimationFrame(() => $("projectDetails").querySelector(".phase-focus")?.scrollIntoView({ block: "nearest" }));
+  }
+  function setMode(mode) {
+    if (!snapshot) return;
+    calendarMode = mode;
+    try { localStorage.setItem(`wangcai-calendar-mode:${snapshot.owner}`, mode); } catch (_) {}
+    render();
+  }
+  $("projectMode").addEventListener("click", () => setMode("project"));
+  $("singleMode").addEventListener("click", () => setMode("single"));
+  $("closeProject").addEventListener("click", () => $("projectDialog").close());
+  $("editProject").addEventListener("click", () => { $("projectDialog").close(); if (detailProject) openEvent(detailProject); });
   function openEvent(event, day = "") {
     if (!snapshot) return;
     editing = event;

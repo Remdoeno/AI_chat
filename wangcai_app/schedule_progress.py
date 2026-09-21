@@ -20,9 +20,9 @@ def normalize_progress(data, event):
         raise ValueError('请同时填写长期事项的开始和结束日期，或都留空')
     normalized, ids = [], set()
     for stage in stages:
-        if not isinstance(stage, dict) or set(stage) - {'id', 'title', 'date', 'time', 'done', 'notes'}:
+        if not isinstance(stage, dict) or set(stage) - {'id', 'title', 'date', 'time', 'done', 'notes', 'start_date', 'important', 'tentative'}:
             raise ValueError('阶段字段不正确')
-        item = {key: stage.get(key, '') for key in ('title', 'date', 'time', 'notes')}
+        item = {key: stage.get(key, '') for key in ('title', 'date', 'time', 'notes', 'start_date')}
         if not all(isinstance(v, str) for v in item.values()):
             raise ValueError('阶段名称、日期与备注必须是文字')
         item = {key: value.strip() for key, value in item.items()}
@@ -34,6 +34,15 @@ def normalize_progress(data, event):
             raise ValueError('阶段时间需为HH:MM，且先填写日期')
         if event['date'] and item['date'] and not event['date'] <= item['date'] <= event['end_date']:
             raise ValueError('阶段DDL需在长期事项开始与结束日期之间，请同时调整范围')
+        if item['start_date']:
+            if not item['date'] or date.fromisoformat(item['start_date']).isoformat() != item['start_date'] or item['start_date'] > item['date']:
+                raise ValueError('阶段开始日期需有效且不晚于截止日期')
+            if event['date'] and item['start_date'] < event['date']:
+                raise ValueError('阶段开始日期不能早于项目范围')
+        for flag in ('important', 'tentative'):
+            item[flag] = stage.get(flag, False)
+            if not isinstance(item[flag], bool):
+                raise ValueError('节点标记必须为true或false')
         item['done'] = stage.get('done', False)
         if not isinstance(item['done'], bool):
             raise ValueError('阶段完成状态必须为true或false')

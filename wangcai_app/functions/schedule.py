@@ -48,6 +48,21 @@ def schedule_agent_decision(context):
             messages=schedule_conversation_messages(SCHEDULE_AGENT_PROMPT, context),
             temperature=0.1, max_tokens=model_output_token_limit(model_slot, 4096),
         )
+        from wangcai_app.schedule_project_shape import needs_project_repair
+        def parse_schedule_response(value):
+            _, text = split_think_text(value.choices[0].message.content or "")
+            return json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip()))
+        initial = parse_schedule_response(response)
+        if needs_project_repair(context.get("message", ""), initial):
+            response = client.chat.completions.create(
+                **model_completion_kwargs(model_slot),
+                messages=schedule_conversation_messages(SCHEDULE_AGENT_PROMPT, context) + [
+                    {"role": "assistant", "content": json.dumps(initial, ensure_ascii=False)},
+                    {"role": "user", "content": "结构校验：你把同一目标的跨日期阶段拆成了普通事项。请合并为一个kind=project及milestones，保留明确的区间、待定窗口和所有其他无关事项；不要猜日期。只返回修正JSON。"}],
+                temperature=0.1, max_tokens=model_output_token_limit(model_slot, 6144),
+            )
+            if needs_project_repair(context.get("message", ""), parse_schedule_response(response)):
+                raise ValueError("长期项目结构未整理完整，未保存；请重试或选择长期事项手动添加阶段")
         _, answer = split_think_text(response.choices[0].message.content or "")
         answer = re.sub(r"^```(?:json)?\s*|\s*```$", "", answer.strip())
         decision = json.loads(answer)

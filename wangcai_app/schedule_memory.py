@@ -31,6 +31,12 @@ def memory_projection(event, today=None):
         text += f" 长期事项进度：{sum(stage['done'] for stage in stages)}/{len(stages)}阶段完成。"
         for stage in stages:
             text += f" 阶段【{'已完成' if stage['done'] else '未完成'}】{stage['title']}；DDL：{stage['date'] or '待定'} {stage['time']}。"
+            if stage.get('start_date'):
+                text += f"执行区间：{stage['start_date']}至{stage['date']}。"
+            if stage.get('tentative'):
+                text += '日期为待定窗口，尚未最终确定。'
+            if stage.get('important'):
+                text += '这是重要节点。'
             if stage['notes']:
                 text += f"阶段备注：{stage['notes']}。"
     active = event["status"] != "cancelled"

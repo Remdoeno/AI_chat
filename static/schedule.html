@@ -7,7 +7,7 @@
   <title>日程 · 旺财</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <script src="/static/theme.js?v=20260916_memberships_2_7_0"></script>
-  <link rel="stylesheet" href="/static/schedule.css?v=20260921_progress_3_1_0" />
+  <link rel="stylesheet" href="/static/schedule.css?v=20260921_modes_3_1_1" />
 </head>
 <body>
   <main class="schedule-shell">
@@ -23,11 +23,12 @@
     <div class="workspace">
       <section class="calendar-panel" aria-label="两周日历">
         <div class="calendar-toolbar"><div class="view-label">▦ <strong>两周日历</strong><span id="eventCount" class="pill"></span></div><div class="toolbar-actions"><button id="todayButton" type="button">今天</button><button id="refreshButton" type="button" aria-label="刷新日程">↻ 刷新</button></div></div>
+        <div class="calendar-mode" role="group" aria-label="日历展示模式"><button id="projectMode" type="button" aria-pressed="true">项目模式</button><button id="singleMode" type="button" aria-pressed="false">单项模式</button><span id="modeHint" class="muted">展开长条查看阶段与重要节点</span></div>
         <div class="legend-status"><span><i class="sample confirmed"></i>已确定</span><span><i class="sample tentative"></i>待确认</span><span class="legend-hint">点击事项查看或修改</span></div>
         <div class="holiday-legend"><span><b class="holiday-badge holiday">休</b> 放假</span><span><b class="holiday-badge makeup">班</b> 调休补班</span><span class="weekend-date">红色日期：周六、周日</span></div>
         <section id="projectTimeline" hidden aria-label="长期事项时间轴"></section>
         <div id="dateStrip" class="date-strip" aria-label="选择日期"></div>
-        <div id="calendarGrid" class="calendar-grid"></div>
+        <div class="calendar-scroll"><div id="calendarGrid" class="calendar-grid"></div></div>
         <div id="mobileAgenda" class="mobile-agenda"></div>
         <section class="undated-section"><div class="section-title"><h2>日期待定</h2><span class="muted">先记下来，再慢慢确定</span></div><div id="undatedEvents" class="undated-events"></div></section>
         <footer class="calendar-footer"><span class="muted">场景图例</span><div id="categoryLegend" class="category-legend"></div></footer>
@@ -44,6 +45,11 @@
     </div>
     <p class="page-note">日期和时间均为北京时间 · 同一绑定用户跨设备同步 · 暂不提供闹钟推送</p>
   </main>
+  <dialog id="projectDialog" aria-labelledby="projectTitle">
+    <div class="dialog-header"><h2 id="projectTitle"></h2><button id="closeProject" type="button" class="icon-button" aria-label="关闭">×</button></div>
+    <div id="projectDetails"></div>
+    <div class="dialog-actions"><button id="editProject" type="button" class="primary">编辑项目与节点</button></div>
+  </dialog>
   <dialog id="eventDialog" aria-labelledby="eventDialogTitle">
     <form id="eventForm">
       <div class="dialog-header"><h2 id="eventDialogTitle">新建事项</h2><button id="closeDialog" type="button" class="icon-button" aria-label="关闭">×</button></div>
@@ -68,7 +74,8 @@
     </form>
   </dialog>
   <script src="/static/device_identity.js?v=20260916_memberships_2_7_0"></script>
-  <script src="/static/schedule_progress.js?v=20260921_progress_3_1_0"></script>
-  <script src="/static/schedule.js?v=20260921_progress_3_1_0"></script>
+  <script src="/static/schedule_connections.js?v=20260921_modes_3_1_1"></script>
+  <script src="/static/schedule_progress.js?v=20260921_modes_3_1_1"></script>
+  <script src="/static/schedule.js?v=20260921_modes_3_1_1"></script>
 </body>
 </html>
