@@ -63,7 +63,7 @@ class UserModelSettingsStore:
                 if old:
                     profiles.setdefault(name, {})[old['provider']] = dict(old)
                 provider = raw.get('provider') or old.get('provider') or ('none' if name == 'image' else 'local')
-                allowed = {'none', 'hidream', 'custom'} if name == 'image' else {'local', 'openai', 'deepseek', 'zhipu', 'dashscope', 'doubao', 'custom'}
+                allowed = {'none', 'hidream', 'qwen_image', 'custom'} if name == 'image' else {'local', 'openai', 'deepseek', 'zhipu', 'dashscope', 'doubao', 'custom'}
                 if provider not in allowed:
                     raise ValueError('当前模型类型不支持所选服务')
                 if provider != old.get('provider'):

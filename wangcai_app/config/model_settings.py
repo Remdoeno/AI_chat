@@ -10,7 +10,7 @@ MODEL_SLOT_IMAGE = "image"
 MODEL_SETTING_SLOTS = (MODEL_SLOT_CHAT, MODEL_SLOT_BACKGROUND, MODEL_SLOT_IMAGE)
 MODEL_PROVIDER_API_KEYS_KEY = "provider_api_keys"
 MODEL_WEB_SEARCH_PROXY_KEY = "web_search_proxy"
-MODEL_KEYLESS_PROVIDERS = {"local", "none", "hidream"}
+MODEL_KEYLESS_PROVIDERS = {"local", "none", "hidream", "qwen_image"}
 
 LOCAL_MODEL_DISPLAY_NAME = "qwen3.8"
 IMAGE_MODEL_DISPLAY_NAME = "HiDream-O1-Image-Dev-2604"
@@ -79,6 +79,12 @@ MODEL_PROVIDER_PRESETS: Dict[str, Dict[str, object]] = {
         "api_key": "",
         "use_proxy": True,
         "proxy_url": "",
+    },
+    "qwen_image": {
+        "display_name": "Qwen-Image-2.1",
+        "base_url": "http://127.0.0.1:8003",
+        "model": "Qwen/Qwen-Image-2.1",
+        "api_key": "", "use_proxy": False, "proxy_url": "",
     },
     "hidream": {
         "display_name": IMAGE_MODEL_DISPLAY_NAME,
@@ -159,7 +165,7 @@ def normalize_model_slot(
         api_key = ""
         use_proxy = False
         proxy_url = ""
-    elif provider == "hidream":
+    elif provider in {"hidream", "qwen_image"}:
         display_name = display_name or IMAGE_MODEL_DISPLAY_NAME
         model = model or IMAGE_MODEL_DISPLAY_NAME
         use_proxy = False

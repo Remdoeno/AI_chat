@@ -423,7 +423,7 @@ IMAGE_MESSAGE_INCOMPATIBLE_ERROR_MARKERS = (
 def model_slot_likely_accepts_image_messages(slot: Dict[str, object]) -> bool:
     provider = str(slot.get("provider") or "").strip().lower()
     model = str(slot.get("model") or "").strip().lower()
-    if provider in {"", "none", "hidream"}:
+    if provider in {"", "none", "hidream", "qwen_image"}:
         return False
     if provider == "deepseek":
         return model in DEEPSEEK_IMAGE_MESSAGE_MODELS
@@ -1350,6 +1350,26 @@ def request_hidream_images(
     base_url = str(slot.get("base_url") or "").strip().rstrip("/")
     model = str(slot.get("model") or IMAGE_MODEL_DISPLAY_NAME).strip()
     headers = {"Content-Type": "application/json", **image_model_headers(slot)}
+    if slot.get("provider") == "qwen_image":
+        width, height = hidream_dimensions(aspect_ratio)
+        # Match HiDream's actual 2K output instead of its nominal 1K request.
+        scale = (2048 * 2048 / max(1, width * height)) ** 0.5
+        width, height = int(width * scale) // 32 * 32, int(height * scale) // 32 * 32
+        images = []
+        with model_http_client(slot, timeout=IMAGE_GENERATION_TIMEOUT) as client:
+            for _ in range(int(count)):
+                response = client.post(f"{base_url}/v1/images/generations", headers=headers, json={
+                    "model": model, "prompt": prompt, "width": width, "height": height,
+                    "num_inference_steps": 40,
+                    "seed": int(uuid.uuid4().int % 2147483647),
+                    "refs_b64": reference_images_b64 or [],
+                })
+                response.raise_for_status()
+                result = extract_generated_image_bytes(response.json())
+                if not result:
+                    raise RuntimeError("Qwen-Image 服务没有返回图片")
+                images.extend(result[:1])
+        return images
     paths = ["/v1/images/generations", "/generate", "/api/generate", "/txt2img"]
     last_error = ""
     with model_http_client(slot, timeout=IMAGE_GENERATION_TIMEOUT) as client:

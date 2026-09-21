@@ -401,4 +401,31 @@ class UserModelSettingsTests(unittest.TestCase):
         with model_owner_scope('bravo'):self.assertNotEqual(self.app.load_model_settings()['web_search_proxy'],'http://proxy.test:7890')
 
 
+    def test_qwen_image_selection_is_personal_and_keyless(self):
+        self.store.save('alpha', {'image': {'provider':'qwen_image'}})
+        with model_owner_scope('alpha'):
+            slot = self.app.image_slot_config()
+            self.assertEqual(slot['model'], 'Qwen/Qwen-Image-2.1')
+            self.assertFalse(slot['use_proxy'])
+            self.assertEqual(slot['api_key'], '')
+        with model_owner_scope('bravo'):
+            self.assertNotEqual(self.app.image_slot_config()['provider'], 'qwen_image')
+
+    def test_qwen_image_routes_reference_images_without_hidream_fallback(self):
+        import base64
+        slot = self.app.default_model_slot('qwen_image')
+        client = mock.MagicMock()
+        client.post.return_value.json.return_value = {'data':[{'b64_json':base64.b64encode(b'image').decode()}]}
+        ns = self.app.request_hidream_images.__globals__
+        with mock.patch.dict(ns, image_slot_config=lambda:slot,
+                image_generation_status=lambda:{'available':True, **slot},
+                model_http_client=mock.MagicMock(return_value=mock.MagicMock(__enter__=lambda _:client, __exit__=lambda *args:None))):
+            result = self.app.request_hidream_images('prompt', '', '16:9', 1, ['reference'])
+        self.assertEqual(result, [b'image'])
+        body = client.post.call_args.kwargs['json']
+        self.assertEqual(body['refs_b64'], ['reference'])
+        self.assertLessEqual(body['width']*body['height'],4600000)
+        self.assertTrue(client.post.call_args.args[0].endswith('/v1/images/generations'))
+
+
 if __name__=='__main__':unittest.main()

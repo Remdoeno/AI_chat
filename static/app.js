@@ -95,6 +95,10 @@ const MODEL_PROVIDER_PRESETS = {
     use_proxy: false,
     proxy_url: "",
   },
+  qwen_image: {
+    display_name: "Qwen-Image-2.1", base_url: "http://127.0.0.1:8003",
+    model: "Qwen/Qwen-Image-2.1", use_proxy: false, proxy_url: "",
+  },
   hidream: {
     display_name: "HiDream-O1-Image-Dev-2604",
     base_url: "http://127.0.0.1:8002",
@@ -220,7 +224,7 @@ function modelPreset(provider) {
 }
 
 function isProxylessProvider(provider) {
-  return ["local", "none", "hidream"].includes(provider);
+  return ["local", "none", "hidream", "qwen_image"].includes(provider);
 }
 
 function currentWebSearchProxy() {
@@ -292,7 +296,7 @@ function applyProviderPreset(slot) {
   if (apiKeyInput) {
     apiKeyInput.value = "";
     apiKeyInput.disabled = isProxylessProvider(provider);
-    apiKeyInput.placeholder = provider === "local" || provider === "hidream" ? "本地服务通常不需要 API Key" : "留空则使用后台保存密钥";
+    apiKeyInput.placeholder = provider === "local" || provider === "hidream" || provider === "qwen_image" ? "本地服务通常不需要 API Key" : "留空则使用后台保存密钥";
   }
   if (useProxyInput) {
     useProxyInput.checked = Boolean(preset.use_proxy) && !isProxylessProvider(provider);
