@@ -39,8 +39,9 @@ window.ScheduleRanges = (() => {
         continuation(bar,s.start,s.end,days[s.left].dataset.date,days[s.right].dataset.date);
         grid.append(bar);
       });
-      if (lanes.length) days.forEach(cell => {
-        const reserve=document.createElement('div');reserve.className='range-reserve';reserve.style.height=`${lanes.length*70+4}px`;
+      days.forEach((cell, column) => {
+        if (!segments.some(s => s.left <= column && s.right >= column)) return;
+        const reserve=document.createElement('div');reserve.className='range-reserve';reserve.style.height="0px";
         cell.querySelector('.day-heading').after(reserve);
       });
     }
@@ -50,19 +51,40 @@ window.ScheduleRanges = (() => {
     if (!grid.clientWidth) return;
     const cells=[...grid.querySelectorAll('.day-cell')];
     for (let row=0;row<2;row++) {
-      const days=cells.slice(row*7,row*7+7);if (!days.some(c => c.querySelector('.range-reserve'))) continue;
-      const headings=days.map(c => c.querySelector('.day-heading'));
-      const height=Math.max(...headings.map(h => h.getBoundingClientRect().height));
-      headings.forEach(h => { if (h.getBoundingClientRect().height < height-.5) h.style.minHeight=`${height}px`; });
+      const days=cells.slice(row*7,row*7+7);
+      const bars=[...grid.querySelectorAll(`.calendar-range[data-range-row="${row}"]`)];
+      if (!bars.length) continue;
+      const covered=days.filter(c => c.querySelector('.range-reserve'));
+      covered.forEach(c => c.querySelector('.range-reserve').style.height='0px');
+      // Use the bottom of headings actually covered by ranges, not the entire week.
+      const bounds=grid.getBoundingClientRect();
+      const startY=Math.max(...covered.map(c => c.querySelector('.range-reserve').getBoundingClientRect().top));
+      const laneHeights=[];
+      bars.forEach(bar => {
+        const left=days[Number(bar.dataset.rangeLeft)].getBoundingClientRect();
+        const right=days[Number(bar.dataset.rangeRight)].getBoundingClientRect();
+        const width=right.right-left.left-20;
+        bar.style.left=`${left.left-bounds.left+10}px`;bar.style.width=`${width}px`;
+        bar.classList.toggle('range-narrow',width<260);
+        const lane=Number(bar.dataset.rangeLane);
+        laneHeights[lane]=Math.max(laneHeights[lane] || 0,bar.getBoundingClientRect().height);
+      });
+      const offsets=[];let offset=0;
+      laneHeights.forEach((height,lane) => { offsets[lane]=offset;offset+=height+16; });
+      const columnBottoms=Array(7).fill(0);
+      bars.forEach(bar => {
+        const lane=Number(bar.dataset.rangeLane),top=startY+offsets[lane];
+        bar.style.top=`${top-bounds.top}px`;
+        for (let column=Number(bar.dataset.rangeLeft);column<=Number(bar.dataset.rangeRight);column++) {
+          columnBottoms[column]=Math.max(columnBottoms[column],top+bar.getBoundingClientRect().height+16);
+        }
+      });
+      days.forEach((cell,column) => {
+        const reserve=cell.querySelector('.range-reserve');if (!reserve) return;
+        reserve.style.height=`${Math.max(0,columnBottoms[column]-reserve.getBoundingClientRect().top)}px`;
+      });
     }
-    const bounds=grid.getBoundingClientRect();
-    grid.querySelectorAll('.calendar-range').forEach(bar => {
-      const row=Number(bar.dataset.rangeRow),left=cells[row*7+Number(bar.dataset.rangeLeft)],right=cells[row*7+Number(bar.dataset.rangeRight)];
-      const reserve=left?.querySelector('.range-reserve');if (!reserve || !right) return;
-      const a=left.getBoundingClientRect(),b=right.getBoundingClientRect();
-      bar.style.left=`${a.left-bounds.left+10}px`;bar.style.width=`${b.right-a.left-20}px`;
-      bar.style.top=`${reserve.getBoundingClientRect().top-bounds.top+Number(bar.dataset.rangeLane)*70}px`;
-    });
   }
+
   return {isRange,continuation,render,position};
 })();
