@@ -26,6 +26,13 @@ def memory_projection(event, today=None):
         text += f"地点：{event['location']}。"
     if event["notes"]:
         text += f"备注：{event['notes']}"
+    if event.get("kind") == "project":
+        stages = event.get("milestones", [])
+        text += f" 长期事项进度：{sum(stage['done'] for stage in stages)}/{len(stages)}阶段完成。"
+        for stage in stages:
+            text += f" 阶段【{'已完成' if stage['done'] else '未完成'}】{stage['title']}；DDL：{stage['date'] or '待定'} {stage['time']}。"
+            if stage['notes']:
+                text += f"阶段备注：{stage['notes']}。"
     active = event["status"] != "cancelled"
     start = f"{event_date}T{event['time'] or '00:00'}:00+08:00" if event_date and active else None
     end_date = event_date if repeat == "weekly" else event["end_date"] or event_date

@@ -1,23 +1,25 @@
 """User-owned calendar storage; no dependency on the application namespace or models."""
 import json
 import uuid
+from wangcai_app.schedule_progress import normalize_progress
 from datetime import date, datetime, timedelta, timezone
 
 
 CATEGORIES = {
+    "travel": ("旅行", "#278a94"), "project": ("项目", "#6862b8"),
     "meal": ("同学约饭", "#b86d26"), "date": ("约会", "#c4517c"),
     "meeting": ("会议", "#4679c2"), "research": ("组会", "#8660c1"),
     "club": ("社团活动", "#258878"), "interview": ("面试", "#c45d46"),
     "talk": ("宣讲", "#468694"), "course": ("课程", "#9b783a"), "other": ("其他", "#77818e"),
 }
-FIELDS = {"title", "date", "time", "end_date", "end_time", "category", "status", "location", "notes", "repeat"}
+FIELDS = {"title", "date", "time", "end_date", "end_time", "category", "status", "location", "notes", "repeat", "kind", "milestones"}
 
 
 def normalize_event(data):
     if not isinstance(data, dict) or set(data) - FIELDS:
         raise ValueError("日程字段不正确")
     event = {key: data.get(key, "") for key in FIELDS}
-    for key in FIELDS:
+    for key in FIELDS - {"milestones"}:
         if not isinstance(event[key], str):
             raise ValueError("日程字段必须是文字")
         event[key] = event[key].strip()
@@ -48,6 +50,7 @@ def normalize_event(data):
         raise ValueError("结束时间必须晚于开始时间；跨天事项请填写结束日期")
     if event["repeat"] == "weekly" and (not event["date"] or (event["end_date"] and event["end_date"] != event["date"])):
         raise ValueError("每周事项需要首次日期，且须在同一天结束")
+    event.update(normalize_progress(data, event))
     return event
 
 
@@ -73,7 +76,7 @@ class ScheduleStore:
 
     @staticmethod
     def event(row):
-        return {"repeat": "none", **json.loads(row["data"]), "id": row["id"], "revision": row["revision"], "updated_at": row["updated_at"]}
+        return {"repeat": "none", "kind": "event", "milestones": [], **json.loads(row["data"]), "id": row["id"], "revision": row["revision"], "updated_at": row["updated_at"]}
 
     def list(self, owner):
         with self.connect() as conn:

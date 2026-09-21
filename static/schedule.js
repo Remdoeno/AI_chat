@@ -10,6 +10,7 @@
   let pendingEdit = null;
   let previousOwner = "";
   const fields = ["title", "date", "time", "end_date", "end_time", "category", "status", "location", "notes", "repeat"];
+  const progressEditor = ScheduleProgress.initEditor($("eventForm"));
   const requestId = () => `schedule-${crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(36).slice(2)}`;
   const node = (tag, className, text) => {
     const element = document.createElement(tag);
@@ -27,7 +28,7 @@
   const isWeekend = (day) => [0, 6].includes(dateObject(day).getUTCDay());
   const dateLabel = (value, options) => dateObject(value).toLocaleDateString("zh-CN", { timeZone: "Asia/Shanghai", ...options });
   const addDays = (value, count) => new Date(dateObject(value).getTime() + count * 86400000).toLocaleDateString("sv-SE", { timeZone: "Asia/Shanghai" });
-  const occurs = (event, day) => event.date && event.date <= day && (event.end_date || event.date) >= day;
+  const occurs = (event, day) => (event.date && event.date <= day && (event.end_date || event.date) >= day) || (event.kind === "project" && event.milestones?.some(s => s.date === day));
   const eventsFor = (day) => snapshot.items.filter((event) => occurs(event, day)).sort((a, b) => (a.time || "99").localeCompare(b.time || "99"));
   const holidayFor = (day) => snapshot.holidays?.days.find((item) => item.date === day);
   function holidayBadge(day, compact = false) {
@@ -81,18 +82,20 @@
     }
     return data;
   }
-  function eventCard(event) {
+  function eventCard(event, day = selectedDate) {
     const category = snapshot.categories.find((item) => item.id === event.category);
     const card = button("", () => openEvent(event), `event-card ${event.status}`);
     card.style.setProperty("--event-color", category?.color || "#77818e");
-    const time = event.time ? `${event.time}${event.end_time ? " – " + event.end_time : ""}` : "时间待定";
+    const time = event.kind === "project" ? "长期事项" : event.time ? `${event.time}${event.end_time ? " – " + event.end_time : ""}` : "时间待定";
     card.append(node("span", "event-time", time), node("span", "event-title", event.title));
+    if (event.kind === "project") card.append(ScheduleProgress.summary(event, day));
     if (event.end_date && event.end_date !== event.date) card.append(node("span", "event-meta", `${event.date.slice(5)} 至 ${event.end_date.slice(5)}`));
     if (event.location) card.append(node("span", "event-meta", `⌖ ${event.location}`));
     card.append(node("span", "event-status", `${category?.label || "其他"} · ${event.status === "confirmed" ? "已确定" : "待确认"}${event.repeat === "weekly" ? " · 每周" : ""}`));
     card.title = `${event.title}\n${event.date || "日期待定"} ${time}\n${event.notes || ""}`;
     return card;
   }
+  function selectDay(day) { selectedDate = day; renderAgenda(); $("mobileAgenda").scrollIntoView({ behavior: "smooth", block: "nearest" }); }
   function renderAgenda() {
     const agenda = $("mobileAgenda");
     agenda.replaceChildren();
@@ -104,6 +107,7 @@
     const events = eventsFor(selectedDate);
     if (events.length) events.forEach((event) => agenda.append(eventCard(event)));
     else agenda.append(node("p", "mobile-empty", "这一天还没有安排，留一点自由时间。"));
+    $("calendarGrid").querySelectorAll(".day-cell").forEach(cell => cell.classList.toggle("selected-day", cell.dataset.date === selectedDate));
     $("dateStrip").querySelectorAll("button").forEach((element) => element.setAttribute("aria-pressed", String(element.dataset.date === selectedDate)));
   }
   function render() {
@@ -116,12 +120,13 @@
       const day = addDays(snapshot.today, index);
       const events = eventsFor(day);
       const cell = node("section", `day-cell${index === 0 ? " today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
+      cell.dataset.date = day;
       const heading = node("div", "day-heading");
-      heading.append(node("span", "", dateLabel(day, { weekday: "short" })), node("span", "day-number", day.slice(8).replace(/^0/, "")), node("span", "", index === 0 ? "今天" : day.slice(5, 7) + "月"));
+      heading.append(node("span", "", dateLabel(day, { weekday: "short" })), button(day.slice(8).replace(/^0/, ""), () => selectDay(day), "day-number"), node("span", "", index === 0 ? "今天" : day.slice(5, 7) + "月"));
       const holiday = holidayBadge(day);
       if (holiday) heading.append(holiday);
       cell.append(heading);
-      events.forEach((event) => cell.append(eventCard(event)));
+      events.filter(event => event.kind !== "project" || event.milestones?.some(s => s.date === day)).forEach((event) => cell.append(eventCard(event, day)));
       if (!events.length) cell.append(node("p", "day-empty", "—"));
       $("calendarGrid").append(cell);
       const tab = button("", () => { selectedDate = day; renderAgenda(); }, `date-button${index === 0 ? " is-today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
@@ -153,6 +158,7 @@
       option.value = category.id;
       $("categorySelect").append(option);
     });
+    ScheduleProgress.timeline($("projectTimeline"), snapshot, openEvent, selectDay, addDays);
     renderHolidayStatus();
     renderAgenda();
   }
@@ -178,6 +184,7 @@
       notice(error.message, error.binding);
       if (error.binding) {
         snapshot = null;
+        $("projectTimeline").replaceChildren();
         $("calendarGrid").replaceChildren(); $("dateStrip").replaceChildren();
         $("mobileAgenda").replaceChildren(); $("undatedEvents").replaceChildren();
         $("chatMessages").replaceChildren();
@@ -193,6 +200,7 @@
     pendingEdit = null;
     $("eventForm").reset();
     fields.forEach((field) => { $("eventForm").elements[field].value = event?.[field] || (field === "status" ? "tentative" : field === "category" ? "other" : field === "repeat" ? "none" : ""); });
+    progressEditor.load(event);
     if (event?.series_date) {
       $("eventForm").elements.date.value = event.series_date;
       if (event.end_date) $("eventForm").elements.end_date.value = event.series_date;
@@ -220,6 +228,7 @@
   $("eventForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(fields.map((field) => [field, $("eventForm").elements[field].value]));
+    Object.assign(data, progressEditor.read());
     save({ action: editing ? "update" : "create", ...(editing ? { id: editing.id, revision: editing.revision } : {}), event: data });
   });
   $("deleteEvent").addEventListener("click", () => {

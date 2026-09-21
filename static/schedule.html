@@ -7,7 +7,7 @@
   <title>日程 · 旺财</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <script src="/static/theme.js?v=20260916_memberships_2_7_0"></script>
-  <link rel="stylesheet" href="/static/schedule.css?v=20260916_weekend_red_2_8_1" />
+  <link rel="stylesheet" href="/static/schedule.css?v=20260921_progress_3_1_0" />
 </head>
 <body>
   <main class="schedule-shell">
@@ -25,6 +25,7 @@
         <div class="calendar-toolbar"><div class="view-label">▦ <strong>两周日历</strong><span id="eventCount" class="pill"></span></div><div class="toolbar-actions"><button id="todayButton" type="button">今天</button><button id="refreshButton" type="button" aria-label="刷新日程">↻ 刷新</button></div></div>
         <div class="legend-status"><span><i class="sample confirmed"></i>已确定</span><span><i class="sample tentative"></i>待确认</span><span class="legend-hint">点击事项查看或修改</span></div>
         <div class="holiday-legend"><span><b class="holiday-badge holiday">休</b> 放假</span><span><b class="holiday-badge makeup">班</b> 调休补班</span><span class="weekend-date">红色日期：周六、周日</span></div>
+        <section id="projectTimeline" hidden aria-label="长期事项时间轴"></section>
         <div id="dateStrip" class="date-strip" aria-label="选择日期"></div>
         <div id="calendarGrid" class="calendar-grid"></div>
         <div id="mobileAgenda" class="mobile-agenda"></div>
@@ -46,6 +47,7 @@
   <dialog id="eventDialog" aria-labelledby="eventDialogTitle">
     <form id="eventForm">
       <div class="dialog-header"><h2 id="eventDialogTitle">新建事项</h2><button id="closeDialog" type="button" class="icon-button" aria-label="关闭">×</button></div>
+      <label>事项类型<select name="kind"><option value="event">普通事项</option><option value="project">长期事项 · 阶段与进度</option></select></label>
       <label>事项名称<input name="title" maxlength="120" required placeholder="例如：和同学约饭" /></label>
       <div class="form-row"><label>分类<select name="category" id="categorySelect"></select></label><label>状态<select name="status"><option value="tentative">待确认 · 虚线</option><option value="confirmed">已确定 · 实线</option><option value="cancelled">已取消</option></select></label></div>
       <label>重复<select name="repeat"><option value="none">不重复</option><option value="weekly">每周重复（按开始日期的星期）</option></select></label>
@@ -55,11 +57,18 @@
       <p class="muted form-help">不知道日期或时间可以留空，不会替你猜测。</p>
       <label>地点<input name="location" maxlength="200" placeholder="线下地点或线上会议" /></label>
       <label>备注<textarea name="notes" rows="3" maxlength="2000" placeholder="例如：下午，具体时间还没定"></textarea></label>
+      <section id="progressEditor" hidden>
+        <h3>阶段与截止日期</h3>
+        <p class="muted form-help">进度按完成阶段数计算。日期未知可留空；勾选完成后，点击“保存事项”同步到日历与记忆。</p>
+        <div id="milestoneRows"></div>
+        <div class="stage-actions"><button id="addMilestone" type="button">＋ 添加阶段</button><button id="travelMilestones" type="button">使用旅行阶段模板</button></div>
+      </section>
       <p id="formStatus" class="form-status" role="status"></p>
       <div class="dialog-actions"><button id="deleteEvent" type="button" class="danger" hidden>删除事项</button><button id="saveEvent" type="submit" class="primary">保存事项</button></div>
     </form>
   </dialog>
   <script src="/static/device_identity.js?v=20260916_memberships_2_7_0"></script>
-  <script src="/static/schedule.js?v=20260916_weekend_red_2_8_1"></script>
+  <script src="/static/schedule_progress.js?v=20260921_progress_3_1_0"></script>
+  <script src="/static/schedule.js?v=20260921_progress_3_1_0"></script>
 </body>
 </html>
