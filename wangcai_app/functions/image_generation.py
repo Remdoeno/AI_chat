@@ -1925,6 +1925,8 @@ def optimize_artifact_image_prompt(prompt_source: str, profiles: List[Dict[str, 
 
 
 
+@scoped_model_call(lambda artifact_id, title, summary, content, image_plan, owner_shared_user_id="":
+                   owner_shared_user_id or current_model_owner())
 def generate_artifact_theme_images(
     artifact_id: int,
     title: str,

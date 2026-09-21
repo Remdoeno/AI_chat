@@ -44,6 +44,47 @@ class UserModelSettingsTests(unittest.TestCase):
     def put(self,payload,device='alpha_one',scope='user'):
         return self.client.put('/api/model-settings?scope='+scope,headers=self.headers(device),json=payload)
 
+    def test_artifact_images_use_owner_model_and_refresh_selection(self):
+        seen = []
+        def batch(**kwargs):
+            seen.append((current_model_owner(), self.app.image_slot_config()['model']))
+            return {'images': []}
+        with mock.patch.dict(self.ns, {
+            'image_generation_status': lambda: {'available': True},
+            'normalize_artifact_image_plan': lambda *a: [{'title': 'test'}],
+            'artifact_image_prompt_source': lambda *a, **kw: 'prompt',
+            'artifact_image_profiles_for_plan': lambda *a, **kw: [],
+            'optimize_artifact_image_prompt': lambda *a: {},
+            'generate_image_batch': batch,
+            'record_event': lambda *a, **kw: None,
+        }):
+            with model_owner_scope('bravo'):
+                for model in ('Qwen/Qwen-Image-2.1', 'HiDream'):
+                    self.store.save('alpha', {'image': self.slot(model)})
+                    self.app.generate_artifact_theme_images(1, 't', 's', 'c', [], owner_shared_user_id='alpha')
+                    self.assertEqual(current_model_owner(), 'bravo')
+                self.app.generate_artifact_theme_images(1, 't', 's', 'c', [])
+        self.assertEqual(seen, [('alpha', 'Qwen/Qwen-Image-2.1'), ('alpha', 'HiDream'), ('bravo', 'global-image')])
+
+    def test_character_images_use_device_owner_even_without_thread_context(self):
+        self.store.save('alpha', {'image': self.slot('Qwen/Qwen-Image-2.1')})
+        seen = []
+        def batch(**kwargs):
+            seen.append((current_model_owner(), self.app.image_slot_config()['model']))
+            raise RuntimeError('stop before persistence')
+        with mock.patch.dict(self.ns, {
+            'character_profile_by_id': lambda *a: {'canonical_name': 'test'},
+            'public_image_model_status': lambda: {'available': True},
+            'character_image_prompt': lambda *a, **kw: 'prompt',
+            'generate_image_batch': batch,
+        }):
+            for kind in ('avatar', 'photo'):
+                with model_owner_scope('bravo'):
+                    with self.assertRaisesRegex(RuntimeError, 'stop before persistence'):
+                        self.app.generate_character_image(1, kind, 'device:model_test_alpha_one')
+                    self.assertEqual(current_model_owner(), 'bravo')
+        self.assertEqual(seen, [('alpha', 'Qwen/Qwen-Image-2.1')] * 2)
+
     def test_deepseek_flash_images_use_selected_model(self):
         messages=[{'role':'user','content':[{'type':'image_url','image_url':{'url':'data:image/png;base64,fixture'}}]}]
         for model in ('deepseek-flash','deepseek-v4-flash','deepseek-v4-flash-vision-exp'):

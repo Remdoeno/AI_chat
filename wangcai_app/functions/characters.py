@@ -2096,6 +2096,7 @@ def character_image_prompt(profile: Dict[str, object], kind: str, prompt_hint: s
     return " ".join(parts)
 
 
+@scoped_model_call(lambda character_id, kind, visitor_ip, prompt_hint="": shared_user_id_for_device(visitor_ip))
 def generate_character_image(character_id: int, kind: str, visitor_ip: str, prompt_hint: str = "") -> Dict[str, object]:
     normalized_kind = "avatar" if str(kind or "").strip().lower() == "avatar" else "photo"
     owner = shared_user_id_for_device(visitor_ip)

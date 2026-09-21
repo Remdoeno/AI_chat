@@ -41,7 +41,7 @@ class ReleaseFeatureStore:
     def public(self, owner=''):
         overrides = self.overrides(owner)
         values = self.values(owner)
-        return {'version': '3.0.6', 'scope': 'user' if owner else 'system', 'owner': owner,
+        return {'version': '3.0.7', 'scope': 'user' if owner else 'system', 'owner': owner,
                 'features': [{'id': key, 'title': text[0], 'description': text[1], 'rollback': text[2],
                               'enabled': values[key], 'inherited': bool(owner and key not in overrides)}
                              for key, text in FEATURES.items()]}
