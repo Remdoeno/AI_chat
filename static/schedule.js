@@ -2,6 +2,8 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   let snapshot = null;
+  let viewStart = "";
+  let editBaseline = "";
   let calendarMode = "project";
   let detailProject = null;
   let selectedDate = "";
@@ -87,7 +89,7 @@
   function eventCard(event, day = selectedDate) {
     const category = snapshot.categories.find((item) => item.id === event.category);
     const card = button("", () => event.kind === "project" ? openProject(event) : openEvent(event), `event-card ${event.status}`);
-    card.style.setProperty("--event-color", event.kind === "project" ? ScheduleProgress.color(event) : category?.color || "#77818e");
+    card.style.setProperty("--event-color", ScheduleColors.color(event));
     const time = event.kind === "project" ? "长期事项" : event.time ? `${event.time}${event.end_time ? " – " + event.end_time : ""}` : "时间待定";
     card.append(node("span", "event-time", time), node("span", "event-title", event.title));
     if (event.kind === "project") card.append(ScheduleProgress.summary(event, day));
@@ -98,7 +100,7 @@
     if (event.date) ScheduleRanges.continuation(card, event.date, event.end_date || event.date, day);
     return card;
   }
-  function selectDay(day) { selectedDate = day; renderAgenda(); $("mobileAgenda").scrollIntoView({ behavior: "smooth", block: "nearest" }); }
+  function selectDay(day) { selectedDate = day; renderAgenda(); }
   function renderAgenda() {
     const agenda = $("mobileAgenda");
     agenda.replaceChildren();
@@ -129,11 +131,11 @@
     for (let index = 0; index < 14; index += 1) {
       const day = addDays(snapshot.today, index);
       const events = eventsFor(day);
-      const cell = node("section", `day-cell${index === 0 ? " today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
+      const cell = node("section", `day-cell${day === snapshot.actual_today ? " today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
       cell.dataset.date = day;
       cell.classList.toggle("week-last", index % 7 === 6);
       const heading = node("div", "day-heading");
-      heading.append(node("span", "", dateLabel(day, { weekday: "short" })), button(day.slice(8).replace(/^0/, ""), () => selectDay(day), "day-number"), node("span", "", index === 0 ? "今天" : day.slice(5, 7) + "月"));
+      heading.append(node("span", "", dateLabel(day, { weekday: "short" })), node("span", "day-number", day.slice(8).replace(/^0/, "")), node("span", "", day === snapshot.actual_today ? "今天" : day.slice(5, 7) + "月"));
       const holiday = holidayBadge(day);
       if (holiday) heading.append(holiday);
       cell.append(heading);
@@ -141,10 +143,10 @@
       if (calendarMode === "single") ScheduleProgress.singleNodes(snapshot.items, day, snapshot.today).filter(({stage}) => !stage.start_date || stage.start_date === stage.date).forEach(item => cell.append(ScheduleProgress.nodeCard(item, openProject)));
       if (!events.length) cell.append(node("p", "day-empty", "—"));
       $("calendarGrid").append(cell);
-      const tab = button("", () => { selectedDate = day; renderAgenda(); }, `date-button${index === 0 ? " is-today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
+      const tab = button("", () => { selectedDate = day; renderAgenda(); }, `date-button${day === snapshot.actual_today ? " is-today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
       tab.dataset.date = day;
       tab.setAttribute("aria-label", dateLabel(day, { month: "long", day: "numeric", weekday: "long" }) + `，${events.length}件事项`);
-      tab.append(node("span", "", index === 0 ? "今天" : dateLabel(day, { weekday: "short" })), node("strong", "", day.slice(8).replace(/^0/, "")));
+      tab.append(node("span", "", day === snapshot.actual_today ? "今天" : dateLabel(day, { weekday: "short" })), node("strong", "", day.slice(8).replace(/^0/, "")));
       const compactHoliday = holidayBadge(day, true);
       if (compactHoliday) {
         tab.append(compactHoliday);
@@ -162,11 +164,14 @@
     if (!$("undatedEvents").children.length) $("undatedEvents").append(node("p", "empty-note", "暂无日期待定的事项"));
     $("categoryLegend").replaceChildren();
     $("categorySelect").replaceChildren();
-    snapshot.categories.forEach((category) => {
+    ScheduleColors.families.forEach(family => {
       const legend = node("span", "legend-category");
-      legend.style.setProperty("--event-color", category.color);
-      legend.append(node("i", "legend-dot"), document.createTextNode(category.label));
-      $("categoryLegend").append(legend);
+      legend.style.setProperty("--event-color", family.color);
+      legend.append(node("i", "legend-dot"), document.createTextNode(family.label));
+      legend.title = family.description; $("categoryLegend").append(legend);
+    });
+    snapshot.categories.forEach((category) => {
+
       const option = node("option", "", category.label);
       option.value = category.id;
       $("categorySelect").append(option);
@@ -178,12 +183,13 @@
     renderHolidayStatus();
     renderAgenda();
   }
-  async function refresh() {
+  async function refresh(targetStart = viewStart) {
     if (loading || $("eventDialog").open || $("projectDialog").open) return;
     loading = true;
     $("refreshButton").disabled = true;
+    ["previousWindow", "nextWindow", "todayButton"].forEach(id => $(id).disabled = true);
     try {
-      const data = await api("/api/schedule");
+      const data = await api("/api/schedule" + (targetStart ? `?start=${encodeURIComponent(targetStart)}` : ""));
       if (previousOwner && previousOwner !== data.owner) {
         $("chatMessages").replaceChildren(node("div", "bubble assistant", "已切换用户，日程已同步。"));
         pendingChat = null;
@@ -191,6 +197,7 @@
       }
       previousOwner = data.owner;
       snapshot = data;
+      viewStart = targetStart ? data.today : "";
       try { calendarMode = localStorage.getItem(`wangcai-calendar-mode:${data.owner}`) === "single" ? "single" : "project"; } catch (_) { calendarMode = "project"; }
       if (!selectedDate || selectedDate < data.today || selectedDate > data.end) selectedDate = data.today;
       render();
@@ -209,7 +216,7 @@
         $("dateRange").textContent = "绑定后查看未来两周的安排";
         $("addEvent").disabled = true; $("sendChat").disabled = true;
       }
-    } finally { loading = false; $("refreshButton").disabled = false; }
+    } finally { loading = false; $("refreshButton").disabled = false; ["previousWindow", "nextWindow", "todayButton"].forEach(id => $(id).disabled = false); }
   }
   function openProject(project, focusId = "") {
     detailProject = project;
@@ -243,6 +250,7 @@
     $("eventDialogTitle").textContent = event?.repeat === "weekly" ? "修改每周系列" : event ? "查看与修改事项" : "新建事项";
     $("deleteEvent").hidden = !event;
     $("formStatus").textContent = "";
+    editBaseline = formSignature();
     $("eventDialog").showModal();
   }
   async function save(operation) {
@@ -268,10 +276,32 @@
   $("deleteEvent").addEventListener("click", () => {
     if (editing && window.confirm(`删除“${editing.title}”${editing.repeat === "weekly" ? "的整个每周系列" : ""}？`)) save({ action: "delete", id: editing.id, revision: editing.revision });
   });
-  $("closeDialog").addEventListener("click", () => $("eventDialog").close());
+  function formSignature() {
+    return JSON.stringify({values:[...$("eventForm").querySelectorAll("input,select,textarea")].map(input => [input.name || input.dataset.stage, input.type === "checkbox" ? input.checked : input.value]), stages:[...$("milestoneRows").children].map(row => row.dataset.id)});
+  }
+  function closeEditor() {
+    if ($("saveEvent").disabled) return;
+    if (formSignature() === editBaseline) return $("eventDialog").close();
+    if (!$("unsavedDialog").open) $("unsavedDialog").showModal();
+  }
+  function dismissOnBackdrop(dialog, close) {
+    let outsideDown = false;
+    const outside = e => { const r = dialog.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
+    dialog.addEventListener("pointerdown", e => { outsideDown = e.target === dialog && outside(e); });
+    dialog.addEventListener("click", e => { if (outsideDown && e.target === dialog && outside(e)) close(); outsideDown = false; });
+  }
+  dismissOnBackdrop($("projectDialog"), () => $("projectDialog").close());
+  dismissOnBackdrop($("eventDialog"), closeEditor);
+  $("eventDialog").addEventListener("cancel", e => { e.preventDefault(); closeEditor(); });
+  $("continueEditing").addEventListener("click", () => $("unsavedDialog").close());
+  $("discardChanges").addEventListener("click", () => { $("unsavedDialog").close(); $("eventDialog").close(); });
+  $("saveChanges").addEventListener("click", () => { $("unsavedDialog").close(); $("eventForm").requestSubmit(); });
+  $("closeDialog").addEventListener("click", closeEditor);
   $("addEvent").addEventListener("click", () => openEvent(null));
-  $("refreshButton").addEventListener("click", refresh);
-  $("todayButton").addEventListener("click", async () => { await refresh(); if (snapshot) { selectedDate = snapshot.today; renderAgenda(); } });
+  $("refreshButton").addEventListener("click", () => refresh());
+  $("todayButton").addEventListener("click", () => refresh(""));
+  $("previousWindow").addEventListener("click", () => { if (snapshot) refresh(addDays(snapshot.today, -14)); });
+  $("nextWindow").addEventListener("click", () => { if (snapshot) refresh(addDays(snapshot.today, 14)); });
   document.querySelectorAll("[data-example]").forEach((element) => element.addEventListener("click", () => { $("chatInput").value = element.dataset.example; $("chatInput").focus(); }));
   function bubble(text, className) {
     $("chatMessages").append(node("div", `bubble ${className}`, text));

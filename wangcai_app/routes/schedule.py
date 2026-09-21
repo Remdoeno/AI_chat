@@ -4,9 +4,22 @@ def schedule_page():
 
 
 @app.get("/api/schedule")
-def get_schedule(request: Request):
+def get_schedule(request: Request, start: str = ""):
+    from datetime import date, timedelta
     owner = require_shared_user_for_request(request)
-    return schedule_snapshot(owner)
+    today = schedule_today()
+    if not start:
+        return {**schedule_snapshot(owner), "actual_today": today}
+    try:
+        parsed = date.fromisoformat(start)
+        if parsed.isoformat() != start:
+            raise ValueError("Use ISO date")
+        parsed + timedelta(days=13)
+    except (ValueError, OverflowError):
+        raise HTTPException(status_code=422, detail="日历开始日期不正确")
+    return {"owner": owner, **calendar_window(schedule_store().list(owner), start),
+            "actual_today": today, "holidays": holiday_calendar().window(start),
+            "categories": [{"id": key, "label": value[0], "color": value[1]} for key, value in CATEGORIES.items()]}
 
 
 @app.post("/api/schedule/events")

@@ -40,7 +40,7 @@ window.ScheduleRanges = (() => {
         grid.append(bar);
       });
       if (lanes.length) days.forEach(cell => {
-        const reserve=document.createElement('div');reserve.className='range-reserve';reserve.style.height=`${lanes.length*48+4}px`;
+        const reserve=document.createElement('div');reserve.className='range-reserve';reserve.style.height=`${lanes.length*70+4}px`;
         cell.querySelector('.day-heading').after(reserve);
       });
     }
@@ -60,8 +60,8 @@ window.ScheduleRanges = (() => {
       const row=Number(bar.dataset.rangeRow),left=cells[row*7+Number(bar.dataset.rangeLeft)],right=cells[row*7+Number(bar.dataset.rangeRight)];
       const reserve=left?.querySelector('.range-reserve');if (!reserve || !right) return;
       const a=left.getBoundingClientRect(),b=right.getBoundingClientRect();
-      bar.style.left=`${a.left-bounds.left+4}px`;bar.style.width=`${b.right-a.left-8}px`;
-      bar.style.top=`${reserve.getBoundingClientRect().top-bounds.top+Number(bar.dataset.rangeLane)*48}px`;
+      bar.style.left=`${a.left-bounds.left+10}px`;bar.style.width=`${b.right-a.left-20}px`;
+      bar.style.top=`${reserve.getBoundingClientRect().top-bounds.top+Number(bar.dataset.rangeLane)*70}px`;
     });
   }
   return {isRange,continuation,render,position};

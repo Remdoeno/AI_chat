@@ -46,3 +46,21 @@
 .event-card.continues-left{border-left:0;border-top-left-radius:0;border-bottom-left-radius:0}.event-card.continues-right{border-right:0;border-top-right-radius:0;border-bottom-right-radius:0}
 .mobile-agenda .event-card.continues-left{padding-left:16px}.mobile-agenda .event-card.continues-right{padding-right:16px}
 @media(max-width:650px){.calendar-grid,.calendar-grid.single-mode{display:none}.mobile-agenda .event-card{min-height:64px}.mobile-agenda .continues-left{margin-left:-14px;width:calc(100% + 14px)}.mobile-agenda .continues-right{margin-right:-14px;width:calc(100% + 14px)}.mobile-agenda .continues-left.continues-right{width:calc(100% + 28px)}}
+
+/* 3.1.3: navigation, uncluttered desktop, horizontal project diagram. */
+.calendar-toolbar{flex-wrap:wrap}.toolbar-actions{flex-wrap:wrap}.calendar-grid{row-gap:24px;background:var(--soft)}
+.day-cell{padding-left:10px;padding-right:10px}.calendar-grid .event-card:not(.calendar-range){margin-bottom:18px}
+.calendar-grid>.calendar-range{gap:8px}.calendar-range .event-time{max-width:46%;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
+.calendar-range:hover{background:color-mix(in srgb,var(--event-color) 12%,var(--panel))}
+.mobile-agenda{display:none}.day-number{cursor:default}.timeline-date{text-align:center}
+#projectDialog{width:min(1100px,calc(100% - 28px))}.phase-diagram-scroll{overflow-x:auto;padding:12px 3px 20px}
+.phase-diagram{display:flex;align-items:stretch;min-width:min-content;padding-top:12px}
+.phase-diagram .project-phase{position:relative;flex:0 0 240px;padding:44px 18px 16px;margin:0 12px 0 0;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.phase-diagram .project-phase::before{content:"";position:absolute;height:2px;background:var(--project-color);top:22px;left:28px;right:-15px;opacity:.6}
+.phase-diagram .project-phase:last-child::before{right:28px}.phase-marker{position:absolute;z-index:1;top:10px;left:18px;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--project-color);color:var(--panel);font-weight:700;font-size:12px}
+.phase-diagram .phase-focus{border-color:var(--project-color);box-shadow:0 0 0 2px color-mix(in srgb,var(--project-color) 22%,transparent)}
+.phase-diagram h3{margin:9px 0;font-size:15px}.phase-note{margin:10px 0}.phase-duration{height:5px;border-radius:9px;background:var(--project-color);opacity:.65;margin:12px 0}
+#unsavedDialog{max-width:440px}#unsavedDialog p{margin:16px 0}.category-legend .legend-dot{width:10px;height:10px}.category-legend::after{content:"同色系表示同类场景，不同色调区分具体事项";flex-basis:100%;font-size:10px}
+@media(max-width:650px){.mobile-agenda{display:block}.calendar-toolbar{gap:12px}.toolbar-actions{width:100%;justify-content:space-between}.phase-diagram .project-phase{flex-basis:220px}.intro h1{font-size:28px}}
+
+.calendar-grid .day-cell.selected-day{box-shadow:none}

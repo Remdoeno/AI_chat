@@ -4,8 +4,7 @@ window.ScheduleProgress = (() => {
   const btn = (text, action, cls) => { const n = el('button', text, cls); n.type = 'button'; n.addEventListener('click', action); return n; };
   const stages = event => event.milestones || [];
   const percent = event => stages(event).length ? Math.round(stages(event).filter(s => s.done).length / stages(event).length * 100) : 0;
-  const palette = ['#6d84c9', '#bd719a', '#559e91', '#bd8c4d', '#9276bd', '#5694b0', '#b97362'];
-  const color = event => palette[[...(event.id || event.title || '')].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 0) % palette.length];
+  const color = event => ScheduleColors.color(event);
   const range = stage => !stage.date ? '日期待定' : `${stage.start_date && stage.start_date !== stage.date ? stage.start_date.slice(5) + ' — ' : ''}${stage.date.slice(5)}${stage.time ? ' ' + stage.time : ''}${stage.tentative ? ' · 待定窗口' : ''}`;
   const activeOn = (s, day) => s.date && (s.start_date || s.date) <= day && s.date >= day;
   function overdue(stage) {
@@ -21,14 +20,14 @@ window.ScheduleProgress = (() => {
   }
   function timeline(target, snapshot, openEvent, selectDay, addDays) {
     target.replaceChildren();
-    const projects = snapshot.items.filter(e => e.kind === 'project' && e.date);
+    const projects = snapshot.items.filter(e => e.kind === 'project' && e.date && e.date <= snapshot.end && (e.end_date || e.date) >= snapshot.today);
     target.hidden = !projects.length;
     if (!projects.length) return;
     target.append(el('h2', '长期事项进度', 'progress-heading'));
     const scroll = el('div', undefined, 'timeline-scroll');
     const grid = el('div', undefined, 'project-timeline');
     for (let i = 0; i < 14; i++) {
-      const d = addDays(snapshot.today, i), b = btn(d.slice(5), () => selectDay(d), 'timeline-date');
+      const d = addDays(snapshot.today, i), b = el('span', d.slice(5), 'timeline-date');
       b.style.gridColumn = String(i + 1); b.style.gridRow = '1'; grid.append(b);
     }
     projects.forEach((p, i) => {
@@ -41,7 +40,7 @@ window.ScheduleProgress = (() => {
       bar.title = `${p.title} · ${p.date} 至 ${p.end_date} · ${percent(p)}%完成`;
       bar.setAttribute('aria-label', bar.title + '，点击查看阶段和DDL'); grid.append(bar);
     });
-    scroll.append(grid); target.append(scroll, el('p', '横条表示持续区间，填充表示已完成阶段比例；点日期查看当天DDL。', 'muted form-help'));
+    scroll.append(grid); target.append(scroll, el('p', '横条表示持续区间，填充表示已完成阶段比例；点击长条查看横向阶段图。', 'muted form-help'));
   }
   function initEditor(form) {
     const box = document.getElementById('milestoneRows');
@@ -105,20 +104,21 @@ window.ScheduleProgress = (() => {
     const content = el('div', undefined, 'project-detail-content');content.style.setProperty('--project-color', color(project));
     content.append(el('p', `${project.date || '日期待定'}${project.end_date ? ' 至 ' + project.end_date : ''} · ${percent(project)}% · ${stages(project).filter(s => s.done).length}/${stages(project).length}阶段完成`, 'muted'));
     if (project.notes) content.append(el('p', project.notes, 'project-notes'));
-    const span = Math.max(1, (new Date(project.end_date) - new Date(project.date)) / 86400000 + 1);
-    stages(project).forEach(s => {
+    const scroll = el('div', undefined, 'phase-diagram-scroll');
+    const diagram = el('div', undefined, 'phase-diagram');
+    diagram.setAttribute('role', 'list'); diagram.setAttribute('aria-label', '项目阶段时间轴');
+    stages(project).forEach((s, index) => {
       const item = el('section', undefined, `project-phase${s.id === focusId ? ' phase-focus' : ''}`);
-      item.append(el('h3', `${s.done ? '✓' : s.important ? '◆' : '○'} ${s.title}`), el('p', range(s), overdue(s) ? 'deadline-overdue' : 'muted'));
+      item.setAttribute('role', 'listitem');
+      item.append(el('span', s.done ? '✓' : s.important ? '◆' : String(index + 1), 'phase-marker'));
+      item.append(el('p', range(s), overdue(s) ? 'deadline-overdue' : 'muted'));
+      item.append(el('h3', s.title));
+      if (s.start_date && s.start_date !== s.date) item.append(el('div', undefined, 'phase-duration'));
       if (s.notes) item.append(el('p', s.notes, 'phase-note'));
-      if (project.date && s.date) {
-        const track = el('div', undefined, 'phase-track'), fill = el('span', undefined, s.start_date && s.start_date !== s.date ? 'phase-span' : 'phase-point');
-        const start = (new Date(s.start_date || s.date) - new Date(project.date)) / 86400000;
-        fill.style.left = `${Math.max(0, start / span * 100)}%`;
-        if (s.start_date && s.start_date !== s.date) fill.style.width = `${Math.min(100, ((new Date(s.date) - new Date(s.start_date))/86400000+1)/span*100)}%`;
-        track.append(fill);item.append(track);
-      }
-      content.append(item);
+      item.append(el('p', s.done ? '已完成' : s.tentative ? '待确认' : '待完成', 'muted'));
+      diagram.append(item);
     });
+    scroll.append(diagram);content.append(scroll);
     if (!stages(project).length) content.append(el('p', '尚未添加阶段，点击编辑项目来补充。', 'muted'));
     return content;
   }

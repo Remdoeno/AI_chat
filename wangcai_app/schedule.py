@@ -6,6 +6,9 @@ from datetime import date, datetime, timedelta, timezone
 
 
 CATEGORIES = {
+    "work": ("工作 / 科研", "#6684c9"), "entertainment": ("娱乐", "#d09448"),
+    "health": ("健康", "#55a78b"), "growth": ("个人发展", "#a47bca"),
+    "social": ("社交", "#cb789d"), "life": ("生活事务", "#8492a4"),
     "travel": ("旅行", "#278a94"), "project": ("项目", "#6862b8"),
     "meal": ("同学约饭", "#b86d26"), "date": ("约会", "#c4517c"),
     "meeting": ("会议", "#4679c2"), "research": ("组会", "#8660c1"),
