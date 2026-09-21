@@ -95,6 +95,7 @@
     if (event.location) card.append(node("span", "event-meta", `⌖ ${event.location}`));
     card.append(node("span", "event-status", `${category?.label || "其他"} · ${event.status === "confirmed" ? "已确定" : "待确认"}${event.repeat === "weekly" ? " · 每周" : ""}`));
     card.title = `${event.title}\n${event.date || "日期待定"} ${time}\n${event.notes || ""}`;
+    if (event.date) ScheduleRanges.continuation(card, event.date, event.end_date || event.date, day);
     return card;
   }
   function selectDay(day) { selectedDate = day; renderAgenda(); $("mobileAgenda").scrollIntoView({ behavior: "smooth", block: "nearest" }); }
@@ -108,7 +109,7 @@
     if (holiday) { holiday.classList.add("agenda-holiday"); agenda.append(holiday); }
     const events = eventsFor(selectedDate);
     const agendaCards = calendarMode === "single"
-      ? [...events.filter(e => e.kind !== "project").map(e => eventCard(e)), ...ScheduleProgress.activeNodes(snapshot.items, selectedDate).map(item => ScheduleProgress.nodeCard(item, openProject))]
+      ? [...events.filter(e => e.kind !== "project").map(e => eventCard(e)), ...ScheduleProgress.activeNodes(snapshot.items, selectedDate).map(item => ScheduleRanges.continuation(ScheduleProgress.nodeCard(item, openProject), item.stage.start_date || item.stage.date, item.stage.date, selectedDate))]
       : events.map(e => eventCard(e));
     if (agendaCards.length) agenda.append(...agendaCards);
     else agenda.append(node("p", "mobile-empty", "这一天还没有安排，留一点自由时间。"));
@@ -130,13 +131,14 @@
       const events = eventsFor(day);
       const cell = node("section", `day-cell${index === 0 ? " today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
       cell.dataset.date = day;
+      cell.classList.toggle("week-last", index % 7 === 6);
       const heading = node("div", "day-heading");
       heading.append(node("span", "", dateLabel(day, { weekday: "short" })), button(day.slice(8).replace(/^0/, ""), () => selectDay(day), "day-number"), node("span", "", index === 0 ? "今天" : day.slice(5, 7) + "月"));
       const holiday = holidayBadge(day);
       if (holiday) heading.append(holiday);
       cell.append(heading);
-      events.filter(event => event.kind !== "project").forEach((event) => cell.append(eventCard(event, day)));
-      if (calendarMode === "single") ScheduleProgress.singleNodes(snapshot.items, day, snapshot.today).forEach(item => cell.append(ScheduleProgress.nodeCard(item, openProject)));
+      events.filter(event => event.kind !== "project" && !ScheduleRanges.isRange(event)).forEach((event) => cell.append(eventCard(event, day)));
+      if (calendarMode === "single") ScheduleProgress.singleNodes(snapshot.items, day, snapshot.today).filter(({stage}) => !stage.start_date || stage.start_date === stage.date).forEach(item => cell.append(ScheduleProgress.nodeCard(item, openProject)));
       if (!events.length) cell.append(node("p", "day-empty", "—"));
       $("calendarGrid").append(cell);
       const tab = button("", () => { selectedDate = day; renderAgenda(); }, `date-button${index === 0 ? " is-today" : ""}${isWeekend(day) ? " is-weekend" : ""}`);
@@ -171,6 +173,7 @@
     });
     ScheduleProgress.timeline($("projectTimeline"), snapshot, openProject, selectDay, addDays);
     if (calendarMode === "single") $("projectTimeline").hidden = true;
+    ScheduleRanges.render($("calendarGrid"), snapshot, calendarMode, eventCard, openProject);
     ScheduleConnections.schedule($("calendarGrid"));
     renderHolidayStatus();
     renderAgenda();
