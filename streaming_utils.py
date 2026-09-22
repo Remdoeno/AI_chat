@@ -72,6 +72,10 @@ class _TagStripper:
         return remaining
 
 
+class ReasoningLeakError(ValueError):
+    """Internal recovery signal; never a user-facing diagnostic."""
+
+
 class ReplyGuard:
     """Quarantine an initial prefix before exposing untagged model self-analysis."""
     def __init__(self):
@@ -92,7 +96,7 @@ class ReplyGuard:
         internal = "this_turn_result" in prefix or "我作为助手" in prefix or "系统提示的结构" in prefix
         deliberation = bool(re.search(r"我需要|我应该|我无法|我倾向|我认为|只能输出|工具调用能力|上一轮|规则说", prefix))
         if internal and deliberation:
-            raise ValueError("模型返回了内部分析而非正式回答，已阻止显示；请重试。")
+            raise ReasoningLeakError("reasoning_in_visible_content")
         self.started = True
         return text
 
