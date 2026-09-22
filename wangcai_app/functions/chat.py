@@ -789,6 +789,8 @@ def call_chat_completion_once_with_slot(
         if not resp.choices:
             return ""
         _reasoning, answer = split_think_text(completion_message_text(resp.choices[0].message))
+        reply_guard = ThinkStripper()
+        answer = reply_guard.feed(answer) + reply_guard.flush()
         return answer.strip()
     finally:
         http_client.close()

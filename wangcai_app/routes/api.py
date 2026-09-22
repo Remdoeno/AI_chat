@@ -2463,13 +2463,10 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                     },
                 )
             model_started = time.perf_counter()
-            for raw_delta in iter_model_deltas(
-                model_messages,
-                payload.max_tokens,
-                payload.temperature,
-                payload.top_p,
-                opening=cached_opening,
-            ):
+            verified_reply = getattr(locals().get("schedule_context"), "reply", None)
+            deltas = [verified_reply] if verified_reply else iter_model_deltas(
+                model_messages, payload.max_tokens, payload.temperature, payload.top_p, opening=cached_opening)
+            for raw_delta in deltas:
                 if is_generation_cancelled(session_id, generation_token):
                     record_event(
                         session_id,
@@ -2634,7 +2631,9 @@ def chat_stream(payload: ChatPayload, request: Request) -> StreamingResponse:
                 answer,
                 extra_metadata={"opening_turn": True} if cached_opening else None,
             )
-            if analysis_trace_id:
+            if verified_reply:
+                record_event(session_id, "schedule_verified_receipt", ip, {"chars": len(answer)})
+            elif analysis_trace_id:
                 record_analysis_trace(
                     session_id=session_id,
                     trace_id=analysis_trace_id,

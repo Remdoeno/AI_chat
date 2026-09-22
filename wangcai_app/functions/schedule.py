@@ -1,3 +1,4 @@
+from wangcai_app.schedule_receipts import align_weekly_updates, ScheduleContext
 """Adapter from the legacy app namespace to the independent schedule service."""
 from wangcai_app.schedule import ScheduleStore, CATEGORIES, calendar_window
 from wangcai_app.schedule_memory import ScheduleMemoryBridge, memory_projection
@@ -95,7 +96,8 @@ def manage_schedule_message(owner, message, request_id, history=None, cancelled=
         "weekday": datetime.fromisoformat(today).strftime("%A"), "today": today,
         "events": relevant, "holidays": holiday_calendar().window(today), "memory_candidates_for_requested_import": memory_candidates,
         "history": history if history is not None else store.history(owner), "message": message})
-    result = store.apply(owner, decision["operations"], request_id, message, decision["reply"][:3000], cancelled)
+    operations = align_weekly_updates(decision["operations"], relevant, message, today)
+    result = store.apply(owner, operations, request_id, message, decision["reply"][:3000], cancelled)
     return result
 
 
@@ -117,12 +119,14 @@ def schedule_context_for_chat(owner, message, request_id, history, cancelled):
         if schedule_message_relevant(message, history):
             result = manage_schedule_message(owner, message, request_id, history, cancelled)
         snapshot = schedule_snapshot(owner)
-        return "\n【日程数据库事实：以此为准，区别于旧事件记忆】\n" + json.dumps(
-            {"calendar": snapshot, "this_turn_result": result}, ensure_ascii=False) + (
-            "\n仅changes中的事项已实际保存或删除。没有执行变更时不可声称已添加、更新或取消；可让用户在首页日程入口管理。回复时自然说明保存结果、日期和待确认状态；如有追问请转述。")
+        context = "\n【本轮日程执行事实】\n" + json.dumps(
+            {"calendar": snapshot, "current_request_id": request_id, "this_turn_result": result}, ensure_ascii=False)
+        context += "\n只以本轮实际保存字段为准；旧轮次结果不是本轮操作。没有changes不得声称修改成功。"
+        return ScheduleContext(context, result["reply"] if result and result.get("changes") else None)
+
     except Exception as exc:
         record_event(None, "schedule_chat_error", "", {"error_type": type(exc).__name__})
-        return "\n本轮日程操作失败，没有保存变更。必须明确告知用户日程未保存，请重试或到日程页手动管理，不得声称已记下。"
+        return ScheduleContext("\n本轮日程操作失败，没有保存变更。", "本轮日程未保存，请重试或到日程页手动修改。")
 
 
 class ScheduleEditPayload(BaseModel):

@@ -2,6 +2,7 @@
 import json
 import uuid
 from wangcai_app.schedule_progress import normalize_progress
+from wangcai_app.schedule_receipts import saved_reply
 from datetime import date, datetime, timedelta, timezone
 
 
@@ -149,7 +150,7 @@ class ScheduleStore:
                 raise ValueError("本次日程操作已停止，未保存")
             if self.synchronizer and changed:
                 self.synchronizer.apply(conn, owner, changed)
-            result = {"reply": reply, "changes": changed}
+            result = {"reply": saved_reply(changed, reply), "changes": changed}
             conn.execute("INSERT INTO schedule_turns VALUES (?,?,?,?,?)", (owner, request_id, message, json.dumps(result, ensure_ascii=False), datetime.now(timezone.utc).isoformat()))
             return result
 

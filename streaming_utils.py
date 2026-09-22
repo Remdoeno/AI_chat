@@ -24,7 +24,7 @@ def longest_suffix_prefix(text: str, marker: str) -> int:
     return 0
 
 
-class ThinkStripper:
+class _TagStripper:
     def __init__(self) -> None:
         self.in_think = False
         self.buffer = ""
@@ -70,6 +70,43 @@ class ThinkStripper:
         remaining = self.buffer
         self.buffer = ""
         return remaining
+
+
+class ReplyGuard:
+    """Quarantine an initial prefix before exposing untagged model self-analysis."""
+    def __init__(self):
+        self.pending = ""
+        self.started = False
+
+    def feed(self, text):
+        if self.started:
+            return text
+        self.pending += text
+        if len(self.pending) < 192:
+            return ""
+        return self.flush()
+
+    def flush(self):
+        text, self.pending = self.pending, ""
+        prefix = text[:700]
+        internal = "this_turn_result" in prefix or "我作为助手" in prefix or "系统提示的结构" in prefix
+        deliberation = bool(re.search(r"我需要|我应该|我无法|我倾向|我认为|只能输出|工具调用能力|上一轮|规则说", prefix))
+        if internal and deliberation:
+            raise ValueError("模型返回了内部分析而非正式回答，已阻止显示；请重试。")
+        self.started = True
+        return text
+
+
+class ThinkStripper:
+    def __init__(self):
+        self.tags = _TagStripper()
+        self.guard = ReplyGuard()
+
+    def feed(self, text):
+        return self.guard.feed(self.tags.feed(text))
+
+    def flush(self):
+        return self.guard.feed(self.tags.flush()) + self.guard.flush()
 
 
 def format_sse(event: str, payload: Dict[str, object]) -> str:
