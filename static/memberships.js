@@ -56,7 +56,7 @@
     if (!data || saving) return;
     editing = card; pendingEdit = null; $("cardForm").reset();
     fields.forEach((field) => { $("cardForm").elements[field].value = card ? String(card[field]) : field === "status" ? "active" : field === "reminder_enabled" ? "true" : ""; });
-    $("cardDialogTitle").textContent = card ? "查看与修改会员卡" : "添加会员卡"; $("deleteCard").hidden = !card; $("cardFormStatus").textContent = ""; $("cardDialog").showModal();
+    $("cardDialogTitle").textContent = card ? "查看与修改会员卡" : "添加会员卡"; $("deleteCard").hidden = !card; $("cardFormStatus").textContent = ""; $("cardDialog").showModal(); cardGuard.markClean();
   }
   async function mutate(operation) {
     if (saving) return;
@@ -71,13 +71,18 @@
       if (error.status) pendingEdit = null;
     } finally { saving = false; $("saveCard").disabled = false; $("deleteCard").disabled = false; }
   }
-  $("cardForm").onsubmit = (event) => {
-    event.preventDefault();
+  async function saveCardDraft() {
+    if (!$("cardForm").reportValidity()) return;
     const card = Object.fromEntries(fields.map((key) => [key, key === "reminder_enabled" ? $("cardForm").elements[key].value === "true" : $("cardForm").elements[key].value]));
-    mutate({ action: editing ? "update" : "create", ...(editing ? { id: editing.id, revision: editing.revision } : {}), card });
-  };
+    await mutate({ action: editing ? "update" : "create", ...(editing ? { id: editing.id, revision: editing.revision } : {}), card });
+  }
+  const cardGuard = WangcaiDialogGuard.attach($("cardDialog"), {
+    read: () => fields.map(key => [key, $("cardForm").elements[key].value]),
+    save: saveCardDraft, discard: () => $("cardDialog").close(), busy: () => saving
+  });
+  $("cardForm").onsubmit = event => { event.preventDefault(); saveCardDraft(); };
   $("deleteCard").onclick = () => { if (editing && confirm(`删除“${editing.name}”及其关联记忆？`)) mutate({ action: "delete", id: editing.id, revision: editing.revision }); };
-  $("closeCard").onclick = () => $("cardDialog").close(); $("newCard").onclick = () => open(); $("refreshCards").onclick = refresh;
+  $("closeCard").onclick = cardGuard.requestClose; $("newCard").onclick = () => open(); $("refreshCards").onclick = refresh;
   $("resumeHint").onclick = async () => { try { data = await api("/api/memberships/preferences", { action: "resume" }); render(); notice(""); } catch (error) { notice(error.message); } };
   function bubble(text, kind) { $("cardChatMessages").append(node("div", text, "bubble " + kind)); $("cardChatMessages").scrollTop = $("cardChatMessages").scrollHeight; }
   $("cardChatForm").onsubmit = async (event) => {

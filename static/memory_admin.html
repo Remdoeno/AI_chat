@@ -5,15 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财记忆库</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
-    <link rel="stylesheet" href="/static/memory_admin.css?v=20260818_global_admin_memory_users" />
-  </head>
+    <script src="/static/theme.js?v=3_3_0"></script>
+    <link rel="stylesheet" href="/static/memory_admin.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/ui_foundation.css?v=3_3_0" />
+  <script src="/static/ui_accessibility.js?v=3_3_0" defer></script>
+</head>
   <body>
     <main class="admin-shell">
       <aside class="admin-side">
         <a class="back-link" href="/">返回聊天</a>
         <div class="brand">
-          <p>WANGCAI</p>
+          
           <h1>全局记忆后台</h1>
         </div>
 
@@ -34,15 +36,15 @@
           <span>标签</span>
           <select id="labelFilter">
             <option value="">全部</option>
-            <option value="preference">preference</option>
-            <option value="identity">identity</option>
-            <option value="rule">rule</option>
-            <option value="persona">persona</option>
-            <option value="risk">risk</option>
-            <option value="diary">diary</option>
-            <option value="event">event</option>
-            <option value="fact">fact</option>
-            <option value="other">other</option>
+            <option value="preference">偏好</option>
+            <option value="identity">身份</option>
+            <option value="rule">约定</option>
+            <option value="persona">性格</option>
+            <option value="risk">注意事项</option>
+            <option value="diary">日记</option>
+            <option value="event">事项</option>
+            <option value="fact">事实</option>
+            <option value="other">其他</option>
           </select>
         </label>
 
@@ -52,22 +54,22 @@
         </label>
 
         <button id="refreshButton" class="button" type="button">刷新</button>
-        <p id="statusText" class="status">读取中</p>
+        <p id="statusText" class="status" role="status" aria-live="polite">读取中</p>
 
+        <details class="create-disclosure"><summary>新增记忆</summary>
         <section class="create-panel" aria-label="新增记忆">
-          <h2>新增记忆</h2>
           <label class="field" for="newLabel">
             <span>标签</span>
             <select id="newLabel">
-              <option value="preference">preference</option>
-              <option value="identity">identity</option>
-              <option value="rule">rule</option>
-              <option value="persona">persona</option>
-              <option value="risk">risk</option>
-              <option value="diary">diary</option>
-              <option value="event">event</option>
-              <option value="fact">fact</option>
-              <option value="other" selected>other</option>
+              <option value="preference">偏好</option>
+              <option value="identity">身份</option>
+              <option value="rule">约定</option>
+              <option value="persona">性格</option>
+              <option value="risk">注意事项</option>
+              <option value="diary">日记</option>
+              <option value="event">事项</option>
+              <option value="fact">事实</option>
+              <option value="other" selected>其他</option>
             </select>
           </label>
           <label class="field" for="newIp">
@@ -75,15 +77,15 @@
             <input id="newIp" type="text" autocomplete="off" placeholder="留空则保存为全局记忆" />
           </label>
           <label class="field" for="newTimeline">
-            <span>Timeline</span>
-            <div id="newTimeline" class="timeline-picker" aria-label="Timeline"></div>
+            <span>时间</span>
+            <div id="newTimeline" class="timeline-picker" aria-label="时间"></div>
           </label>
           <label class="field" for="newContent">
             <span>内容</span>
             <textarea id="newContent" rows="6"></textarea>
           </label>
           <button id="createButton" class="button" type="button">新增</button>
-        </section>
+        </section></details>
       </aside>
 
       <section class="admin-content">
@@ -97,8 +99,9 @@
         <div id="memoryList" class="memory-list"></div>
       </section>
     </main>
-    <script src="/static/device_identity.js?v=20260816_wangcai_2_4"></script>
-    <script src="/static/memory_admin.js?v=20260818_global_admin_memory_users_v2"></script>
-    <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
+    <script src="/static/device_identity.js?v=3_3_0"></script>
+    <script src="/static/ui_memory.js?v=3_3_0"></script>
+    <script src="/static/memory_admin.js?v=3_3_0"></script>
+    <script src="/static/image_viewer.js?v=3_3_0"></script>
   </body>
 </html>

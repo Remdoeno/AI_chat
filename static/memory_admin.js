@@ -44,7 +44,7 @@ function makeLabelSelect(value) {
   for (const label of LABELS) {
     const option = document.createElement("option");
     option.value = label;
-    option.textContent = label;
+    option.textContent = window.MemoryUI.label(label);
     option.selected = label === normalizedValue;
     select.appendChild(option);
   }
@@ -199,15 +199,15 @@ function renderMemories(payload) {
     meta.className = "memory-meta";
     meta.textContent = [
       `#${item.id}`,
-      itemLabel,
+      window.MemoryUI.label(itemLabel),
       formatTimelineMain(item) || null,
-      item.confidence != null ? `confidence ${Number(item.confidence).toFixed(2)}` : null,
-      item.supersedes_id ? `supersedes #${item.supersedes_id}` : null,
+      item.confidence != null ? `可信度 ${Number(item.confidence).toFixed(2)}` : null,
+      item.supersedes_id ? `替代 #${item.supersedes_id}` : null,
       item.refine_status ? `精简 ${item.refine_status}` : null,
-      item.refined_from_id ? `from #${item.refined_from_id}` : null,
-      item.shared_user_id ? `user ${item.shared_user_id}` : null,
-      item.device_id || item.visitor_ip ? `device ${item.device_id || item.visitor_ip}` : "global",
-      `updated ${formatTime(item.updated_at)}`,
+      item.refined_from_id ? `来源 #${item.refined_from_id}` : null,
+      item.shared_user_id ? `用户 ${item.shared_user_id}` : null,
+      item.device_id || item.visitor_ip ? `设备 ${item.device_id || item.visitor_ip}` : "全局",
+      `更新 ${formatTime(item.updated_at)}`,
     ].filter(Boolean).join(" · ");
 
     const editGrid = document.createElement("div");
@@ -216,21 +216,21 @@ function renderMemories(payload) {
     const labelField = document.createElement("label");
     labelField.className = "field";
     const labelTitle = document.createElement("span");
-    labelTitle.textContent = "Label";
+    labelTitle.textContent = "分类";
     const labelSelect = makeLabelSelect(itemLabel);
     labelField.append(labelTitle, labelSelect);
 
     const timelineField = document.createElement("label");
     timelineField.className = "field timeline-field";
     const timelineTitle = document.createElement("span");
-    timelineTitle.textContent = "Timeline";
+    timelineTitle.textContent = "时间";
     const timelinePicker = makeTimelineEditor(item);
     timelineField.append(timelineTitle, timelinePicker.root);
 
     const deviceField = document.createElement("label");
     deviceField.className = "field";
     const deviceTitle = document.createElement("span");
-    deviceTitle.textContent = "Device";
+    deviceTitle.textContent = "关联设备";
     const deviceInput = document.createElement("input");
     deviceInput.type = "text";
     deviceInput.value = item.device_id || item.visitor_ip || "";
@@ -256,7 +256,11 @@ function renderMemories(payload) {
     saveButton.type = "button";
     saveButton.textContent = "保存";
     saveButton.addEventListener("click", async () => {
-      await updateMemory(item.id, textarea.value, labelSelect.value, timelinePicker.value(), deviceInput.value);
+      try {
+        saveButton.disabled = true;
+        await updateMemory(item.id, textarea.value, labelSelect.value, timelinePicker.value(), deviceInput.value);
+      } catch (error) { window.MemoryUI.showError(actions, error); }
+      finally { saveButton.disabled = false; }
     });
 
     const deleteButton = document.createElement("button");
@@ -265,12 +269,13 @@ function renderMemories(payload) {
     deleteButton.textContent = "删除";
     deleteButton.addEventListener("click", async () => {
       if (window.confirm(`删除记忆 #${item.id}？`)) {
-        await deleteMemory(item.id);
+        try { await deleteMemory(item.id); }
+        catch (error) { window.MemoryUI.showError(actions, error); }
       }
     });
 
     actions.append(saveButton, deleteButton);
-    card.append(meta, editGrid, actions);
+    card.append(meta, window.MemoryUI.editor(item.content, editGrid, actions));
     memoryList.appendChild(card);
   }
 }

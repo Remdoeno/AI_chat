@@ -34,7 +34,11 @@ authForm.addEventListener("submit", async (event) => {
     setAuthStatus("两次新密码不一致");
     return;
   }
+  const button = authForm.querySelector('[type="submit"]');
+  if (button.disabled) return;
+  button.disabled = true;
   setAuthStatus("保存中");
+  try {
   const response = await fetch("/api/auth/password", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,6 +53,8 @@ authForm.addEventListener("submit", async (event) => {
   }
   setAuthStatus("已保存");
   window.location.href = "/";
+  } catch (_) { setAuthStatus("连接未完成，输入已保留，请重试。"); }
+  finally { button.disabled = false; }
 });
 
 loadAuthStatus().catch((error) => setAuthStatus(`读取失败：${error.message}`));

@@ -467,6 +467,7 @@ function populateModelSettings(settings) {
   document.getElementById("modelSettingsScopeNote").textContent = settings.scope === "user"
     ? "仅对当前绑定用户生效。三类模型可分别设置；勾选使用系统默认即可恢复继承。"
     : "修改系统默认会影响所有仍在继承默认设置的用户。";
+  modelSettingsGuard.markClean();
 }
 
 function setLocalModelServiceStatus(text, state = "") {
@@ -594,6 +595,7 @@ async function openModelSettingsDialog() {
       return;
     }
     populateModelSettings(settings);
+    modelSettingsGuard.markClean();
     modelSettingsStatus.textContent = "";
     if (typeof modelSettingsDialog.showModal === "function") {
       modelSettingsDialog.showModal();
@@ -615,11 +617,14 @@ function closeModelSettingsDialog() {
 
 async function saveModelSettings(event) {
   event.preventDefault();
+  const saveButton = modelSettingsForm.querySelector('[type="submit"]');
+  if (saveButton.disabled) return;
   if (!modelSettingsState || document.getElementById("modelSettingsScope").value !== modelSettingsState.scope) {
     modelSettingsStatus.textContent = "请等待当前配置范围加载完毕";
     return;
   }
   modelSettingsStatus.textContent = "保存中";
+  saveButton.disabled = true;
   try {
     const scope = modelSettingsState?.scope || "user";
     const response = await fetch(`/api/model-settings?scope=${scope}`, {
@@ -651,8 +656,8 @@ async function saveModelSettings(event) {
     await loadModelSettings();
     setStatus(`模型已更新：${modelSettingsState.chat.provider === "local" ? LOCAL_MODEL_DISPLAY_NAME : (modelSettingsState.chat.model || modelSettingsState.chat.display_name || "AI模型")}`);
   } catch (error) {
-    modelSettingsStatus.textContent = error.message || "保存失败";
-  }
+    modelSettingsStatus.textContent = error.message || "保存失败，修改已保留，请重试。";
+  } finally { saveButton.disabled = false; }
 }
 
 async function syncModelProxySettingToServer() {
@@ -3073,8 +3078,14 @@ if (localModelServiceButton) {
 if (modelSettingsForm) {
   modelSettingsForm.addEventListener("submit", saveModelSettings);
 }
+const modelSettingsGuard = WangcaiDialogGuard.attach(modelSettingsDialog, {
+  read: () => [...modelSettingsForm.querySelectorAll('input,select,textarea')].map(n => [n.id, n.type === 'checkbox' ? n.checked : n.value]),
+  save: () => modelSettingsForm.reportValidity() ? saveModelSettings({preventDefault(){}}) : undefined,
+  discard: closeModelSettingsDialog,
+  busy: () => modelSettingsForm.querySelector('[type="submit"]').disabled
+});
 if (modelSettingsCancelButton) {
-  modelSettingsCancelButton.addEventListener("click", closeModelSettingsDialog);
+  modelSettingsCancelButton.addEventListener("click", modelSettingsGuard.requestClose);
 }
 window.WangcaiApp = {
   openModelSettingsDialog,
@@ -3121,6 +3132,12 @@ document.querySelectorAll("[data-model-inherit]").forEach((input) => input.addEv
 document.getElementById("modelSettingsScope")?.addEventListener("change", (event) => {
   const scope = event.target.value;
   const previousScope = modelSettingsState?.scope || "user";
+  event.target.value = previousScope;
+  if (modelSettingsGuard.isDirty()) {
+    modelSettingsStatus.textContent = "当前配置尚未保存。请先保存，或取消并放弃修改后再切换范围。";
+    return;
+  }
+  event.target.value = scope;
   const saveButton = modelSettingsForm.querySelector('button[type="submit"]');
   const load = async () => {
     saveButton.disabled = true;

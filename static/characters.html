@@ -5,18 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财角色库</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
-    <link rel="stylesheet" href="/static/characters.css?v=20260622_character_stop_button" />
-    <link rel="stylesheet" href="/static/tutorial.css?v=20260816_wangcai_2_4" />
-  </head>
+    <script src="/static/theme.js?v=3_3_0"></script>
+    <link rel="stylesheet" href="/static/characters.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/tutorial.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/ui_workspace.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/ui_foundation.css?v=3_3_0" />
+  <script src="/static/ui_accessibility.js?v=3_3_0" defer></script>
+  <script src="/static/ui_dialog_guard.js?v=3_3_0"></script>
+</head>
   <body>
-    <main class="character-shell">
-      <section class="character-chat-panel" aria-label="角色库聊天">
+    <main class="character-shell" data-workspace="characters" data-breakpoint="900" data-default-panel="library">
+      <nav class="workspace-switcher" aria-label="角色库视图">
+        <a href="/artifacts" class="workspace-back">返回成果</a>
+        <div role="group" aria-label="查看内容">
+          <button type="button" data-workspace-target="library" aria-controls="characterLibrarySurface" aria-pressed="true">角色</button>
+          <button type="button" data-workspace-target="chat" aria-controls="characterChatSurface" aria-pressed="false">聊天</button>
+        </div>
+      </nav>
+      <section id="characterChatSurface" data-workspace-panel="chat" class="character-chat-panel" aria-label="角色库聊天">
         <header class="character-head">
           <a class="back-link" href="/artifacts">← 返回成果</a>
           <div class="character-title-wrap">
             <div id="characterSticker" class="character-sticker" aria-hidden="true">角</div>
-            <p>WANGCAI CAST</p>
+            
             <h1>旺财角色库</h1>
           </div>
         </header>
@@ -27,7 +38,7 @@
         <div id="characterMessages" class="character-messages"></div>
 
         <form id="characterChatForm" class="character-composer">
-          <p id="characterStatus" class="status">读取中</p>
+          <p id="characterStatus" class="status" role="status">读取中</p>
           <div id="attachmentPreview" class="attachment-preview"></div>
           <div class="composer-row">
             <textarea
@@ -45,10 +56,10 @@
         </form>
       </section>
 
-      <section class="character-library-panel" aria-label="角色卡片">
+      <section id="characterLibrarySurface" data-workspace-panel="library" class="character-library-panel" aria-label="角色卡片">
         <div class="library-head">
           <div>
-            <p>CAST</p>
+            
             <h2>角色</h2>
           </div>
           <button id="refreshCharactersButton" class="secondary-button" type="button">刷新</button>
@@ -66,6 +77,7 @@
           </div>
           <button id="characterDialogClose" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
+        <p id="characterDialogStatus" class="dialog-status" role="status" aria-live="polite"></p>
         <div id="characterDialogBody" class="character-detail"></div>
         <div class="dialog-actions">
           <button id="characterDialogDelete" class="danger-button" type="button">删除角色</button>
@@ -77,9 +89,10 @@
       </div>
     </dialog>
 
-    <script src="/static/device_identity.js?v=20260816_wangcai_2_4"></script>
-    <script src="/static/tutorial.js?v=20260816_wangcai_2_4"></script>
-    <script src="/static/characters.js?v=20260921_image_status_3_0_6b"></script>
-    <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
+    <script src="/static/device_identity.js?v=3_3_0"></script>
+    <script src="/static/tutorial.js?v=3_3_0"></script>
+    <script src="/static/characters.js?v=3_3_0"></script>
+    <script src="/static/image_viewer.js?v=3_3_0"></script>
+    <script src="/static/ui_workspace.js?v=3_3_0"></script>
   </body>
 </html>

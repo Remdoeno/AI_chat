@@ -56,6 +56,50 @@ window.ScheduleProgress = (() => {
   function initEditor(form) {
     const box = document.getElementById('milestoneRows');
     const kind = form.elements.kind;
+    const routes = el('datalist'); routes.id = 'milestoneTrackSuggestions';
+    box.after(routes);
+    const rowTrack = r => r.querySelector('[data-stage="track"]').value.trim();
+    function groupRoutes() {
+      const groups = new Map();
+      [...box.children].forEach(r => {
+        const name = rowTrack(r);
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(r);
+      });
+      const focused = document.activeElement;
+      let moved = false, index = 0;
+      groups.forEach(rows => rows.forEach(r => {
+        if (box.children[index] !== r) { box.insertBefore(r, box.children[index] || null); moved = true; }
+        index++;
+      }));
+      if (moved && box.contains(focused)) focused.focus({preventScroll:true});
+      refreshSummaries();
+    }
+    function refreshSummaries() {
+      const names = new Set();
+      const counts = new Map();
+      [...box.children].forEach(r => counts.set(rowTrack(r), (counts.get(rowTrack(r)) || 0) + 1));
+      let previousTrack = null, routeIndex = 0;
+      [...box.children].forEach(r => {
+        const value = key => r.querySelector(`[data-stage="${key}"]`)?.value || '';
+        const done = r.querySelector('[data-stage="done"]').checked;
+        const track = value('track').trim(); if (track) names.add(track);
+        const first = track !== previousTrack;
+        if (first) routeIndex = 0;
+        const groupTitle = r.querySelector('.milestone-track-heading');
+        groupTitle.hidden = !first;
+        groupTitle.textContent = `${track || '未分组'} · ${counts.get(track)} 个阶段`;
+        previousTrack = track;
+        routeIndex++;
+        const move = r.querySelector('[data-stage-move]'); move.disabled = first;
+        r.querySelector('.milestone-label').textContent = `${routeIndex}. ${value('title') || '新阶段'}`;
+        r.querySelector('.milestone-meta').textContent = [track || '未分组', value('date') || '日期待定', done ? '已完成' : '待完成'].join(' · ');
+      });
+      routes.replaceChildren(...[...names].map(name => { const option = el('option'); option.value = name; return option; }));
+    }
+    box.addEventListener('input', refreshSummaries);
+    box.addEventListener('change', event => { if (event.target.dataset.stage === 'track') groupRoutes(); else refreshSummaries(); });
+    box.addEventListener('invalid', event => { const row = event.target.closest('.milestone-row'); if (row) row.open = true; }, true);
     function update() {
       const active = kind.value === 'project';
       document.getElementById('progressEditor').hidden = !active;
@@ -64,34 +108,45 @@ window.ScheduleProgress = (() => {
       box.querySelectorAll('[data-stage-title]').forEach(n => n.required = active);
     }
     function row(stage = {}) {
-      const r = el('div', undefined, 'milestone-row');r.dataset.id = stage.id || '';
+      const r = el('div', undefined, 'milestone-editor-entry');r.dataset.id = stage.id || '';
+      const groupTitle = el('h3', '', 'milestone-track-heading');
+      const disclosure = el('details', undefined, 'milestone-row'); disclosure.open = !stage.title;
+      r.append(groupTitle, disclosure);
+      const heading = el('summary', undefined, 'milestone-heading');
+      heading.append(el('strong', '', 'milestone-label'), el('span', '', 'milestone-meta'));
+      const fields = el('div', undefined, 'milestone-fields'); disclosure.append(heading, fields);
       const input = (key, type, value, label) => {
         const l = el('label', label), n = el('input'); n.type = type; n.dataset.stage = key;
         if (type === 'checkbox') n.checked = Boolean(value); else n.value = value || '';
-        l.append(n); r.append(l); return n;
+        l.append(n); fields.append(l); return n;
       };
       input('done', 'checkbox', stage.done, '完成');
       const title = input('title', 'text', stage.title, '阶段名称');title.maxLength = 120;title.dataset.stageTitle = '';title.required = true;
-      const track = input('track', 'text', stage.track, '所属子任务路线 可选');track.maxLength = 80;track.placeholder = '相同名称的节点属于同一路线';
+      const track = input('track', 'text', stage.track, '所属子任务路线 可选');track.maxLength = 80;track.setAttribute('list', routes.id);track.placeholder = '相同名称的节点属于同一路线';
       input('start_date', 'date', stage.start_date, '阶段开始 可选');
       input('date', 'date', stage.date, '节点日期 / 阶段结束');input('time', 'time', stage.time, '时间 可选');
       input('important', 'checkbox', stage.important, '重要节点');
       input('tentative', 'checkbox', stage.tentative, '日期待确认');
       const note = input('notes', 'text', stage.notes, '阶段备注');note.maxLength = 500;
-      if (stage.depends_on?.length) r.append(el('p', '此节点有前置阶段，保存时会按依赖及时间自动排序；可通过日程聊天调整前后关系。', 'muted'));
+      if (stage.depends_on?.length) fields.append(el('p', '此节点有前置阶段，保存时会按依赖及时间自动排序；可通过日程聊天调整前后关系。', 'muted'));
       const actions = el('div', undefined, 'stage-actions');
-      actions.append(btn('上移（同日或待定）', () => { if (r.previousElementSibling) box.insertBefore(r, r.previousElementSibling); }), btn('移除', () => { if (window.confirm('移除这个阶段？保存后生效。')) r.remove(); }));
-      r.append(actions); box.append(r);update();
+      const move = btn('上移（同日或待定）', () => {
+        const previous = r.previousElementSibling;
+        if (previous && rowTrack(previous) === rowTrack(r)) box.insertBefore(r, previous);
+        refreshSummaries();
+      }); move.dataset.stageMove = '';
+      actions.append(move, btn('移除', () => { if (window.confirm('移除这个阶段？保存后生效。')) { r.remove(); groupRoutes(); } }));
+      fields.append(actions); box.append(r);update();refreshSummaries();
     }
     kind.addEventListener('change', update);
-    document.getElementById('addMilestone').addEventListener('click', () => { if (box.children.length < 30) row(); });
+    document.getElementById('addMilestone').addEventListener('click', () => { if (box.children.length < 30) { row(); groupRoutes(); } });
     document.getElementById('travelMilestones').addEventListener('click', () => {
       if (box.children.length && !window.confirm('用旅行模板替换当前阶段？日期和完成状态会重置，保存后生效。')) return;
       box.replaceChildren(); ['定行程', '买票', '收拾行李', '购买物资', '正式出行'].forEach(title => row({ title }));
-      form.elements.category.value = 'travel';
+      form.elements.category.value = 'travel'; groupRoutes();
     });
     return {
-      load(event) { box.replaceChildren();kind.value = event?.kind || 'event';stages(event || {}).forEach(row);update(); },
+      load(event) { box.replaceChildren();kind.value = event?.kind || 'event';stages(event || {}).forEach(row);update();groupRoutes(); },
       read() { return {kind: kind.value, milestones: kind.value === 'project' ? [...box.children].map(r => {
         const s = {};if (r.dataset.id) s.id = r.dataset.id;
         r.querySelectorAll('[data-stage]').forEach(n => s[n.dataset.stage] = n.type === 'checkbox' ? n.checked : n.value);
@@ -116,7 +171,11 @@ window.ScheduleProgress = (() => {
   function details(project, focusId) {
     const content = el('div', undefined, 'project-detail-content');content.style.setProperty('--project-color', color(project));
     content.append(el('p', `${project.date || '日期待定'}${project.end_date ? ' 至 ' + project.end_date : ''} · ${percent(project)}% · ${stages(project).filter(s => s.done).length}/${stages(project).length}阶段完成`, 'muted'));
-    if (project.notes) content.append(el('p', project.notes.replace(/[；;]?\s*([1-9][）)])/g, '\n$1'), 'project-notes'));
+    if (project.notes) {
+      const notes = el('details', undefined, 'project-note-disclosure');
+      notes.append(el('summary', '项目说明'), el('p', project.notes.replace(/[；;]?\s*([1-9][）)])/g, '\n$1'), 'project-notes'));
+      content.append(notes);
+    }
     trackGroups(project).forEach(group => {
     const row = el('section', undefined, 'project-track');
     row.style.setProperty('--project-color', trackColor(project, group.name));
@@ -124,15 +183,19 @@ window.ScheduleProgress = (() => {
     const scroll = el('div', undefined, 'phase-diagram-scroll');
     const diagram = el('div', undefined, 'phase-diagram');
     diagram.setAttribute('role', 'list'); diagram.setAttribute('aria-label', '项目阶段时间轴');
+    const current = group.items.find(({stage}) => !stage.done)?.stage;
     group.items.forEach(({stage:s}, index) => {
-      const item = el('section', undefined, `project-phase${s.id === focusId ? ' phase-focus' : ''}`);
+      const item = el('section', undefined, `project-phase${s.id === focusId ? ' phase-focus' : ''}${s === current ? ' phase-current' : ''}`);
       item.setAttribute('role', 'listitem');
       item.append(el('span', s.done ? '✓' : s.important ? '◆' : String(index + 1), 'phase-marker'));
       item.append(el('p', range(s), overdue(s) ? 'deadline-overdue' : 'muted'));
       item.append(el('h3', s.title));
       if (s.start_date && s.start_date !== s.date) item.append(el('div', undefined, 'phase-duration'));
-      if (s.notes) item.append(el('p', s.notes, 'phase-note'));
-      item.append(el('p', s.done ? '已完成' : s.tentative ? '待确认' : '待完成', 'muted'));
+      if (s.notes) {
+        const notes = el('details', undefined, 'phase-note-disclosure');
+        notes.append(el('summary', '阶段说明'), el('p', s.notes, 'phase-note')); item.append(notes);
+      }
+      item.append(el('p', s.done ? '已完成' : s === current ? (s.tentative ? '当前阶段 · 日期待确认' : '当前阶段') : s.tentative ? '待确认' : '待完成', s === current ? 'phase-current-label' : 'muted'));
       diagram.append(item);
     });
     scroll.append(diagram);row.append(scroll);content.append(row);

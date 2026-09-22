@@ -88,7 +88,7 @@ function makeLabelSelect(value) {
   for (const label of LABELS) {
     const option = document.createElement("option");
     option.value = label;
-    option.textContent = label;
+    option.textContent = window.MemoryUI.label(label);
     option.selected = label === normalized;
     select.appendChild(option);
   }
@@ -243,18 +243,25 @@ function renderMemories(payload) {
       const tags = div("tag-row");
       const memoryTags = [
         tag(`#${item.id}`),
-        tag(item.importance_label),
-        tag(`add_time: ${formatTime(item.updated_at)}`),
+        tag(window.MemoryUI.label(item.importance_label)),
+        tag(`更新：${formatTime(item.updated_at)}`),
         formatTimelineMain(item) ? tag(formatTimelineMain(item)) : null,
-        item.device_id || item.visitor_ip ? tag(`device ${item.device_id || item.visitor_ip}`) : null,
-        item.confidence != null ? tag(`confidence ${Number(item.confidence).toFixed(2)}`) : null,
-        item.supersedes_id ? tag(`supersedes #${item.supersedes_id}`) : null,
+        item.device_id || item.visitor_ip ? tag(`设备 ${item.device_id || item.visitor_ip}`) : null,
+        item.confidence != null ? tag(`可信度 ${Number(item.confidence).toFixed(2)}`) : null,
+        item.supersedes_id ? tag(`替代 #${item.supersedes_id}`) : null,
         item.refine_status ? tag(`精简 ${item.refine_status}`) : null,
-        item.refined_from_id ? tag(`from #${item.refined_from_id}`) : null,
-        tag(item.has_vector ? `vector ${item.vector_dim}` : "no vector"),
+        item.refined_from_id ? tag(`来源 #${item.refined_from_id}`) : null,
+        tag(item.has_vector ? `向量维度 ${item.vector_dim}` : "未建立向量"),
       ].filter(Boolean);
-      tags.append(...memoryTags);
+      tags.append(...memoryTags.slice(0, 4));
       top.append(tags);
+      const recordInfo = document.createElement("details");
+      recordInfo.className = "memory-record-info";
+      const recordSummary = document.createElement("summary");
+      recordSummary.textContent = "记录信息";
+      const recordTags = div("tag-row");
+      recordTags.append(...memoryTags.slice(4));
+      recordInfo.append(recordSummary, recordTags);
       const editGrid = div("memory-edit-grid");
 
       const labelField = document.createElement("label");
@@ -264,7 +271,7 @@ function renderMemories(payload) {
       const timelineField = document.createElement("label");
       timelineField.className = "edit-field timeline-field";
       const timelinePicker = makeTimelineEditor(item);
-      timelineField.append(div("edit-label", "Timeline"), timelinePicker.root);
+      timelineField.append(div("edit-label", "时间"), timelinePicker.root);
 
       const contentField = document.createElement("label");
       contentField.className = "edit-field content-field";
@@ -280,7 +287,11 @@ function renderMemories(payload) {
       saveButton.type = "button";
       saveButton.textContent = "保存";
       saveButton.addEventListener("click", async () => {
-        await updateMemory(item.id, textarea.value, labelField.querySelector("select").value, timelinePicker.value());
+        try {
+          saveButton.disabled = true;
+          await updateMemory(item.id, textarea.value, labelField.querySelector("select").value, timelinePicker.value());
+        } catch (error) { window.MemoryUI.showError(actions, error); }
+        finally { saveButton.disabled = false; }
       });
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
@@ -288,11 +299,12 @@ function renderMemories(payload) {
       deleteButton.textContent = "删除";
       deleteButton.addEventListener("click", async () => {
         if (window.confirm(`删除记忆 #${item.id}？`)) {
-          await deleteMemory(item.id);
+          try { await deleteMemory(item.id); }
+          catch (error) { window.MemoryUI.showError(actions, error); }
         }
       });
       actions.append(saveButton, deleteButton);
-      root.append(top, editGrid, actions);
+      root.append(top, window.MemoryUI.editor(item.content, editGrid, actions), recordInfo);
       return root;
     })
   );
@@ -357,7 +369,7 @@ function renderRetrievals(payload) {
       tags.append(
         tag(`#${item.id}`),
         tag(`session ${item.session_id}`),
-        tag(`add_time: ${formatTime(item.created_at)}`),
+        tag(`更新：${formatTime(item.created_at)}`),
         tag(`${item.result_count} hits`)
       );
       top.append(tags);
@@ -390,7 +402,7 @@ function renderOperations(payload) {
       const top = div("item-top");
       const tags = div("tag-row");
       tags.append(tag(item.kind), tag(`#${item.id}`));
-      tags.append(tag(`add_time: ${formatTime(item.updated_at || item.created_at)}`));
+      tags.append(tag(`更新：${formatTime(item.updated_at || item.created_at)}`));
       if (item.status) {
         tags.append(tag(item.status));
       }
@@ -425,6 +437,8 @@ function buildQuery(params) {
 
 async function refreshAll() {
   refreshButton.disabled = true;
+  const loadStatus = document.getElementById("memoryLoadStatus");
+  loadStatus.textContent = "正在更新记忆库…";
   try {
     const memoryQuery = buildQuery({
       keyword: memoryKeyword.value.trim(),
@@ -451,8 +465,9 @@ async function refreshAll() {
     renderMemories(memories);
     renderRetrievals(retrievals);
     renderOperations(operations);
+    loadStatus.textContent = "";
   } catch (error) {
-    renderEmpty(operationList, `加载失败：${error.message}`);
+    loadStatus.textContent = `加载失败：${error.message}。可点击刷新重试，已显示内容和输入将保留。`;
   } finally {
     refreshButton.disabled = false;
   }

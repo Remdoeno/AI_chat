@@ -6,8 +6,11 @@
   <meta name="theme-color" content="#f5f6f2" />
   <title>日程 · 旺财</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <script src="/static/theme.js?v=20260922_icons_3_1_7"></script>
-  <link rel="stylesheet" href="/static/schedule.css?v=20260922_tracks_3_2_0" />
+  <script src="/static/theme.js?v=3_3_0"></script>
+  <link rel="stylesheet" href="/static/schedule.css?v=3_3_0" />
+  <link rel="stylesheet" href="/static/ui_model_settings.css?v=3_3_0" />
+  <link rel="stylesheet" href="/static/ui_foundation.css?v=3_3_0" />
+  <script src="/static/ui_accessibility.js?v=3_3_0" defer></script>
 </head>
 <body>
   <main class="schedule-shell">
@@ -16,7 +19,7 @@
       <nav><a href="/">返回聊天</a><button type="button" class="icon-button" data-theme-toggle aria-label="切换黑暗模式"><span data-theme-toggle-icon aria-hidden="true">☾</span></button></nav>
     </header>
     <section class="intro compact-intro">
-      <div class="intro-title"><h1>日程与进度<span class="heading-dot">.</span></h1><p id="dateRange" class="muted">正在读取日程…</p><span id="eventCount" class="pill"></span></div>
+      <div class="intro-title"><h1>日程与进度</h1><div class="intro-summary"><p id="dateRange" class="muted">正在读取日程…</p><span id="eventCount" class="pill"></span></div></div>
       <div class="header-controls">
         <div class="calendar-mode" role="group" aria-label="日历展示模式"><button id="projectMode" type="button" aria-pressed="true">项目模式</button><button id="singleMode" type="button" aria-pressed="false">单项模式</button><span id="modeHint" class="muted">展开长条查看阶段与重要节点</span></div>
         <div class="header-actions"><div class="toolbar-actions" role="group" aria-label="日历翻页"><button id="previousWindow" type="button" aria-label="上两周">‹ 上两周</button><button id="todayButton" type="button">今天</button><button id="nextWindow" type="button" aria-label="下两周">下两周 ›</button></div></div>
@@ -81,12 +84,12 @@
     <h2 id="unsavedTitle">保存本次修改？</h2><p>你修改了事项内容，关闭前是否保存？</p>
     <div class="dialog-actions"><button id="continueEditing" type="button">继续编辑</button><button id="discardChanges" type="button">不保存</button><button id="saveChanges" type="button" class="primary">保存并关闭</button></div>
   </dialog>
-  <script src="/static/schedule_colors.js?v=20260922_tracks_3_2_0"></script>
-  <script src="/static/device_identity.js?v=20260916_memberships_2_7_0"></script>
-  <script src="/static/schedule_ranges.js?v=20260922_tracks_3_2_0"></script>
-  <script src="/static/schedule_routing.js?v=20260922_route_3_2_0_1"></script>
-  <script src="/static/schedule_connections.js?v=20260922_route_3_2_0_1"></script>
-  <script src="/static/schedule_progress.js?v=20260922_order_3_2_1"></script>
-  <script src="/static/schedule.js?v=20260922_tracks_3_2_0"></script>
+  <script src="/static/schedule_colors.js?v=3_3_0"></script>
+  <script src="/static/device_identity.js?v=3_3_0"></script>
+  <script src="/static/schedule_ranges.js?v=3_3_0"></script>
+  <script src="/static/schedule_routing.js?v=3_3_0"></script>
+  <script src="/static/schedule_connections.js?v=3_3_0"></script>
+  <script src="/static/schedule_progress.js?v=3_3_0"></script>
+  <script src="/static/schedule.js?v=3_3_0"></script>
 </body>
 </html>

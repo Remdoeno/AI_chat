@@ -50,6 +50,8 @@ const PREVIOUS_CHARACTER_SESSION_DESKTOP_TOP_BUFFER = 96;
 
 function setStatus(text) {
   statusText.textContent = text;
+  const local = document.getElementById("characterDialogStatus");
+  if (local && local.closest("dialog").open) local.textContent = text;
 }
 
 function escapeHtml(text) {
@@ -497,7 +499,7 @@ async function loadPreviousCharacterSession() {
 function characterExcerpt(item) {
   const text = [item.background, item.personality].filter(Boolean).join(" ");
   const cleaned = text.replace(/\s+/g, " ").trim();
-  return cleaned || "还没有详细设定，可以在左侧聊天里补充。";
+  return cleaned || "还没有详细设定，可以在角色聊天里补充。";
 }
 
 function renderCharacterCard(item) {
@@ -553,7 +555,7 @@ async function loadCharacters() {
   if (!items.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "还没有固定角色。可以在左侧聊天里创建一个。";
+    empty.textContent = "还没有固定角色。可以在角色聊天里创建一个。";
     characterGrid.append(empty);
   } else {
     for (const item of items) {
@@ -880,6 +882,7 @@ async function openCharacterDialog(characterId) {
   renderCharacterDialog(item);
   resetCharacterDialogScroll();
   characterDialog.showModal();
+  characterGuard.markClean();
   resetCharacterDialogScroll();
   requestAnimationFrame(resetCharacterDialogScroll);
 }
@@ -890,6 +893,7 @@ async function refreshActiveCharacterDialog() {
   if (!response.ok) throw new Error(await response.text());
   const item = await response.json();
   renderCharacterDialog(item);
+  characterGuard.markClean();
 }
 
 function closeCharacterDialog() {
@@ -922,7 +926,7 @@ async function saveActiveCharacter() {
     await loadCharacters();
     setStatus("角色已保存");
   } catch (error) {
-    setStatus(`保存失败：${error.message}`);
+    setStatus("保存失败，修改已保留，请稍后重试。");
   } finally {
     characterDialogSave.disabled = false;
   }
@@ -940,6 +944,7 @@ async function deleteActiveCharacter() {
 
 async function generateCharacterImage(kind) {
   if (!activeDialogCharacterId) return;
+  if (characterGuard.isDirty()) { setStatus("请先保存角色修改，再生成图片，避免覆盖未保存的设定。"); return; }
   setStatus(kind === "avatar" ? "正在创建头像" : "正在创建照片");
   try {
     const response = await fetch(`/api/characters/${encodeURIComponent(activeDialogCharacterId)}/images/generate`, {
@@ -949,16 +954,17 @@ async function generateCharacterImage(kind) {
     });
     if (!response.ok) throw new Error(await response.text());
     const payload = await response.json();
-    if (payload.character) renderCharacterDialog(payload.character);
+    if (payload.character) { renderCharacterDialog(payload.character); characterGuard.markClean(); }
     await loadCharacters();
     setStatus(kind === "avatar" ? "头像已加入角色卡片" : "照片已加入角色卡片");
   } catch (error) {
-    setStatus(`图片创建失败：${error.message}`);
+    setStatus("图片创建失败，请稍后重试。");
   }
 }
 
 async function deleteCharacterImage(imageId) {
   if (!activeDialogCharacterId || !imageId) return;
+  if (characterGuard.isDirty()) { setStatus("请先保存角色修改，再删除图片，避免覆盖未保存的设定。"); return; }
   const ok = window.confirm("确定删除这张图片吗？角色至少需要保留一张图片。");
   if (!ok) return;
   setStatus("正在删除图片");
@@ -969,7 +975,7 @@ async function deleteCharacterImage(imageId) {
     );
     if (!response.ok) throw new Error(await response.text());
     const payload = await response.json();
-    if (payload.character) renderCharacterDialog(payload.character);
+    if (payload.character) { renderCharacterDialog(payload.character); characterGuard.markClean(); }
     await loadCharacters();
     setStatus("图片已删除");
   } catch (error) {
@@ -1316,12 +1322,14 @@ imageInput.addEventListener("change", async () => {
 });
 
 refreshCharactersButton.addEventListener("click", loadCharacters);
-characterDialogClose.addEventListener("click", closeCharacterDialog);
-characterDialogCancel.addEventListener("click", closeCharacterDialog);
-characterDialogSave.addEventListener("click", saveActiveCharacter);
-characterDialog.addEventListener("click", (event) => {
-  if (event.target === characterDialog) closeCharacterDialog();
+const characterGuard = WangcaiDialogGuard.attach(characterDialog, {
+  read: characterDialogPayload, save: saveActiveCharacter,
+  discard: closeCharacterDialog, busy: () => characterDialogSave.disabled
 });
+characterDialogClose.addEventListener("click", characterGuard.requestClose);
+characterDialogCancel.addEventListener("click", characterGuard.requestClose);
+characterDialogSave.addEventListener("click", saveActiveCharacter);
+
 characterDialogDelete.addEventListener("click", async () => {
   try {
     await deleteActiveCharacter();
@@ -1337,6 +1345,6 @@ characterDialogDelete.addEventListener("click", async () => {
     await loadCharacters();
     messageInput.focus();
   } catch (error) {
-    setStatus(`初始化失败：${error.message}`);
+    setStatus("角色暂时无法加载，请刷新页面重试。");
   }
 })();

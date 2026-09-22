@@ -1,0 +1,31 @@
+/* Shared form disclosure: loaded after incumbent page styles. */
+.model-settings-form .model-slot-panel[hidden]{display:none!important}
+.model-slot-tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);padding-bottom:12px}
+.model-slot-tabs button{flex:1;min-height:44px;padding:8px 16px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink,var(--text));font:inherit;cursor:pointer}
+.model-slot-tabs button[aria-selected=true]{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:650}
+.model-slot-tabs button:focus-visible,.model-connection-options summary:focus-visible,.milestone-heading:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.model-settings-form .model-slot-panel{padding:0;border:0;background:transparent;gap:16px}
+.model-settings-form .model-slot-panel h3{font-size:16px}
+.model-connection-options{grid-column:1/-1;border-top:1px solid var(--line);padding-top:8px}
+.model-connection-options summary{cursor:pointer;padding:12px 0;font-weight:600}
+.model-connection-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:8px 0}
+.model-settings-footer{position:sticky;bottom:0;z-index:2;background:var(--panel,var(--bg));border-top:1px solid var(--line);padding:12px 0 max(4px,env(safe-area-inset-bottom));margin-top:8px}
+.model-settings-footer .dialog-status:empty{display:none}
+.model-settings-footer .dialog-status{margin:0 0 8px}
+.model-settings-footer .dialog-actions{margin:0;justify-content:flex-end}
+#milestoneRows .milestone-row{display:block;padding:0;border-radius:12px}
+.milestone-heading{padding:12px 16px;cursor:pointer;min-height:44px;line-height:1.5}
+.milestone-label{font-size:14px;overflow-wrap:anywhere}
+.milestone-meta{display:block;font-size:13px;color:var(--muted);padding-left:16px;margin-top:4px}
+.milestone-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:12px 16px 16px;border-top:1px solid var(--line)}
+#milestoneRows .milestone-fields label{font-size:13px;grid-column:auto}
+.milestone-fields label:has([data-stage=title]),.milestone-fields label:has([data-stage=track]),.milestone-fields label:has([data-stage=notes]),.milestone-fields .stage-actions,.milestone-fields>p{grid-column:1/-1!important}
+.milestone-fields .stage-actions{display:flex;flex-wrap:wrap;gap:8px}
+.project-note-disclosure>summary,.phase-note-disclosure>summary{cursor:pointer;min-height:36px;padding:8px 0;font-size:13px;color:var(--muted)}
+.phase-diagram .project-phase.phase-current{border-color:var(--project-color);background:var(--soft,var(--panel))}
+.phase-current-label{font-size:13px;color:var(--project-color);font-weight:650}
+.phase-note-disclosure .phase-note{font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.project-note-disclosure{margin-bottom:16px}
+@media(max-width:600px){.model-connection-fields{grid-template-columns:1fr}.model-settings-form .model-slot-panel{grid-template-columns:1fr}.milestone-fields{padding:12px;gap:12px}.milestone-heading{padding:12px}.model-settings-footer .dialog-actions>button{min-height:44px;flex:1}}
+
+html[data-theme="dark"] .model-slot-tabs button[aria-selected=true]{color:var(--bg)}

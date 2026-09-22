@@ -1096,3 +1096,20 @@ html[data-theme="dark"] .markdown-body code {
     align-items: stretch;
   }
 }
+
+.character-chat-panel { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+@media (max-width: 900px) {
+  html:has(.character-shell.workspace-compact), body:has(.character-shell.workspace-compact) { height: 100%; overflow: hidden; }
+  .character-shell.workspace-compact { height: 100dvh; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+  .workspace-compact .character-chat-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; overflow: hidden; }
+  .workspace-compact .character-head { display: none; }
+  .workspace-compact .character-chat-history-actions { grid-row: 1; }
+  .workspace-compact .character-messages { grid-row: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .workspace-compact .character-composer { grid-row: 3; position: static; }
+  .workspace-compact .composer-row { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+  .workspace-compact .composer-row textarea { min-height: 72px; max-height: 160px; }
+  .workspace-compact .send-button { height: 44px; }
+  .workspace-compact .character-library-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; overflow: hidden; }
+  .workspace-compact .character-grid { overflow-y: auto; min-height: 0; align-content: start; }
+  .workspace-compact .character-card { min-height: 0; }
+}

@@ -5,126 +5,130 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财记忆库</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
-    <link rel="stylesheet" href="/static/memory.css?v=20260618_memory_time_tags" />
-    <link rel="stylesheet" href="/static/tutorial.css?v=20260816_wangcai_2_4" />
-  </head>
+    <script src="/static/theme.js?v=3_3_0"></script>
+    <link rel="stylesheet" href="/static/memory.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/tutorial.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/ui_foundation.css?v=3_3_0" />
+  <script src="/static/ui_accessibility.js?v=3_3_0" defer></script>
+</head>
   <body>
     <main class="memory-shell">
       <header class="topbar">
         <a class="topbar-back" href="/">返回聊天</a>
         <div class="topbar-title">
-          <p class="eyebrow">WANGCAI</p>
+          
           <h1>旺财记忆库</h1>
         </div>
         <button id="refreshButton" type="button">刷新</button>
       </header>
 
-      <section class="summary-grid" aria-label="状态汇总">
-        <div class="metric">
+      <nav class="summary-grid" role="tablist" aria-label="记忆库视图">
+        <button type="button" class="metric" role="tab" id="tab-memories" aria-controls="panel-memories" aria-selected="true" tabindex="0">
           <span>长期记忆</span>
           <strong id="memoryCount">-</strong>
-        </div>
-        <div class="metric">
+        </button>
+        <button type="button" class="metric" role="tab" id="tab-retrievals" aria-controls="panel-retrievals" aria-selected="false" tabindex="-1">
           <span>调用记录</span>
           <strong id="retrievalCount">-</strong>
-        </div>
-        <div class="metric">
+        </button>
+        <button type="button" class="metric" role="tab" id="tab-operations" aria-controls="panel-operations" aria-selected="false" tabindex="-1">
           <span>系统操作</span>
           <strong id="operationCount">-</strong>
-        </div>
-      </section>
+        </button>
+      </nav>
+      <p id="memoryLoadStatus" class="muted memory-load-status" role="status" aria-live="polite"></p>
 
       <section class="panel-grid">
-        <article class="panel">
+        <article class="panel" id="panel-memories" role="tabpanel" aria-labelledby="tab-memories" tabindex="0">
           <header class="panel-header">
             <div>
               <h2>记忆</h2>
               <p>整理后的长期记忆，不含原始对话。</p>
             </div>
           </header>
-          <section class="create-memory-panel" aria-label="新增记忆">
+          <details class="create-memory-disclosure"><summary>新增记忆</summary><section class="create-memory-panel" aria-label="新增记忆">
             <div class="create-memory-fields">
-              <select id="newMemoryLabel">
-                <option value="preference">preference</option>
-                <option value="identity">identity</option>
-                <option value="rule">rule</option>
-                <option value="persona">persona</option>
-                <option value="risk">risk</option>
-                <option value="diary">diary</option>
-                <option value="event">event</option>
-                <option value="fact">fact</option>
-                <option value="other" selected>other</option>
+              <select id="newMemoryLabel" aria-label="新增记忆分类">
+                <option value="preference">偏好</option>
+                <option value="identity">身份</option>
+                <option value="rule">约定</option>
+                <option value="persona">性格</option>
+                <option value="risk">注意事项</option>
+                <option value="diary">日记</option>
+                <option value="event">事项</option>
+                <option value="fact">事实</option>
+                <option value="other" selected>其他</option>
               </select>
-              <div id="newMemoryTimeline" class="timeline-picker" aria-label="timeline"></div>
+              <div id="newMemoryTimeline" class="timeline-picker" aria-label="时间"></div>
             </div>
-            <textarea id="newMemoryContent" rows="4" placeholder="新增一条属于当前用户范围的记忆"></textarea>
+            <textarea id="newMemoryContent" aria-label="新增记忆正文" rows="4" placeholder="新增一条属于当前用户范围的记忆"></textarea>
             <div class="create-memory-actions">
-              <p id="memoryEditStatus" class="muted">只显示并编辑当前共享用户范围内的记忆。</p>
+              <p id="memoryEditStatus" class="muted" role="status" aria-live="polite">只显示并编辑当前共享用户范围内的记忆。</p>
               <button id="createMemoryButton" type="button">新增记忆</button>
             </div>
-          </section>
+          </section></details>
           <div class="filters">
-            <input id="memoryKeyword" type="search" placeholder="关键词" />
-            <select id="memoryLabel">
-              <option value="">全部 label</option>
-              <option value="preference">preference</option>
-              <option value="identity">identity</option>
-              <option value="rule">rule</option>
-              <option value="persona">persona</option>
-              <option value="risk">risk</option>
-              <option value="diary">diary</option>
-              <option value="event">event</option>
-              <option value="fact">fact</option>
-              <option value="other">other</option>
+            <input id="memoryKeyword" aria-label="搜索记忆关键词" type="search" placeholder="关键词" />
+            <select id="memoryLabel" aria-label="按记忆分类筛选">
+              <option value="">全部分类</option>
+              <option value="preference">偏好</option>
+              <option value="identity">身份</option>
+              <option value="rule">约定</option>
+              <option value="persona">性格</option>
+              <option value="risk">注意事项</option>
+              <option value="diary">日记</option>
+              <option value="event">事项</option>
+              <option value="fact">事实</option>
+              <option value="other">其他</option>
             </select>
           </div>
           <div id="memoryList" class="list"></div>
         </article>
 
-        <article class="panel">
+        <article class="panel" id="panel-retrievals" role="tabpanel" aria-labelledby="tab-retrievals" tabindex="0" hidden>
           <header class="panel-header">
             <div>
               <h2>记忆调用记录</h2>
-              <p>只记录 query hash、命中的 memory id 和分数。</p>
+              <p>查看记忆被检索的时间、命中记录和相关程度。</p>
             </div>
           </header>
           <div class="filters">
-            <input id="retrievalMemoryId" type="number" min="1" placeholder="memory id" />
+            <input id="retrievalMemoryId" type="number" min="1" placeholder="记忆编号" aria-label="记忆编号" />
           </div>
           <div id="retrievalList" class="list compact"></div>
         </article>
 
-        <article class="panel wide">
+        <article class="panel wide" id="panel-operations" role="tabpanel" aria-labelledby="tab-operations" tabindex="0" hidden>
           <header class="panel-header">
             <div>
               <h2>系统操作</h2>
-              <p>回答、reset、后台整理、压缩任务等事件。</p>
+              <p>查看回复、新对话、后台整理等运行记录。</p>
             </div>
           </header>
           <div class="filters">
-            <select id="operationKind">
+            <select id="operationKind" aria-label="系统操作类型">
               <option value="">全部类型</option>
-              <option value="event">event</option>
-              <option value="memory_agent_job">memory agent job</option>
+              <option value="event">系统事件</option>
+              <option value="memory_agent_job">记忆整理任务</option>
             </select>
-            <select id="operationStatus">
-              <option value="">全部 job 状态</option>
-              <option value="pending">pending</option>
-              <option value="running">running</option>
-              <option value="completed">completed</option>
-              <option value="skipped">skipped</option>
-              <option value="failed">failed</option>
-              <option value="cancelled">cancelled</option>
+            <select id="operationStatus" aria-label="任务状态">
+              <option value="">全部任务状态</option>
+              <option value="pending">等待中</option>
+              <option value="running">进行中</option>
+              <option value="completed">已完成</option>
+              <option value="skipped">已跳过</option>
+              <option value="failed">失败</option>
+              <option value="cancelled">已取消</option>
             </select>
-            <input id="operationEventType" type="search" placeholder="event type" />
+            <input id="operationEventType" type="search" placeholder="事件类型" aria-label="事件类型" />
           </div>
           <div id="operationList" class="list operations"></div>
         </article>
       </section>
     </main>
-    <script src="/static/tutorial.js?v=20260816_wangcai_2_4"></script>
-    <script src="/static/memory.js?v=20260816_wangcai_2_4"></script>
-    <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
+    <script src="/static/tutorial.js?v=3_3_0"></script>
+    <script src="/static/ui_memory.js?v=3_3_0"></script>
+    <script src="/static/memory.js?v=3_3_0"></script>
+    <script src="/static/image_viewer.js?v=3_3_0"></script>
   </body>
 </html>

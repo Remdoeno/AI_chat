@@ -5,14 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>旺财分析模式</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-    <script src="/static/theme.js?v=20260618_wangcai_rename"></script>
-    <link rel="stylesheet" href="/static/analysis.css?v=20260704_message_copy" />
-    <link rel="stylesheet" href="/static/tutorial.css?v=20260816_wangcai_2_4" />
-    <link rel="stylesheet" href="/static/release_controls.css?v=3_0_1" />
-  </head>
+    <script src="/static/theme.js?v=3_3_0"></script>
+    <link rel="stylesheet" href="/static/analysis.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/tutorial.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/release_controls.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/ui_workspace.css?v=3_3_0" />
+    <link rel="stylesheet" href="/static/ui_foundation.css?v=3_3_0" />
+  <script src="/static/ui_accessibility.js?v=3_3_0" defer></script>
+</head>
   <body>
-    <main id="analysisMode" class="analysis-shell">
-      <section class="analysis-chat" aria-label="分析模式聊天">
+    <main id="analysisMode" class="analysis-shell" data-workspace="analysis" data-breakpoint="1100" data-default-panel="chat">
+      <nav class="workspace-switcher" aria-label="分析模式视图">
+        <a href="/" class="workspace-back">返回聊天</a>
+        <div role="group" aria-label="查看内容">
+          <button type="button" data-workspace-target="chat" aria-controls="analysisChatSurface" aria-pressed="true">聊天</button>
+          <button type="button" data-workspace-target="trace" aria-controls="analysisTraceSurface" aria-pressed="false">明细</button>
+          <button type="button" data-workspace-target="tasks" aria-controls="analysisTasksSurface" aria-pressed="false">任务</button>
+        </div>
+      </nav>
+      <section id="analysisChatSurface" data-workspace-panel="chat" class="analysis-chat" aria-label="分析模式聊天">
         <header class="analysis-chat-header">
           <div class="analysis-topbar">
             <a class="analysis-back analysis-back-button" href="/" aria-label="返回聊天主页">返回聊天</a>
@@ -24,9 +35,9 @@
           <div class="analysis-status-row">
             <div class="analysis-field analysis-status-field">
               <span>状态</span>
-              <strong id="statusText">连接中</strong>
+              <strong id="statusText" role="status">连接中</strong>
             </div>
-            <button id="resetButton" class="analysis-secondary analysis-reset-button" type="button">Reset</button>
+            <button id="resetButton" class="analysis-secondary analysis-reset-button" type="button">新对话</button>
           </div>
         </header>
         <div class="analysis-chat-history-actions">
@@ -49,22 +60,26 @@
         </form>
       </section>
 
-      <section class="analysis-trace" aria-label="Trace panel">
+      <section class="analysis-trace" data-workspace-container aria-label="后台详情">
+        <div id="analysisTraceSurface" data-workspace-panel="trace">
         <div class="analysis-trace-header">
           <div>
-            <p class="analysis-kicker">Trace</p>
+            
             <h2>后台明细</h2>
           </div>
         </div>
         <div id="tracePanel" class="trace-panel"></div>
+        </div>
+        <div id="analysisTasksSurface" data-workspace-panel="tasks">
         <div class="analysis-trace-header analysis-background-header">
           <div>
-            <p class="analysis-kicker">Idle Workers</p>
+            
             <h2>后台任务</h2>
           </div>
         </div>
         <div id="backgroundPanel" class="background-panel"></div>
         <button id="backgroundMoreButton" class="analysis-secondary background-more-button" type="button">显示更多</button>
+        </div>
       </section>
     </main>
     <script>
@@ -88,13 +103,14 @@
         }, 5000);
       });
     </script>
-    <script src="/static/tutorial.js?v=20260816_wangcai_2_4"></script>
-    <script src="/static/release_controls.js?v=3_0_1"></script>
+    <script src="/static/tutorial.js?v=3_3_0"></script>
+    <script src="/static/release_controls.js?v=3_3_0"></script>
     <script
-      src="/static/analysis.js?v=20260921_image_status_3_0_6"
+      src="/static/analysis.js?v=3_3_0"
       onerror="document.getElementById('statusText').textContent='analysis.js 加载失败'"
     ></script>
-    <script src="/static/image_viewer.js?v=20260617_image_viewer_toplayer"></script>
+    <script src="/static/image_viewer.js?v=3_3_0"></script>
     <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+    <script src="/static/ui_workspace.js?v=3_3_0"></script>
   </body>
 </html>

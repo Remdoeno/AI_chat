@@ -1328,3 +1328,17 @@ html[data-theme="dark"] .artifact-body blockquote {
   border-color: rgba(216, 168, 50, 0.55);
   background: rgba(216, 168, 50, 0.08);
 }
+
+/* Keep discovery ahead of administration, especially on phones. */
+.side { gap: 16px; }
+.side .brand h1 { font-size: 24px; }
+.workspace-disclosure .prompt-panel { border-top: 1px solid var(--line); padding-top: 16px; }
+.workspace-disclosure .idle-control { margin: 0; }
+@media (max-width: 760px) {
+  .side { gap: 10px; }
+  .side .brand h1 { font-size: 22px; }
+  .side .character-library-link { min-height: 44px; }
+  .artifact-view-tabs { margin: 0; }
+  .content { padding-top: 16px; }
+  .workspace-disclosure-body { gap: 12px; }
+}

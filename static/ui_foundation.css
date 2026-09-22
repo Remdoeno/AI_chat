@@ -1,0 +1,55 @@
+/* Shared product controls. Page palettes and calendar scene colors remain authoritative. */
+:root{--ui-radius:12px;--ui-gap:12px;--ui-focus:#147a63;--ui-control-height:40px}
+:root[data-theme="dark"]{--ui-focus:#a5d9bf}
+[hidden]{display:none!important}
+body{caret-color:var(--accent);accent-color:var(--accent)}
+::selection{background:var(--accent);color:var(--panel,#fff)}
+button,input,select,textarea{font:inherit;letter-spacing:normal}
+button,input:not([type=checkbox]):not([type=radio]):not([type=file]),select{min-height:var(--ui-control-height)}
+button{border-radius:10px;line-height:1.35}input,select,textarea{border-radius:10px}
+button:disabled{cursor:not-allowed;opacity:.6}
+:where(button,a,input,select,textarea,summary):focus-visible{outline:3px solid var(--ui-focus);outline-offset:3px}
+:where(h1,h2,h3){overflow-wrap:anywhere}
+:where(.page-header,.topbar,.background-header,.warn-header){gap:16px}
+:where(.panel,.calendar-panel,.chat-panel,.wallet-card,.artifact-card,.character-card){border-radius:var(--ui-radius);box-shadow:none}
+:where(.page-header,.background-header,.warn-header) h1{font-size:26px;line-height:1.3}
+:where(.kicker,.analysis-kicker,.brand>p,.character-title-wrap>p,.library-head>div>p){letter-spacing:.04em}
+:where(.status,.dialog-status,.form-status,.analysis-status){font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+:where(.status,.dialog-status,.form-status,.analysis-status):empty{display:none}
+button[data-theme-toggle]{display:inline-grid;place-items:center;min-width:40px;width:40px;height:40px;flex:0 0 40px;padding:7px;white-space:nowrap}
+[data-theme-toggle-icon]{display:block;font-size:23px;line-height:1}
+:where(.back-link,.secondary-link,.analysis-back){display:inline-flex;align-items:center;min-height:40px}
+:where(.summary-value,.wallet-balance,td,.event-time,.pill){font-variant-numeric:tabular-nums}
+.ui-section-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 16px}
+.ui-section-nav button{padding:8px 14px;border:1px solid var(--line);background:var(--panel);color:inherit}
+.ui-section-nav button[aria-pressed=true],.ui-section-nav button[aria-selected=true]{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.ui-settings-summary{cursor:pointer;font-weight:600;padding:10px 0}
+.ui-unsaved-dialog{color:var(--ink,var(--text));background:var(--panel);border:1px solid var(--line);border-radius:16px;width:min(440px,calc(100vw - 32px));padding:24px;max-height:85dvh;overflow:auto}
+.ui-unsaved-dialog::backdrop{background:#0008}.ui-unsaved-dialog h2{font-size:20px;margin:0 0 8px}.ui-unsaved-dialog p{line-height:1.6;margin:0 0 18px}.ui-unsaved-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}.ui-unsaved-actions button{padding:8px 12px;background:var(--panel);color:inherit;border:1px solid var(--line)}.ui-unsaved-actions .ui-save{background:var(--accent);color:var(--panel)}
+.ui-inline-help{font-size:13px;color:var(--muted);line-height:1.6}.ui-error{color:var(--danger,#b42318)}
+:where(.model-settings-dialog,.binding-dialog,.advanced-options,.character-dialog,.artifact-dialog){border-radius:16px}
+:where(.character-dialog,.artifact-dialog) .dialog-actions{position:sticky;bottom:0;background:var(--panel);padding:12px 0;z-index:2;border-top:1px solid var(--line)}
+/* Calendar stays compact; secondary information must still be readable. */
+.schedule-shell{--muted:#59695e}.schedule-shell~dialog{--muted:#59695e}
+:root[data-theme=dark] .schedule-shell,:root[data-theme=dark] .schedule-shell~dialog{--muted:#aebdb1}
+.schedule-shell .event-time,.schedule-shell .event-meta{font-size:12px;line-height:1.5}
+.schedule-shell .event-title{line-height:1.45;font-weight:600}.schedule-shell .event-card{padding:9px 10px}
+.schedule-shell .event-location{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.schedule-shell .intro:not(.compact-intro){padding:20px 0}.schedule-shell .intro:not(.compact-intro) h1{font-size:26px}
+.schedule-shell .chat-heading{padding:16px}.schedule-shell .chat-heading h2{font-size:17px}
+.schedule-shell .chat-heading .avatar{width:42px;height:42px;font-size:27px}
+.schedule-shell .wallet-actions button{font-size:13px;padding:7px 10px}
+#projectDialog .project-phase{min-height:0}#projectDialog .phase-notes{font-size:13px;line-height:1.6}
+@media(max-width:760px){:root{--ui-control-height:44px}.ui-section-nav{gap:5px}.ui-section-nav button{flex:1 1 auto}button[data-theme-toggle]{width:44px;height:44px;min-width:44px;flex-basis:44px}.sidebar .sidebar-link,.sidebar>.secondary-button{min-height:44px}.binding-info-button,.logo-button{min-width:44px;min-height:44px}.schedule-shell .header-controls button{font-size:12px}.schedule-shell .page-header{height:68px}.schedule-shell .brand{gap:7px}.schedule-shell nav{gap:8px}.ui-unsaved-actions button{flex:1 1 100px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+/* Match incumbent selector specificity so shared components actually win. */
+.panel,.calendar-panel,.chat-panel,.wallet-card,.artifact-card,.character-card{border-radius:var(--ui-radius);box-shadow:none}
+html[data-theme="dark"] body{background:var(--bg)}
+html[data-theme="dark"] .sidebar,html[data-theme="dark"] .chat-area,html[data-theme="dark"] .composer,html[data-theme="dark"] .session-panel,html[data-theme="dark"] .search-activity{box-shadow:none}
+/* One neutral surface scale; each workspace keeps its accent and event colors. */
+:root{--bg:#f5f6f5;--panel:#fff;--panel-soft:#edf1ef;--soft:#edf1ef;--ink:#26332d;--text:#26332d;--muted:#5d6b63;--line:#d4ded7;--line-strong:#bccbc1}
+:root[data-theme=dark]{--bg:#161d19;--panel:#202923;--panel-soft:#29372e;--soft:#29372e;--ink:#e6eee8;--text:#e6eee8;--muted:#afbeb3;--line:#3d4b42;--line-strong:#596b5e}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+
+.milestone-track-heading{font-size:14px;margin:24px 0 8px;line-height:1.5}.milestone-editor-entry:first-child .milestone-track-heading{margin-top:4px}
+#characterDialogStatus{margin:0;padding:0 20px;color:var(--muted)}

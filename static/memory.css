@@ -127,8 +127,6 @@ h2 {
 .panel {
   display: flex;
   flex-direction: column;
-  height: clamp(1120px, calc(200vh - 380px), 1680px);
-  height: clamp(1120px, calc(200dvh - 380px), 1680px);
   min-height: 0;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -139,8 +137,6 @@ h2 {
 
 .panel.wide {
   grid-column: 1 / -1;
-  height: clamp(760px, calc(200vh - 460px), 1240px);
-  height: clamp(760px, calc(200dvh - 460px), 1240px);
   min-height: 0;
 }
 
@@ -270,7 +266,7 @@ h2 {
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
-  overflow-y: auto;
+  overflow-y: visible;
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
@@ -432,17 +428,12 @@ h2 {
 
   .panel,
   .panel.wide {
-    height: min(88dvh, 820px);
-    min-height: 620px;
   }
 
   .panel-grid > .panel:first-child {
-    height: min(calc(88dvh + 220px), 1040px);
-    min-height: 820px;
   }
 
   .panel.wide {
-    min-height: 480px;
   }
 
   .panel-header {
@@ -569,3 +560,42 @@ html[data-theme="dark"] .tag {
   background: rgba(216, 168, 50, 0.12);
   color: #f0c85a;
 }
+
+/* Memory reading is the primary task; one natural-height pane at a time. */
+.panel-grid { display: block; }
+.panel-grid > .panel,
+.panel-grid > .panel:first-child,
+.panel-grid > .panel.wide { height: auto; min-height: 0; overflow: visible; box-shadow: none; }
+.panel[hidden] { display: none; }
+.list { overflow: visible; background: var(--panel); padding: 0 16px 16px; gap: 0; }
+.item, html[data-theme="dark"] .item { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; padding: 20px 0; background: transparent; }
+.item:last-child { border-bottom: 0; }
+.summary-grid { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.metric { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; cursor: pointer; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 8px; min-height: 44px; }
+.metric span, .metric strong { display: inline; margin: 0; font-size: 14px; color: inherit; }
+.metric[aria-selected="true"], html[data-theme="dark"] .metric[aria-selected="true"] { background: var(--soft); border-color: var(--accent); color: var(--accent-dark); }
+html[data-theme="dark"] .metric { box-shadow: none; background: transparent; border-color: transparent; }
+.memory-load-status:not(:empty) { margin: 8px 0 16px; }
+.create-memory-disclosure { border-bottom: 1px solid var(--line); }
+.create-memory-disclosure > summary { padding: 12px 16px; color: var(--accent-dark); }
+summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-weight: 600; }
+.memory-preview { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.7; margin: 0; max-width: 75ch; }
+.memory-editor { margin-top: 8px; }
+.memory-editor > summary { color: var(--accent-dark); font-size: 14px; }
+.memory-editor[open] > summary { margin-bottom: 8px; }
+.memory-actions { flex-wrap: wrap; margin-top: 12px; }
+.memory-action-status { flex-basis: 100%; color: var(--text); font-size: 14px; }
+.memory-actions button, .create-memory-actions button, .topbar button, .topbar a { min-height: 44px; }
+button:disabled { opacity: .6; cursor: wait; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.create-memory-actions { flex-wrap: wrap; }
+input, select, textarea { min-width: 0; }
+@media (max-width: 600px) {
+  .summary-grid { gap: 0; }
+  .metric { padding: 10px; flex: 1; justify-content: center; }
+  .metric span, .metric strong { font-size: 13px; }
+  .topbar-title h1 { font-size: 20px; }
+  .memory-preview { font-size: 15px; }
+}
+.memory-record-info { margin-top: 4px; }
+.memory-record-info > summary { color: var(--muted); font-size: 13px; }

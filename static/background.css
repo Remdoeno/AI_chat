@@ -372,3 +372,30 @@ th.number {
     grid-template-columns: 1fr;
   }
 }
+
+/* Keep the current window readable; detailed accounting remains on demand. */
+.background-header, .panel, .summary-card, .status-strip { box-shadow: none; }
+.summary-grid { display: flex; flex-wrap: wrap; gap: 0; border-block: 1px solid var(--line); }
+.summary-card { flex: 1 1 140px; display: flex; align-items: baseline; gap: 8px; border: 0; border-radius: 0; padding: 12px; background: transparent; }
+.summary-card span { font-size: 13px; }
+.summary-card strong { margin: 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+.tables-grid .panel { height: auto; }
+.table-wrap { overflow-x: auto; overflow-y: visible; max-height: none; }
+.agent-table-wrap, .model-table-wrap, .database-table-wrap { flex: 0 1 auto; }
+#agentRows table th:first-child, #agentRows table td:first-child, #modelRows table th:first-child, #modelRows table td:first-child { width: 54%; }
+.usage-cell span, .usage-cell summary { font-size: 13px; }
+.usage-cell details { margin-top: 4px; }
+.usage-cell details summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+.usage-cell details span { display: block; padding: 3px 0; }
+tr.has-failures .usage-failure { color: var(--danger); font-weight: 700; }
+.resource-block { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 0; }
+#tableStats table { min-width: 440px; }
+@media (max-width: 760px) {
+  .summary-card { flex-basis: 45%; }
+  .panel { padding: 12px; }
+  .stats-toolbar { align-items: stretch; }
+  .stats-toolbar label { width: 100%; justify-content: space-between; }
+  .background-header h1 { font-size: 24px; }
+  .metric-row { flex-wrap: wrap; }
+  .metric-row strong { text-align: left; }
+}
