@@ -303,6 +303,15 @@
     $("chatMessages").append(node("div", `bubble ${className}`, text));
     $("chatMessages").scrollTop = $("chatMessages").scrollHeight;
   }
+  let chatComposing = false;
+  $("chatInput").addEventListener("compositionstart", () => { chatComposing = true; });
+  $("chatInput").addEventListener("compositionend", () => { chatComposing = false; });
+  $("chatInput").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing || chatComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (event.repeat || sending || !snapshot || $("sendChat").disabled || !$("chatInput").value.trim()) return;
+    $("scheduleChatForm").requestSubmit($("sendChat"));
+  });
   $("scheduleChatForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = $("chatInput").value.trim();

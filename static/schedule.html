@@ -44,7 +44,7 @@
           <div class="bubble assistant">把近期的安排告诉我吧。<br />只是有这个事情，我会先画成虚线；确定要去，再变成实线。</div>
           <div class="chat-examples"><p>你可以这样说</p><button type="button" data-example="周五有个宣讲会，还没决定去不去">周五有宣讲会，还没决定去</button><button type="button" data-example="明天中午和同学约好了吃饭">明天中午和同学约好了吃饭</button><button type="button" data-example="请从已有记忆中导入未来两周的日程，不确定出席的先标为待确认">从已有记忆整理近期日程</button></div>
         </div>
-        <form id="scheduleChatForm" class="chat-composer"><label for="chatInput" class="sr-only">输入日程安排</label><textarea id="chatInput" rows="3" maxlength="4000" placeholder="添加、补充、改期、确认或取消…" required></textarea><div><span class="muted">也可以在首页聊天中告诉我</span><button id="sendChat" type="submit" class="primary">发送 ↑</button></div></form>
+        <form id="scheduleChatForm" class="chat-composer"><label for="chatInput" class="sr-only">输入日程安排</label><textarea id="chatInput" rows="3" maxlength="4000" placeholder="添加、补充、改期、确认或取消…" title="Enter 发送，Shift + Enter 换行" required></textarea><div><span class="muted">也可以在首页聊天中告诉我</span><button id="sendChat" type="submit" class="primary">发送 ↑</button></div></form>
       </aside>
     </div>
     <p class="page-note">日期和时间均为北京时间 · 同一绑定用户跨设备同步 · 暂不提供闹钟推送</p>
@@ -86,6 +86,6 @@
   <script src="/static/schedule_ranges.js?v=20260922_legend_3_1_7_1"></script>
   <script src="/static/schedule_connections.js?v=20260922_legend_3_1_7_1"></script>
   <script src="/static/schedule_progress.js?v=20260922_legend_3_1_7_1"></script>
-  <script src="/static/schedule.js?v=20260922_legend_3_1_7_1"></script>
+  <script src="/static/schedule.js?v=20260922_enter_send_3_1_9_1"></script>
 </body>
 </html>
