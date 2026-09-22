@@ -89,3 +89,10 @@
 @media(max-width:390px){.header-controls{grid-template-columns:1fr;gap:9px}.header-actions{justify-content:flex-start}}
 
 @media(min-width:651px) and (max-width:800px){.compact-intro{grid-template-columns:1fr}.header-controls{grid-template-columns:1fr auto}}
+
+/* Keep both control groups together; theme labels are accessibility text only. */
+.header-controls{display:flex;flex-direction:row;justify-content:flex-start;align-items:center;flex-wrap:wrap;gap:12px 24px}
+.header-actions{justify-content:flex-start}.header-controls .calendar-mode,.header-actions .toolbar-actions{flex-shrink:0}
+.page-header [data-theme-toggle]{flex:0 0 34px;min-width:34px;white-space:nowrap;overflow:hidden}
+.page-header [data-theme-toggle-icon]{display:block;font-family:Arial,sans-serif;font-size:23px;line-height:1;text-align:center}
+@media(max-width:650px){.header-controls{gap:10px 14px}.header-actions{justify-content:flex-start}}

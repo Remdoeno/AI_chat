@@ -21,7 +21,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="Wangcai Web",
-    version="3.1.6",
+    version="3.1.7",
     lifespan=lifespan,
     openapi_url=None,
     docs_url=None,
