@@ -186,7 +186,6 @@
   async function refresh(targetStart = viewStart) {
     if (loading || $("eventDialog").open || $("projectDialog").open) return;
     loading = true;
-    $("refreshButton").disabled = true;
     ["previousWindow", "nextWindow", "todayButton"].forEach(id => $(id).disabled = true);
     try {
       const data = await api("/api/schedule" + (targetStart ? `?start=${encodeURIComponent(targetStart)}` : ""));
@@ -201,7 +200,6 @@
       try { calendarMode = localStorage.getItem(`wangcai-calendar-mode:${data.owner}`) === "single" ? "single" : "project"; } catch (_) { calendarMode = "project"; }
       if (!selectedDate || selectedDate < data.today || selectedDate > data.end) selectedDate = data.today;
       render();
-      $("addEvent").disabled = false;
       $("sendChat").disabled = sending;
       notice("");
     } catch (error) {
@@ -214,9 +212,9 @@
         $("chatMessages").replaceChildren();
         $("eventCount").textContent = "";
         $("dateRange").textContent = "绑定后查看未来两周的安排";
-        $("addEvent").disabled = true; $("sendChat").disabled = true;
+        $("sendChat").disabled = true;
       }
-    } finally { loading = false; $("refreshButton").disabled = false; ["previousWindow", "nextWindow", "todayButton"].forEach(id => $(id).disabled = false); }
+    } finally { loading = false; ["previousWindow", "nextWindow", "todayButton"].forEach(id => $(id).disabled = false); }
   }
   function openProject(project, focusId = "") {
     detailProject = project;
@@ -297,8 +295,6 @@
   $("discardChanges").addEventListener("click", () => { $("unsavedDialog").close(); $("eventDialog").close(); });
   $("saveChanges").addEventListener("click", () => { $("unsavedDialog").close(); $("eventForm").requestSubmit(); });
   $("closeDialog").addEventListener("click", closeEditor);
-  $("addEvent").addEventListener("click", () => openEvent(null));
-  $("refreshButton").addEventListener("click", () => refresh());
   $("todayButton").addEventListener("click", () => refresh(""));
   $("previousWindow").addEventListener("click", () => { if (snapshot) refresh(addDays(snapshot.today, -14)); });
   $("nextWindow").addEventListener("click", () => { if (snapshot) refresh(addDays(snapshot.today, 14)); });
@@ -336,6 +332,5 @@
   window.addEventListener("focus", () => { if (!sending) refresh(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !sending) refresh(); });
   window.setInterval(() => { if (!document.hidden && !sending) refresh(); }, 60000);
-  $("addEvent").disabled = true;
   refresh();
 })();

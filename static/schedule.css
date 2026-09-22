@@ -77,3 +77,15 @@
 .calendar-key{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;padding:12px 18px}.calendar-key .legend-status,.calendar-key .holiday-legend{padding:0;margin:0;gap:12px;display:flex;align-items:center;flex-wrap:wrap}.calendar-key .key-hint{margin-left:auto;font-size:10px}.calendar-key .holiday-badge{font-size:10px;padding:1px 5px}.calendar-key .weekend-date{font-size:10px}
 @media(max-width:1000px){.header-controls .calendar-mode .muted{display:none}.compact-intro{gap:12px}}
 @media(max-width:650px){.page-header{height:52px}.compact-intro{align-items:stretch;flex-direction:column;padding:14px 0;gap:12px}.compact-intro h1{font-size:23px}.intro-title .pill{margin-top:5px}.header-controls{align-items:stretch;gap:9px}.header-controls .calendar-mode{justify-content:flex-start}.header-actions{justify-content:space-between;gap:8px}.header-actions .toolbar-actions{flex-wrap:wrap;justify-content:flex-start;gap:4px}.header-actions .toolbar-actions button{padding:6px 8px;font-size:11px}.header-actions .primary{padding:7px 9px;white-space:nowrap}.calendar-key{padding:10px 12px;gap:8px 14px}.calendar-key .key-hint{display:none}}
+
+/* Three compact zones: title, mode selector, chronological navigation. */
+.compact-intro{display:grid;grid-template-columns:minmax(240px,.85fr) minmax(0,2fr);gap:26px;padding:16px 0}
+.header-controls{display:grid;grid-template-columns:1fr auto;align-items:center;gap:20px}
+.header-controls .calendar-mode{justify-content:flex-start;flex-wrap:nowrap}.header-controls .calendar-mode .muted{display:none}
+.header-actions{justify-content:flex-end}.header-actions .toolbar-actions{flex-wrap:nowrap}
+.page-header [data-theme-toggle]{display:grid;place-items:center;width:34px;height:34px;padding:0;border-radius:50%;font-size:22px;line-height:1}
+@media(max-width:900px){.compact-intro{grid-template-columns:minmax(210px,.8fr) minmax(0,1.5fr);gap:16px}.header-controls{gap:10px}.header-controls .calendar-mode button{padding:6px 9px}}
+@media(max-width:650px){.compact-intro{grid-template-columns:1fr;gap:12px;padding:12px 0}.header-controls{grid-template-columns:1fr auto;gap:10px}.header-controls .calendar-mode{gap:4px}.header-controls .calendar-mode button{font-size:11px;padding:6px 8px}.header-actions .toolbar-actions button{padding:6px;font-size:11px}}
+@media(max-width:390px){.header-controls{grid-template-columns:1fr;gap:9px}.header-actions{justify-content:flex-start}}
+
+@media(min-width:651px) and (max-width:800px){.compact-intro{grid-template-columns:1fr}.header-controls{grid-template-columns:1fr auto}}
