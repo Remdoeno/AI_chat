@@ -96,3 +96,8 @@
 .page-header [data-theme-toggle]{flex:0 0 34px;min-width:34px;white-space:nowrap;overflow:hidden}
 .page-header [data-theme-toggle-icon]{display:block;font-family:Arial,sans-serif;font-size:23px;line-height:1;text-align:center}
 @media(max-width:650px){.header-controls{gap:10px 14px}.header-actions{justify-content:flex-start}}
+
+/* Independent project tracks have separate rows and never share connectors. */
+.project-track{padding:16px 0;border-top:1px solid var(--line)}.track-heading{font-size:14px;margin:0 0 8px;color:var(--project-color);font-weight:650}.project-track .phase-diagram-scroll{padding-top:0}.project-track .phase-diagram{padding-top:0}.project-track .project-phase{flex-basis:260px}.project-notes{line-height:1.8}
+.undated-track{grid-column:1/-1;min-width:0;padding:12px 0}.undated-track-flow{display:flex;gap:24px;overflow-x:auto;padding:4px 0 12px}.undated-track-flow .project-node{position:relative;flex:0 0 230px;margin:0}.undated-track-flow .project-node:not(:last-child)::after{content:"";position:absolute;left:100%;top:50%;width:26px;border-top:2px solid var(--event-color);opacity:.65;pointer-events:none}
+@media(max-width:650px){.project-track .project-phase{flex-basis:220px}.undated-track-flow .project-node{flex-basis:210px}}

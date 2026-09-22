@@ -160,7 +160,7 @@
     $("undatedEvents").replaceChildren();
     const undated = snapshot.items.filter((event) => !event.date && (calendarMode !== "single" || event.kind !== "project" || !event.milestones?.length));
     if (undated.length) undated.forEach((event) => $("undatedEvents").append(eventCard(event)));
-    if (calendarMode === "single") ScheduleProgress.undatedNodes(snapshot.items).forEach(item => $("undatedEvents").append(ScheduleProgress.nodeCard(item, openProject)));
+    if (calendarMode === "single") ScheduleProgress.renderUndated($("undatedEvents"), snapshot.items, openProject);
     if (!$("undatedEvents").children.length) $("undatedEvents").append(node("p", "empty-note", "暂无日期待定的事项"));
     $("categoryLegend").replaceChildren();
     $("categorySelect").replaceChildren();

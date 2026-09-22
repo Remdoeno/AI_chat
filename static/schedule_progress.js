@@ -5,6 +5,17 @@ window.ScheduleProgress = (() => {
   const stages = event => event.milestones || [];
   const percent = event => stages(event).length ? Math.round(stages(event).filter(s => s.done).length / stages(event).length * 100) : 0;
   const color = event => ScheduleColors.color(event);
+  const trackName = stage => (stage.track || '').trim();
+  const trackColor = (project, track) => track ? ScheduleColors.color({...project, id:`${project.id}:${track}`}) : color(project);
+  const trackGroups = project => {
+    const groups = new Map();
+    stages(project).forEach((stage,index) => {
+      const name = trackName(stage);
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push({project,stage,index});
+    });
+    return [...groups].map(([name,items]) => ({name,items}));
+  };
   const range = stage => !stage.date ? '日期待定' : `${stage.start_date && stage.start_date !== stage.date ? stage.start_date.slice(5) + ' — ' : ''}${stage.date.slice(5)}${stage.time ? ' ' + stage.time : ''}${stage.tentative ? ' · 待定窗口' : ''}`;
   const activeOn = (s, day) => s.date && (s.start_date || s.date) <= day && s.date >= day;
   function overdue(stage) {
@@ -61,6 +72,7 @@ window.ScheduleProgress = (() => {
       };
       input('done', 'checkbox', stage.done, '完成');
       const title = input('title', 'text', stage.title, '阶段名称');title.maxLength = 120;title.dataset.stageTitle = '';title.required = true;
+      const track = input('track', 'text', stage.track, '所属子任务路线 可选');track.maxLength = 80;track.placeholder = '相同名称的节点属于同一路线';
       input('start_date', 'date', stage.start_date, '阶段开始 可选');
       input('date', 'date', stage.date, '节点日期 / 阶段结束');input('time', 'time', stage.time, '时间 可选');
       input('important', 'checkbox', stage.important, '重要节点');
@@ -95,19 +107,23 @@ window.ScheduleProgress = (() => {
   }
   function nodeCard({project, stage, index}, open) {
     const card = btn('', () => open(project, stage.id), `event-card project-node${stage.done ? ' node-done' : ''}${stage.tentative ? ' tentative' : ''}`);
-    card.style.setProperty('--event-color', color(project));card.dataset.project = project.id;card.dataset.stageIndex = index;
-    card.append(el('span', `${stage.important ? '◆ 重要节点 · ' : ''}${range(stage)}`, 'event-time'), el('span', `${stage.done ? '✓ ' : ''}${stage.title}`, 'event-title'), el('span', project.title, 'event-meta'));
+    card.style.setProperty('--event-color', trackColor(project, trackName(stage)));card.dataset.project = project.id;card.dataset.track = trackName(stage);card.dataset.stageIndex = index;
+    card.append(el('span', `${stage.important ? '◆ 重要节点 · ' : ''}${range(stage)}`, 'event-time'), el('span', `${stage.done ? '✓ ' : ''}${stage.title}`, 'event-title'), el('span', [project.title, trackName(stage)].filter(Boolean).join(' · '), 'event-meta'));
     if (overdue(stage)) card.append(el('span', '已逾期', 'deadline-overdue'));
     return card;
   }
   function details(project, focusId) {
     const content = el('div', undefined, 'project-detail-content');content.style.setProperty('--project-color', color(project));
     content.append(el('p', `${project.date || '日期待定'}${project.end_date ? ' 至 ' + project.end_date : ''} · ${percent(project)}% · ${stages(project).filter(s => s.done).length}/${stages(project).length}阶段完成`, 'muted'));
-    if (project.notes) content.append(el('p', project.notes, 'project-notes'));
+    if (project.notes) content.append(el('p', project.notes.replace(/[；;]?\s*([1-9][）)])/g, '\n$1'), 'project-notes'));
+    trackGroups(project).forEach(group => {
+    const row = el('section', undefined, 'project-track');
+    row.style.setProperty('--project-color', trackColor(project, group.name));
+    if (group.name || trackGroups(project).length > 1) row.append(el('h3', `${group.name || '未分组'} · ${group.items.filter(x => x.stage.done).length}/${group.items.length}`, 'track-heading'));
     const scroll = el('div', undefined, 'phase-diagram-scroll');
     const diagram = el('div', undefined, 'phase-diagram');
     diagram.setAttribute('role', 'list'); diagram.setAttribute('aria-label', '项目阶段时间轴');
-    stages(project).forEach((s, index) => {
+    group.items.forEach(({stage:s}, index) => {
       const item = el('section', undefined, `project-phase${s.id === focusId ? ' phase-focus' : ''}`);
       item.setAttribute('role', 'listitem');
       item.append(el('span', s.done ? '✓' : s.important ? '◆' : String(index + 1), 'phase-marker'));
@@ -118,12 +134,24 @@ window.ScheduleProgress = (() => {
       item.append(el('p', s.done ? '已完成' : s.tentative ? '待确认' : '待完成', 'muted'));
       diagram.append(item);
     });
-    scroll.append(diagram);content.append(scroll);
+    scroll.append(diagram);row.append(scroll);content.append(row);
+    });
     if (!stages(project).length) content.append(el('p', '尚未添加阶段，点击编辑项目来补充。', 'muted'));
     return content;
   }
   const activeNodes = (items, day) => items.filter(p => p.kind === 'project').flatMap(project => stages(project).map((stage,index) => ({project,stage,index})).filter(({stage}) => activeOn(stage,day)));
   const undatedNodes = items => items.filter(p => p.kind === 'project').flatMap(project => stages(project).map((stage,index) => ({project,stage,index})).filter(({stage}) => !stage.date));
-  return { timeline, initEditor, summary, singleNodes, activeNodes, undatedNodes, nodeCard, details, activeOn, color };
+  function renderUndated(target, items, open) {
+    items.filter(p => p.kind === 'project').forEach(project => trackGroups(project).forEach(group => {
+      const pending = group.items.filter(x => !x.stage.date);if (!pending.length) return;
+      const row = el('section', undefined, 'undated-track');
+      row.style.setProperty('--project-color', trackColor(project, group.name));
+      row.append(el('h3', [project.title, group.name || '待定节点'].join(' · '), 'track-heading'));
+      const flow = el('div', undefined, 'undated-track-flow');
+      pending.forEach(item => flow.append(nodeCard(item,open)));
+      row.append(flow);target.append(row);
+    }));
+  }
+  return { renderUndated, timeline, initEditor, summary, singleNodes, activeNodes, undatedNodes, nodeCard, details, activeOn, color };
 
 })();

@@ -7,7 +7,7 @@
   <title>日程 · 旺财</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
   <script src="/static/theme.js?v=20260922_icons_3_1_7"></script>
-  <link rel="stylesheet" href="/static/schedule.css?v=20260922_legend_3_1_7_1" />
+  <link rel="stylesheet" href="/static/schedule.css?v=20260922_tracks_3_2_0" />
 </head>
 <body>
   <main class="schedule-shell">
@@ -69,7 +69,7 @@
       <label>备注<textarea name="notes" rows="3" maxlength="2000" placeholder="例如：下午，具体时间还没定"></textarea></label>
       <section id="progressEditor" hidden>
         <h3>阶段与截止日期</h3>
-        <p class="muted form-help">进度按完成阶段数计算。日期未知可留空；勾选完成后，点击“保存事项”同步到日历与记忆。</p>
+        <p class="muted form-help">进度按完成阶段数计算。日期未知可留空；可填写所属子任务路线，名称相同的节点会独立成行；勾选完成后，点击“保存事项”同步到日历与记忆。</p>
         <div id="milestoneRows"></div>
         <div class="stage-actions"><button id="addMilestone" type="button">＋ 添加阶段</button><button id="travelMilestones" type="button">使用旅行阶段模板</button></div>
       </section>
@@ -81,11 +81,11 @@
     <h2 id="unsavedTitle">保存本次修改？</h2><p>你修改了事项内容，关闭前是否保存？</p>
     <div class="dialog-actions"><button id="continueEditing" type="button">继续编辑</button><button id="discardChanges" type="button">不保存</button><button id="saveChanges" type="button" class="primary">保存并关闭</button></div>
   </dialog>
-  <script src="/static/schedule_colors.js?v=20260922_legend_3_1_7_1"></script>
+  <script src="/static/schedule_colors.js?v=20260922_tracks_3_2_0"></script>
   <script src="/static/device_identity.js?v=20260916_memberships_2_7_0"></script>
-  <script src="/static/schedule_ranges.js?v=20260922_legend_3_1_7_1"></script>
-  <script src="/static/schedule_connections.js?v=20260922_legend_3_1_7_1"></script>
-  <script src="/static/schedule_progress.js?v=20260922_legend_3_1_7_1"></script>
-  <script src="/static/schedule.js?v=20260922_enter_send_3_1_9_1"></script>
+  <script src="/static/schedule_ranges.js?v=20260922_tracks_3_2_0"></script>
+  <script src="/static/schedule_connections.js?v=20260922_tracks_3_2_0"></script>
+  <script src="/static/schedule_progress.js?v=20260922_tracks_3_2_0"></script>
+  <script src="/static/schedule.js?v=20260922_tracks_3_2_0"></script>
 </body>
 </html>

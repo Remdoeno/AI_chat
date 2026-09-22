@@ -24,8 +24,9 @@ window.ScheduleConnections = (() => {
     const rect = n => { const r=n.getBoundingClientRect();return {left:r.left-bounds.left,right:r.right-bounds.left,top:r.top-bounds.top,bottom:r.bottom-bounds.top,cx:(r.left+r.right)/2-bounds.left,cy:(r.top+r.bottom)/2-bounds.top}; };
     const cellFor=card => card.closest('.day-cell') || grid.querySelector(`.day-cell[data-date="${card.dataset.anchorDate}"]`);
     grid.querySelectorAll('[data-project]').forEach(card => {
-      if (!groups.has(card.dataset.project)) groups.set(card.dataset.project,[]);
-      groups.get(card.dataset.project).push(card);
+      const key = JSON.stringify([card.dataset.project, card.dataset.track || '']);
+      if (!groups.has(key)) groups.set(key,[]);
+      groups.get(key).push(card);
     });
     groups.forEach(cards => {
       cards.sort((a,b) => Number(a.dataset.stageIndex)-Number(b.dataset.stageIndex) || (a.dataset.anchorDate || '').localeCompare(b.dataset.anchorDate || ''));

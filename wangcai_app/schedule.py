@@ -1,7 +1,7 @@
 """User-owned calendar storage; no dependency on the application namespace or models."""
 import json
 import uuid
-from wangcai_app.schedule_progress import normalize_progress
+from wangcai_app.schedule_progress import normalize_progress, preserve_stage_tracks
 from wangcai_app.schedule_receipts import saved_reply
 from datetime import date, datetime, timedelta, timezone
 
@@ -131,6 +131,7 @@ class ScheduleStore:
                 patch = operation.get("event", {})
                 if not isinstance(patch, dict):
                     raise ValueError("日程内容格式不正确")
+                patch = preserve_stage_tracks(patch, current)
                 data = normalize_event({**({key: current[key] for key in FIELDS} if current else {}), **patch})
                 if current:
                     conn.execute("UPDATE schedule_events SET data=?,revision=revision+1,updated_at=? WHERE id=? AND owner=?",

@@ -20,12 +20,14 @@ def normalize_progress(data, event):
         raise ValueError('请同时填写长期事项的开始和结束日期，或都留空')
     normalized, ids = [], set()
     for stage in stages:
-        if not isinstance(stage, dict) or set(stage) - {'id', 'title', 'date', 'time', 'done', 'notes', 'start_date', 'important', 'tentative'}:
+        if not isinstance(stage, dict) or set(stage) - {'id', 'title', 'date', 'time', 'done', 'notes', 'start_date', 'important', 'tentative', 'track'}:
             raise ValueError('阶段字段不正确')
-        item = {key: stage.get(key, '') for key in ('title', 'date', 'time', 'notes', 'start_date')}
+        item = {key: stage.get(key, '') for key in ('title', 'date', 'time', 'notes', 'start_date', 'track')}
         if not all(isinstance(v, str) for v in item.values()):
             raise ValueError('阶段名称、日期与备注必须是文字')
         item = {key: value.strip() for key, value in item.items()}
+        if len(item['track']) > 80:
+            raise ValueError('子任务路线名称最多80字')
         if not item['title'] or len(item['title']) > 120 or len(item['notes']) > 500:
             raise ValueError('阶段名称需为1–120字，备注最多500字')
         if item['date'] and date.fromisoformat(item['date']).isoformat() != item['date']:
@@ -52,3 +54,13 @@ def normalize_progress(data, event):
         ids.add(identifier)
         normalized.append({**item, 'id': identifier})
     return {'kind': kind, 'milestones': normalized}
+
+
+def preserve_stage_tracks(patch, current):
+    """Missing group fields preserve membership; an explicit empty string clears it."""
+    if not current or not isinstance(patch.get('milestones'), list):
+        return patch
+    previous = {s['id']: s.get('track', '') for s in current.get('milestones', [])}
+    return {**patch, 'milestones': [
+        {**stage, 'track': previous.get(stage.get('id'), '')} if isinstance(stage, dict) and 'track' not in stage else stage
+        for stage in patch['milestones']]}
