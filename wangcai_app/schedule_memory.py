@@ -29,10 +29,13 @@ def memory_projection(event, today=None):
     if event.get("kind") == "project":
         stages = event.get("milestones", [])
         text += f" 长期事项进度：{sum(stage['done'] for stage in stages)}/{len(stages)}阶段完成。"
+        titles = {s['id']: s['title'] for s in stages}
         for stage in stages:
             if stage.get("track"):
                 text += f" 子任务路线【{stage['track']}】。"
             text += f" 阶段【{'已完成' if stage['done'] else '未完成'}】{stage['title']}；DDL：{stage['date'] or '待定'} {stage['time']}。"
+            if stage.get('depends_on'):
+                text += ' 前置阶段：' + '、'.join(titles[i] for i in stage['depends_on'] if i in titles) + '。'
             if stage.get('start_date'):
                 text += f"执行区间：{stage['start_date']}至{stage['date']}。"
             if stage.get('tentative'):

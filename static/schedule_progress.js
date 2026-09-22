@@ -78,8 +78,9 @@ window.ScheduleProgress = (() => {
       input('important', 'checkbox', stage.important, '重要节点');
       input('tentative', 'checkbox', stage.tentative, '日期待确认');
       const note = input('notes', 'text', stage.notes, '阶段备注');note.maxLength = 500;
+      if (stage.depends_on?.length) r.append(el('p', '此节点有前置阶段，保存时会按依赖及时间自动排序；可通过日程聊天调整前后关系。', 'muted'));
       const actions = el('div', undefined, 'stage-actions');
-      actions.append(btn('上移', () => { if (r.previousElementSibling) box.insertBefore(r, r.previousElementSibling); }), btn('移除', () => { if (window.confirm('移除这个阶段？保存后生效。')) r.remove(); }));
+      actions.append(btn('上移（同日或待定）', () => { if (r.previousElementSibling) box.insertBefore(r, r.previousElementSibling); }), btn('移除', () => { if (window.confirm('移除这个阶段？保存后生效。')) r.remove(); }));
       r.append(actions); box.append(r);update();
     }
     kind.addEventListener('change', update);

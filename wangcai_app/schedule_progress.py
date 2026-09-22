@@ -1,5 +1,6 @@
 """Validation of long-running schedule entries and their user-defined milestones."""
 import uuid
+from wangcai_app.schedule_order import order_stages
 from datetime import date, datetime
 
 
@@ -20,7 +21,7 @@ def normalize_progress(data, event):
         raise ValueError('请同时填写长期事项的开始和结束日期，或都留空')
     normalized, ids = [], set()
     for stage in stages:
-        if not isinstance(stage, dict) or set(stage) - {'id', 'title', 'date', 'time', 'done', 'notes', 'start_date', 'important', 'tentative', 'track'}:
+        if not isinstance(stage, dict) or set(stage) - {'id', 'title', 'date', 'time', 'done', 'notes', 'start_date', 'important', 'tentative', 'track', 'depends_on'}:
             raise ValueError('阶段字段不正确')
         item = {key: stage.get(key, '') for key in ('title', 'date', 'time', 'notes', 'start_date', 'track')}
         if not all(isinstance(v, str) for v in item.values()):
@@ -52,15 +53,27 @@ def normalize_progress(data, event):
         if not isinstance(identifier, str) or len(identifier) > 64 or identifier in ids:
             raise ValueError('阶段ID不正确或重复')
         ids.add(identifier)
-        normalized.append({**item, 'id': identifier})
-    return {'kind': kind, 'milestones': normalized}
+        normalized.append({**item, 'id': identifier, 'depends_on': stage.get('depends_on', [])})
+    return {'kind': kind, 'milestones': order_stages(normalized)}
 
 
 def preserve_stage_tracks(patch, current):
     """Missing group fields preserve membership; an explicit empty string clears it."""
     if not current or not isinstance(patch.get('milestones'), list):
         return patch
-    previous = {s['id']: s.get('track', '') for s in current.get('milestones', [])}
-    return {**patch, 'milestones': [
-        {**stage, 'track': previous.get(stage.get('id'), '')} if isinstance(stage, dict) and 'track' not in stage else stage
-        for stage in patch['milestones']]}
+    previous = {s['id']: s for s in current.get('milestones', [])}
+    retained_ids = {s.get('id') for s in patch['milestones'] if isinstance(s, dict)}
+    stages = []
+    for stage in patch['milestones']:
+        if isinstance(stage, dict):
+            old = previous.get(stage.get('id'), {})
+            stage = dict(stage)
+            stage.setdefault('track', old.get('track', ''))
+            # Removed predecessors and regrouped nodes must not leave dangling links.
+            if 'depends_on' not in stage:
+                tracks = {s.get('id'): s.get('track', previous.get(s.get('id'), {}).get('track', ''))
+                          for s in patch['milestones'] if isinstance(s, dict)}
+                stage['depends_on'] = [i for i in old.get('depends_on', [])
+                                       if i in retained_ids and tracks[i] == stage['track']]
+        stages.append(stage)
+    return {**patch, 'milestones': stages}
