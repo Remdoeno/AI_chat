@@ -1,7 +1,7 @@
 /* Short rounded elbows in the space between cards. Never capture interaction. */
 window.ScheduleConnections = (() => {
   const NS = 'http://www.w3.org/2000/svg';
-  function rounded(points, radius=9) {
+  function rounded(points, radius=4) {
     let d=`M ${points[0][0]} ${points[0][1]}`;
     for (let i=1;i<points.length-1;i++) {
       const a=points[i-1],b=points[i],c=points[i+1];
@@ -22,6 +22,7 @@ window.ScheduleConnections = (() => {
     svg.setAttribute('aria-hidden','true');svg.setAttribute('width',grid.scrollWidth);svg.setAttribute('height',grid.scrollHeight);
     const bounds=grid.getBoundingClientRect(),groups=new Map();
     const rect = n => { const r=n.getBoundingClientRect();return {left:r.left-bounds.left,right:r.right-bounds.left,top:r.top-bounds.top,bottom:r.bottom-bounds.top,cx:(r.left+r.right)/2-bounds.left,cy:(r.top+r.bottom)/2-bounds.top}; };
+    const obstacles=[...grid.querySelectorAll('.event-card,.day-heading')].map(rect);
     const cellFor=card => card.closest('.day-cell') || grid.querySelector(`.day-cell[data-date="${card.dataset.anchorDate}"]`);
     grid.querySelectorAll('[data-project]').forEach(card => {
       const key = JSON.stringify([card.dataset.project, card.dataset.track || '']);
@@ -54,7 +55,9 @@ window.ScheduleConnections = (() => {
           const forward=a.cx<b.cx,ax=forward?a.right:a.left,bx=forward?b.left:b.right,middle=(ax+bx)/2;
           points=[[ax,a.cy],[middle,a.cy],[middle,b.cy],[bx,b.cy]];
         }
-        const path=document.createElementNS(NS,'path');path.setAttribute('d',rounded(points));
+        const routed=ScheduleRouting.route(points,obstacles,grid.clientWidth,grid.scrollHeight);
+        if (!routed) continue;
+        const path=document.createElementNS(NS,'path');path.setAttribute('d',rounded(routed));
         path.setAttribute('stroke',getComputedStyle(cards[i]).getPropertyValue('--event-color').trim());
         path.setAttribute('fill','none');path.setAttribute('stroke-width','1.8');path.setAttribute('stroke-linecap','round');svg.append(path);
       }
